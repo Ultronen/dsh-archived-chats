@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DeepSeek Harness 已归档会话管理页：在设置里查看、搜索、取消归档、删除已归档的聊天，按项目分组。An Archived Chats settings page for DeepSeek Harness: browse, search, unarchive, and delete archived sessions, grouped by workspace.",
   "license": "MIT",
   "author": "Ultronen",

@@ -201,6 +201,56 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
+console.log('\n[5b] delete — live session disposed in place (no restart needed)');
+{
+  const id = 'session-live2';
+  mkdirSync(join(tmp, id), { recursive: true });
+  writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+  headerRows.push({ id, createdAt: 1786726600000, cwd: '/ws/one' });
+  events[id] = [];
+  workspaceState.archivedSessionIds.push(id);
+  const calls = { cancel: null, idle: 0, flush: 0, scope: 0, agentDetach: 0, sessionDetach: 0 };
+  const sessionObj = { id, header: { id, createdAt: 1786726600000 } };
+  const agentObj = {
+    cancel: (cause) => { calls.cancel = cause; },
+    whenIdle: async () => { calls.idle += 1; },
+    scope: { dispose: async () => { calls.scope += 1; } },
+  };
+  const sessionsStore = new Map([[id, {
+    session: sessionObj,
+    detach: () => { calls.sessionDetach += 1; sessionsStore.delete(id); },
+  }]]);
+  // Real AgentRegistry entries carry NO detach — unregistration goes through
+  // the registry's detachEntered(entry), which is what the plugin must call.
+  const agentsStore = new Map([[id, { id, agent: agentObj, announcing: false }]]);
+  services.sessions = {
+    get: (sid) => sessionsStore.get(sid)?.session,
+    store: sessionsStore,
+    flush: async () => { calls.flush += 1; },
+  };
+  services.agents = {
+    get: (sid) => agentsStore.get(sid)?.agent,
+    store: agentsStore,
+    detachEntered: (entry) => { calls.agentDetach += 1; agentsStore.delete(entry.id); },
+  };
+  const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, `{"sessionId":"${id}"}`));
+  assert(res.status === 200, `in-place deletion answers 200 (got ${res.status})`);
+  const body = res.json();
+  assert(body.deleted.includes(id), 'live session reported as deleted, not pending');
+  assert(body.pending.length === 0 && body.failed.length === 0, 'no pending/failed entries');
+  assert(calls.cancel?.kind === 'disposed', 'agent cancelled with the disposed cause');
+  assert(calls.idle === 1, 'quiescence awaited before flush');
+  assert(calls.flush === 1, 'durability flushed before detach');
+  assert(calls.scope === 1, 'agent fiber disposed (factory disposer order)');
+  assert(calls.agentDetach === 1 && calls.sessionDetach === 1, 'both store entries detached');
+  assert(!existsSync(join(tmp, id)), 'session directory removed in the same request');
+  assert(!workspaceState.archivedSessionIds.includes(id), 'deleted session left the archive set');
+  assert(!readPendingStore().includes(id), 'pending-store crash bracket cleared after completion');
+  assert(readPendingStore().includes('session-live'), 'unrelated parked id untouched by the bracket cleanup');
+  services.sessions = liveSessions;
+  delete services.agents;
+}
+
 console.log('\n[6] delete — full path');
 {
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-b"}'));
