@@ -1,5 +1,7 @@
 # dsh-archived-chats
 
+> ⚡ **删除即生效，无需重启。** 即使会话仍驻留在后台，也会沿官方生命周期当场安全拆除并从磁盘彻底删除——点下删除的那一刻就删干净，而不是"停用后等下次重启"。
+
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 新增一个「已归档的聊天」设置页，把被归档的会话重新找回来。
 
 在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「已归档的聊天」页面，让所有归档会话都可见、可搜索、可管理。
