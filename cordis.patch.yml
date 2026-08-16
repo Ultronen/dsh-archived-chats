@@ -1,0 +1,7 @@
+# dsh-archived-chats profile patch layer: one loader entry for the plugin
+# package. The host half registers /plugins/dsh-archived-chats/* HTTP routes;
+# the browser half is picked up by dsh-client-modules through the package's
+# dsh.client declaration, exactly like the shipped ui-* packages.
+- insert:
+    - id: archived-chats
+      name: 'dsh-archived-chats'

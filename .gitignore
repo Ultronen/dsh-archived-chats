@@ -1,0 +1,11 @@
+# Node
+node_modules/
+
+# npm 打包产物
+*.tgz
+
+# 系统
+.DS_Store
+
+# 日志
+*.log
