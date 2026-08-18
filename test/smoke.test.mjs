@@ -272,6 +272,9 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
   assert(readMetadataStore().sessions['session-live'] !== undefined, 'parked delete keeps metadata until physical deletion');
   const stateAfterPark = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
   assert(!stateAfterPark.json().sessions.some((s) => s.id === 'session-live'), 'parked session excluded from /state listing');
+  const statsAfterPark = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
+  assert(statsAfterPark.json().summary.sessionCount === 2, 'stats exclude a parked pending-deletion session');
+  assert(statsAfterPark.json().sessions['session-live'] === undefined, 'stats omit the parked session row');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
@@ -336,24 +339,48 @@ console.log('\n[6] delete — full path');
   assert(!registry.sessionPaths.has('session-b'), 'registry session-path index purged');
   assert(registry.headers.has('session-c'), 'other sessions stay indexed');
   assert(readMetadataStore().sessions['session-b'] === undefined, 'cold delete removes metadata after physical deletion');
+  mkdirSync(join(tmp, 'session-b'), { recursive: true });
+  writeFileSync(join(tmp, 'session-b', 'session.jsonl.zstd'), 'restored');
+  workspaceState.archivedSessionIds.push('session-b');
+  const statsAfterRearchive = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
+  assert(statsAfterRearchive.json().sessions['session-b'].sizeBytes === 8, 'delete invalidates cached stats before a session is re-archived');
 }
 
-console.log('\n[7] delete-all — partial failure keeps going');
+console.log('\n[7] delete preserves metadata when physical removal is unconfirmed');
 {
-  writeFileSync(metadataFile, '{broken', 'utf8');
+  const id = 'session-unconfirmed';
+  mkdirSync(join(tmp, id), { recursive: true });
+  writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+  workspaceState.archivedSessionIds.push(id);
+  const metadata = readMetadataStore();
+  metadata.sessions[id] = { tags: ['keep'], note: 'physical log remains', updatedAt: '2026-08-18T12:00:00.000Z' };
+  writeFileSync(metadataFile, JSON.stringify(metadata), 'utf8');
+  const list = persistence.list;
+  persistence.list = async () => { throw new Error('temporary header listing outage'); };
+  const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, `{"sessionId":"${id}"}`));
+  persistence.list = list;
+  assert(res.status === 200 && res.json().deleted.includes(id), 'unconfirmed delete preserves the established completed response');
+  assert(existsSync(join(tmp, id)), 'unconfirmed delete leaves the physical session directory');
+  assert(readMetadataStore().sessions[id] !== undefined, 'unconfirmed delete retains authoritative metadata');
+}
+
+console.log('\n[8] delete-all — partial failure keeps going');
+{
+  const corruptMetadata = '{broken';
+  writeFileSync(metadataFile, corruptMetadata, 'utf8');
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete-all', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-c","session-live","session-b"]}'));
   const body = res.json();
   assert(res.status === 200, `batch with mixed results answers 200 (got ${res.status})`);
-  assert(body.deleted.includes('session-c'), 'session-c deleted');
   assert(body.pending.includes('session-live'), 'live session reported as pending');
   assert(body.failed.length === 0, 'no failures in the mixed batch');
   assert(!existsSync(join(tmp, 'session-c')), 'session-c directory removed');
   assert(body.deleted.includes('session-c'), 'cold delete remains successful when metadata cleanup is unavailable');
+  assert(readFileSync(metadataFile, 'utf8') === corruptMetadata, 'failed metadata cleanup leaves corrupt metadata bytes untouched');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
-console.log('\n[8] boot sweep — deferred deletions complete on the next boot');
+console.log('\n[9] boot sweep — deferred deletions complete on the next boot');
 {
   const state2 = { initialized: true, workspaceIds: [], archivedSessionIds: ['session-live'] };
   const registry2 = {
@@ -390,7 +417,7 @@ console.log('\n[8] boot sweep — deferred deletions complete on the next boot')
   assert(readPendingStore().length === 0, 'pending store drained after the sweep');
 }
 
-console.log('\n[9] unarchive of a parked session drops its pending-deletion mark');
+console.log('\n[10] unarchive of a parked session drops its pending-deletion mark');
 {
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-live"}'));
