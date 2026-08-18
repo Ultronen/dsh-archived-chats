@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "DeepSeek Harness 已归档会话管理页：搜索、排序、批量选择、取消归档和删除。An Archived Chats settings page for DeepSeek Harness with search, sorting, bulk selection, unarchive, and delete.",
   "license": "MIT",
   "author": "Ultronen",

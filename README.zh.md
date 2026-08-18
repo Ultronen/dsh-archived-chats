@@ -14,6 +14,10 @@ dsh plugin --profile web add dsh-archived-chats
 
 安装后重启一次 DSH，然后打开 **设置 → 已归档的聊天**。
 
+## 兼容性
+
+0.5.1 版本以 DeepSeek Harness `0.1.0-rc.7` 为验证基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
+
 ## 功能
 
 - **完整归档列表**：按工作区（项目）分组并显示每组数量；每个分组都可折叠/展开，状态按浏览器记忆。
@@ -30,7 +34,7 @@ dsh plugin --profile web add dsh-archived-chats
 - **活会话原地删除**：删除仍驻留后台的会话时，插件复刻 agent 工厂自身 disposer 的顺序——`cancel({ kind: 'disposed' })` → `whenIdle` → `flush` → `agent.scope.dispose()` → 依次 detach `agents` 与 `sessions` 两个 store 条目；session detach 发出 `session/disposed`，持久化协调器随之 retire（排空并释放）该会话的写入通道，之后冷删除路径在同一请求内完成。所涉 store 条目属于内部接口，每一步都做特性探测，探测失败即回退为停用+延后。
 - **待删队列**（回退路径与崩溃兜底）：id 记入 `$DSH_HOME/plugin-data/archived-chats/pending-deletions.json`，会话保持归档与隐藏；下次启动时插件清扫该队列，通过常规删除路径完成物理删除。原地删除也用该队列包裹（删除前登记、文件移除后清除），中途崩溃由下次启动补完。已入队的会话不会出现在列表中；取消归档会撤销待删标记。
 - **标题缓存**：列表刷新时按 id 记忆已解析的标题，不再每次全量读日志；删除与取消归档会使对应缓存失效。
-- **浏览器半**（`lib/client.js`）注册 `settings.section` 插槽项（order 30），用 React 和 DSH 设计令牌渲染页面。
+- **浏览器半**（`lib/client.js`）注册 `settings.section` 插槽项（order 30），用 React 和 rc.7 的 DSH 浮层/状态设计令牌渲染页面。
 
 ## 开发
 
