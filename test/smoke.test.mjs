@@ -747,6 +747,63 @@ console.log('\n[10e] unarchive wins when it cancels the same id during a paused 
   }
 }
 
+console.log('\n[10f] unarchive cannot interleave while a live session is being disposed');
+{
+  const id = 'session-live-dispose-race';
+  mkdirSync(join(tmp, id), { recursive: true });
+  writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+  const header = { id, createdAt: 1786726800000, cwd: '/ws/one' };
+  headerRows.push(header);
+  events[id] = [];
+  workspaceState.archivedSessionIds.push(id);
+  let releaseIdle;
+  let markIdleEntered;
+  const idleEntered = new Promise((resolve) => { markIdleEntered = resolve; });
+  const idleReleased = new Promise((resolve) => { releaseIdle = resolve; });
+  const sessionObj = { id, header };
+  const sessionsStore = new Map([[id, {
+    session: sessionObj,
+    detach: () => { sessionsStore.delete(id); },
+  }]]);
+  const agentObj = {
+    cancel: () => {},
+    whenIdle: async () => { markIdleEntered(); await idleReleased; },
+    scope: { dispose: async () => {} },
+  };
+  const agentsStore = new Map([[id, { id, agent: agentObj, announcing: false }]]);
+  const originalSessions = services.sessions;
+  services.sessions = {
+    get: (sessionId) => sessionsStore.get(sessionId)?.session,
+    store: sessionsStore,
+    flush: async () => {},
+  };
+  services.agents = {
+    get: (sessionId) => agentsStore.get(sessionId)?.agent,
+    store: agentsStore,
+    detachEntered: (entry) => agentsStore.delete(entry.id),
+  };
+  const deletePromise = call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  await waitFor(idleEntered);
+  const unarchivePromise = call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  let unarchiveSettled = false;
+  void unarchivePromise.then(() => { unarchiveSettled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert(!unarchiveSettled, 'unarchive waits for live disposal instead of detaching the active session mid-delete');
+  releaseIdle();
+  const [deleteResponse, unarchiveResponse] = await Promise.all([deletePromise, unarchivePromise]);
+  assert(deleteResponse.status === 200 && unarchiveResponse.status === 200, 'serialized live delete and unarchive both answer successfully');
+  assert(!existsSync(join(tmp, id)) && !sessionsStore.has(id) && !agentsStore.has(id), 'live delete owns the serialized commit after disposal begins');
+  services.sessions = originalSessions;
+  delete services.agents;
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id);
+  headerRows.splice(headerRows.indexOf(header), 1);
+  delete events[id];
+}
+
 //#region client-half fixture
 const clientSource = readFileSync(join(here, '../lib/client.js'), 'utf8');
 const headChildren = [];
