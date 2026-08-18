@@ -808,6 +808,9 @@ console.log('\n[11c] client half — archive insights UI');
   const alphaEdit = editButtonsIn(alphaRow)[0];
   assert(alphaEdit !== undefined, 'row exposes a metadata edit action');
   assert(alphaEdit?.props.disabled !== true, 'edit action enabled when metadata is ready');
+  let editFocuses = 0;
+  const editTrigger = { focus: () => { editFocuses += 1; documentMock.activeElement = editTrigger; } };
+  documentMock.activeElement = editTrigger;
   alphaEdit.props.onClick();
   tree = renderSection();
   elements = collectElements(tree);
@@ -820,6 +823,34 @@ console.log('\n[11c] client half — archive insights UI');
   const noteTextarea = elements.find((el) => el.props?.id === 'dac-meta-note');
   assert(tagInput?.props.type === 'text' && tagInput?.props.value === 'important', 'tag input prefilled from the row');
   assert(noteTextarea !== undefined && noteTextarea?.props.value === 'keep this', 'note textarea prefilled from the row');
+
+  let tagFocuses = 0;
+  const tagControl = { focus: () => { tagFocuses += 1; documentMock.activeElement = tagControl; } };
+  const saveControl = { focus: () => { documentMock.activeElement = saveControl; } };
+  if (dialog?.props.ref) dialog.props.ref.current = {
+    contains: (node) => node === tagControl || node === saveControl,
+    querySelectorAll: () => [tagControl, saveControl],
+  };
+  if (tagInput?.props.ref) tagInput.props.ref.current = tagControl;
+  documentMock.activeElement = editTrigger;
+  const metaEffect = [...effectRecords].reverse().find(({ deps }) => deps?.length === 3);
+  const cleanupMeta = metaEffect?.effect();
+  assert(tagFocuses === 1, 'metadata dialog moves initial focus to tag input');
+  let stoppedEscape = false;
+  let preventedEscape = false;
+  dialog?.props.onKeyDown?.({
+    key: 'Escape',
+    preventDefault: () => { preventedEscape = true; },
+    stopPropagation: () => { stoppedEscape = true; },
+  });
+  assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
+  assert(states[15].value === null, 'metadata Escape cancels only the metadata editor state');
+  cleanupMeta?.();
+  assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
+
+  states[15].value = archivedRows[0];
+  tree = renderSection();
+  elements = collectElements(tree);
 
   const requests = [];
   const savedFetch = globalThis.fetch;
