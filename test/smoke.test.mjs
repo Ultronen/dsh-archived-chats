@@ -45,6 +45,11 @@ function readPendingStore() {
   } catch { return []; }
 }
 
+/** Read the metadata document while a test expects the store to be healthy. */
+function readMetadataStore() {
+  return JSON.parse(readFileSync(metadataFile, 'utf8'));
+}
+
 //#region shared mocks
 function mockReq(method, headers, bodyText) {
   const cbs = {};
@@ -155,8 +160,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 6, `six routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 7, `seven routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 
@@ -178,6 +183,14 @@ console.log('\n[2] GET /state');
   assert(b.origin === 'subagent', 'subagent origin surfaced for the type filter');
   const c = body.sessions.find((s) => s.id === 'session-c');
   assert(c.title === null, 'title-less session lists with null title');
+}
+
+console.log('\n[2a] GET /stats');
+{
+  const stats = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
+  assert(stats.status === 200, `stats answers 200 (got ${stats.status})`);
+  assert(stats.json().summary.sessionCount === 3, 'stats count visible archived sessions');
+  assert(stats.json().sessions['session-a'].sizeBytes === 4, 'stats report fixture bytes');
 }
 
 console.log('\n[2b] POST /metadata');
@@ -215,6 +228,13 @@ console.log('\n[2c] unavailable metadata store');
     JSON.stringify({ sessionId: 'session-a', tags: [], note: 'retry later' }),
   ));
   assert(saved.status === 503, `metadata save reports unavailable store (got ${saved.status})`);
+  writeFileSync(metadataFile, JSON.stringify({
+    version: 1,
+    sessions: {
+      'session-b': { tags: ['delete-me'], note: 'remove after physical deletion', updatedAt: '2026-08-18T12:00:00.000Z' },
+      'session-live': { tags: ['parked'], note: 'keep until the deferred delete completes', updatedAt: '2026-08-18T12:00:00.000Z' },
+    },
+  }), 'utf8');
 }
 
 console.log('\n[3] POST guard');
@@ -249,6 +269,7 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
   assert(existsSync(join(tmp, 'session-live')), 'live session files untouched');
   assert(workspaceState.archivedSessionIds.includes('session-live'), 'parked session stays archived (invisible)');
   assert(readPendingStore().includes('session-live'), 'parked id recorded in the pending-deletion store');
+  assert(readMetadataStore().sessions['session-live'] !== undefined, 'parked delete keeps metadata until physical deletion');
   const stateAfterPark = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
   assert(!stateAfterPark.json().sessions.some((s) => s.id === 'session-live'), 'parked session excluded from /state listing');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
@@ -314,10 +335,12 @@ console.log('\n[6] delete — full path');
   assert(!registry.headers.has('session-b'), 'registry header index purged (no ghost re-archive)');
   assert(!registry.sessionPaths.has('session-b'), 'registry session-path index purged');
   assert(registry.headers.has('session-c'), 'other sessions stay indexed');
+  assert(readMetadataStore().sessions['session-b'] === undefined, 'cold delete removes metadata after physical deletion');
 }
 
 console.log('\n[7] delete-all — partial failure keeps going');
 {
+  writeFileSync(metadataFile, '{broken', 'utf8');
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete-all', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-c","session-live","session-b"]}'));
   const body = res.json();
@@ -326,6 +349,7 @@ console.log('\n[7] delete-all — partial failure keeps going');
   assert(body.pending.includes('session-live'), 'live session reported as pending');
   assert(body.failed.length === 0, 'no failures in the mixed batch');
   assert(!existsSync(join(tmp, 'session-c')), 'session-c directory removed');
+  assert(body.deleted.includes('session-c'), 'cold delete remains successful when metadata cleanup is unavailable');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
