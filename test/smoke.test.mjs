@@ -343,8 +343,15 @@ const documentMock = {
   createElement: (tag) => makeElement(tag),
   head: { appendChild: (c) => headChildren.push(c) },
   body: {},
+  activeElement: null,
+  contains: () => true,
   querySelectorAll: (sel) => (sel === '[role="dialog"]' ? mockDialogs : []),
   getElementById: (id) => createdElements.find((e) => e.id === id && !e.removed) || null,
+};
+const documentListeners = new Map();
+documentMock.addEventListener = (event, handler) => documentListeners.set(event, handler);
+documentMock.removeEventListener = (event, handler) => {
+  if (documentListeners.get(event) === handler) documentListeners.delete(event);
 };
 const observers = [];
 class MockMutationObserver {
@@ -485,12 +492,24 @@ console.log('\n[11b] client half — bulk selection workflow');
     { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
   ];
   let stateCall = 0;
+  let selectedAfterGroup = null;
+  const renderedEffects = [];
   moduleTable.react.useState = (initial) => {
     const value = typeof initial === 'function' ? initial() : initial;
-    const current = stateCall++ === 0 ? archivedRows : value instanceof Set ? new Set(['session-a']) : value;
-    return [current, () => {}];
+    const index = stateCall++;
+    const current = index === 0
+      ? archivedRows
+      : index === 2
+        ? 'Alpha'
+        : index === 7
+          ? { title: '删除选中的已归档聊天？', body: '这将永久删除选中的 1 个已归档聊天', ids: ['session-a'] }
+          : value instanceof Set ? new Set(['session-a']) : value;
+    const setter = value instanceof Set
+      ? (next) => { selectedAfterGroup = typeof next === 'function' ? next(current) : next; }
+      : () => {};
+    return [current, setter];
   };
-  moduleTable.react.useEffect = () => {};
+  moduleTable.react.useEffect = (effect, deps) => { renderedEffects.push({ effect, deps }); };
   moduleTable.react.useMemo = (fn) => fn();
   moduleTable.react.useCallback = (fn) => fn;
   moduleTable.react.useRef = (value) => ({ current: value });
@@ -504,10 +523,12 @@ console.log('\n[11b] client half — bulk selection workflow');
 
   const checkboxes = elements.filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
   const alphaCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择 Alpha');
-  const betaCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择 Beta');
   assert(alphaCheckbox?.props.checked === true, 'selected chat renders checked');
-  assert(betaCheckbox?.props.checked === false, 'unselected chat renders unchecked');
-  assert(checkboxes.some((el) => el.props?.['aria-checked'] === 'mixed'), 'partial visible selection exposes mixed state');
+  assert(checkboxes.every((el) => el.props?.['aria-label'] !== '选择 Beta'), 'search filter hides non-matching chats');
+  const projectCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择此项目：项目一');
+  assert(projectCheckbox?.props['aria-checked'] === 'mixed', 'project selection includes chats hidden by filters');
+  projectCheckbox?.props.onChange({ target: { checked: true } });
+  assert([...selectedAfterGroup ?? []].sort().join(',') === 'session-a,session-b', 'project selection selects hidden chats in the project');
 
   const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
   assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
@@ -522,6 +543,35 @@ console.log('\n[11b] client half — bulk selection workflow');
   const bulkButtons = collectElements(bulkBar).filter((el) => el.type === 'button');
   const bulkUnarchive = bulkButtons.find((button) => elementText(button) === '取消归档');
   await bulkUnarchive?.props.onClick();
+
+  const alertDialog = elements.find((el) => el.props?.role === 'alertdialog');
+  const dialogTitle = elements.find((el) => el.props?.id === 'dac-confirm-title');
+  const dialogBody = elements.find((el) => el.props?.id === 'dac-confirm-body');
+  assert(alertDialog?.props['aria-labelledby'] === 'dac-confirm-title' && dialogTitle !== undefined, 'confirmation dialog has an accessible title');
+  assert(alertDialog?.props['aria-describedby'] === 'dac-confirm-body' && dialogBody !== undefined, 'confirmation dialog has an accessible description');
+
+  let cancelFocuses = 0;
+  let destructiveFocuses = 0;
+  let restoredFocuses = 0;
+  const previousFocus = { focus: () => { restoredFocuses += 1; documentMock.activeElement = previousFocus; } };
+  const cancelControl = { focus: () => { cancelFocuses += 1; documentMock.activeElement = cancelControl; } };
+  const destructiveControl = { focus: () => { destructiveFocuses += 1; documentMock.activeElement = destructiveControl; } };
+  const cancelButton = elements.find((el) => el.type === 'button' && elementText(el) === '取消');
+  const destructiveButton = elements.find((el) => el.type === 'button' && elementText(el) === '删除' && el.props?.className === 'dac-btn-danger');
+  if (alertDialog?.props.ref) alertDialog.props.ref.current = { querySelectorAll: () => [cancelControl, destructiveControl] };
+  if (cancelButton?.props.ref) cancelButton.props.ref.current = cancelControl;
+  if (destructiveButton?.props.ref) destructiveButton.props.ref.current = destructiveControl;
+  documentMock.activeElement = previousFocus;
+  const modalEffect = [...renderedEffects].reverse().find(({ deps }) => deps?.length === 1 && typeof deps[0] === 'function');
+  const cleanupModal = modalEffect?.effect();
+  assert(cancelFocuses === 1, 'confirmation dialog moves initial focus to cancel');
+  documentMock.activeElement = destructiveControl;
+  let trappedForward = false;
+  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { trappedForward = true; } });
+  assert(trappedForward && documentMock.activeElement === cancelControl, 'confirmation dialog traps forward tab focus');
+  cleanupModal?.();
+  assert(restoredFocuses === 1, 'closing confirmation dialog restores previous focus');
+
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
   assert(requests[0]?.url === '/plugins/dsh-archived-chats/unarchive-all', 'bulk unarchive uses the batch endpoint');
