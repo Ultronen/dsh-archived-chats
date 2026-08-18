@@ -460,6 +460,24 @@ console.log('\n[11] client half — settings section registration');
   assert(style !== undefined, 'page stylesheet injected into <head>');
   assert(style?.attrs['data-plugin-css'] === 'dsh-archived-chats', 'stylesheet carries the data-plugin-css marker');
   assert(style?.textContent.includes('.dac-row'), 'stylesheet paints the chat rows');
+  assert(
+    style?.textContent.includes('background:var(--dsw-specific-menu)')
+      && style?.textContent.includes('border:1px solid var(--dsw-alias-border-inverted)')
+      && style?.textContent.includes('box-shadow:var(--dsw-shadow-lv3)'),
+    'menus and dialogs use the rc.7 overlay surface tokens',
+  );
+  assert(
+    style?.textContent.includes('var(--dsw-alias-state-error-primary)')
+      && style?.textContent.includes('var(--dsw-alias-interactive-bg-hover-danger)')
+      && style?.textContent.includes('var(--dsw-alias-state-success-primary)')
+      && style?.textContent.includes('var(--dsw-alias-state-success-tertiary)'),
+    'destructive and success states use rc.7 semantic tokens',
+  );
+  assert(
+    !/(?:#e5484d|#d13438|#30a46c|#2f9e68|rgba\(229,72,77|rgba\(48,164,108)/i.test(style?.textContent ?? ''),
+    'legacy hard-coded destructive and success colors are absent',
+  );
+  assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
 function collectElements(node, result = []) {
@@ -615,6 +633,37 @@ console.log('\n[13] client half — settings nav icon patch');
   observers[0].cb();
   assert(gearSvg.innerHTML.includes('<rect'), 're-patching is idempotent');
   mockDialogs = [];
+}
+
+console.log('\n[13b] client half — nav icon patch degrades safely on an unknown host DOM');
+{
+  let defensiveModule = null;
+  const hostileWindow = {
+    ...windowMock,
+    __ModuleLoader__: { load: (def) => { defensiveModule = def; } },
+    MutationObserver: class {
+      observe() { throw new Error('observer rejected host root'); }
+      disconnect() {}
+    },
+  };
+  const hostileDocument = {
+    ...documentMock,
+    body: {},
+    querySelectorAll: () => { throw new Error('host settings DOM changed'); },
+  };
+  const fn = new Function('window', 'document', 'require', clientSource);
+  fn(hostileWindow, hostileDocument, (name) => moduleTable[name]);
+  const defensiveExports = defensiveModule?.factory((name) => moduleTable[name]);
+  let threw = false;
+  try {
+    defensiveExports.apply({
+      ...clientCtx,
+      slots: { inject: (_name, register) => register(), register: () => () => {} },
+    });
+  } catch {
+    threw = true;
+  }
+  assert(!threw, 'host DOM or observer changes cannot prevent the plugin section from loading');
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.
