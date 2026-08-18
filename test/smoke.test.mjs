@@ -364,6 +364,7 @@ const moduleTable = {
   },
 };
 let loadedModule = null;
+let clientExports = null;
 const windowMock = {
   __ModuleLoader__: { load: (def) => { loadedModule = def; } },
   localStorage: {
@@ -398,16 +399,39 @@ console.log('\n[10] client half — module registration');
   });
   assert(loadedModule !== null, 'client.js registers itself via __ModuleLoader__.load');
   assert(loadedModule.id === 'dsh-archived-chats', `module id is "dsh-archived-chats" (got "${loadedModule.id}")`);
-  const factoryResult = loadedModule.factory((name) => moduleTable[name]);
-  assert(typeof factoryResult.apply === 'function', 'exports.apply is a function');
-  assert(JSON.stringify(factoryResult.inject) === JSON.stringify(['slots', 'locale']), 'inject declares exactly [slots, locale]');
-  assert(factoryResult.SETTINGS_NS === 'settings.archived-chats', 'SETTINGS_NS exported');
+  clientExports = loadedModule.factory((name) => moduleTable[name]);
+  assert(typeof clientExports.apply === 'function', 'exports.apply is a function');
+  assert(JSON.stringify(clientExports.inject) === JSON.stringify(['slots', 'locale']), 'inject declares exactly [slots, locale]');
+  assert(clientExports.SETTINGS_NS === 'settings.archived-chats', 'SETTINGS_NS exported');
+}
+
+console.log('\n[10b] client model — sorting and visible selection');
+{
+  const rows = [
+    { id: 'b', title: 'Beta', createdAt: 20 },
+    { id: 'untitled', title: null, createdAt: null },
+    { id: 'a', title: 'Alpha', createdAt: 10 },
+  ];
+  const newest = clientExports.__test.sortArchivedSessions(rows, 'newest', 'en-US');
+  const oldest = clientExports.__test.sortArchivedSessions(rows, 'oldest', 'en-US');
+  const byTitle = clientExports.__test.sortArchivedSessions(rows, 'title', 'en-US');
+  assert(newest.map((row) => row.id).join(',') === 'b,a,untitled', 'newest sort puts missing dates last');
+  assert(oldest.map((row) => row.id).join(',') === 'a,b,untitled', 'oldest sort puts missing dates last');
+  assert(byTitle.map((row) => row.id).join(',') === 'a,b,untitled', 'title sort puts untitled chats last');
+  assert(rows.map((row) => row.id).join(',') === 'b,untitled,a', 'sorting never mutates session state');
+
+  const selected = new Set(['hidden', 'a']);
+  const selectedVisible = clientExports.__test.setVisibleSelection(selected, ['a', 'b'], true);
+  assert([...selectedVisible].sort().join(',') === 'a,b,hidden', 'select-visible preserves hidden selections');
+  const deselectedVisible = clientExports.__test.setVisibleSelection(selectedVisible, ['a', 'b'], false);
+  assert([...deselectedVisible].join(',') === 'hidden', 'clear-visible preserves hidden selections');
+  const reconciled = clientExports.__test.reconcileSelection(new Set(['hidden', 'b']), [{ id: 'b' }, { id: 'c' }]);
+  assert([...reconciled].join(',') === 'b', 'selection drops chats removed by an operation or refresh');
 }
 
 console.log('\n[11] client half — settings section registration');
 {
-  const factoryResult = loadedModule.factory((name) => moduleTable[name]);
-  factoryResult.apply(clientCtx);
+  clientExports.apply(clientCtx);
   assert(clientCalls.localeRegister.length === 1, 'locale dictionaries registered once');
   assert(clientCalls.localeRegister[0].ns === 'settings.archived-chats', 'locale namespace is settings.archived-chats');
   const zhDict = clientCalls.localeRegister[0].dicts.zh;
@@ -429,6 +453,79 @@ console.log('\n[11] client half — settings section registration');
   assert(style !== undefined, 'page stylesheet injected into <head>');
   assert(style?.attrs['data-plugin-css'] === 'dsh-archived-chats', 'stylesheet carries the data-plugin-css marker');
   assert(style?.textContent.includes('.dac-row'), 'stylesheet paints the chat rows');
+}
+
+function collectElements(node, result = []) {
+  if (node === null || node === undefined || node === false) return result;
+  if (Array.isArray(node)) {
+    for (const child of node) collectElements(child, result);
+    return result;
+  }
+  if (typeof node !== 'object') return result;
+  if (typeof node.type === 'function') return collectElements(node.type(node.props ?? {}), result);
+  result.push(node);
+  collectElements(node.props?.children, result);
+  return result;
+}
+
+function elementText(node) {
+  if (node === null || node === undefined || node === false) return '';
+  if (Array.isArray(node)) return node.map(elementText).join('');
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (typeof node !== 'object') return '';
+  if (typeof node.type === 'function') return elementText(node.type(node.props ?? {}));
+  return elementText(node.props?.children);
+}
+
+console.log('\n[11b] client half — bulk selection workflow');
+{
+  const savedHooks = { ...moduleTable.react };
+  const archivedRows = [
+    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' },
+    { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
+  ];
+  let stateCall = 0;
+  moduleTable.react.useState = (initial) => {
+    const value = typeof initial === 'function' ? initial() : initial;
+    const current = stateCall++ === 0 ? archivedRows : value instanceof Set ? new Set(['session-a']) : value;
+    return [current, () => {}];
+  };
+  moduleTable.react.useEffect = () => {};
+  moduleTable.react.useMemo = (fn) => fn();
+  moduleTable.react.useCallback = (fn) => fn;
+  moduleTable.react.useRef = (value) => ({ current: value });
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const tree = clientCalls.slotRegister[0].component({ t, refreshSidebar: () => {} });
+  const elements = collectElements(tree);
+  const sortSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '排序方式');
+  assert(sortSelect?.props.value === 'newest', 'sort control defaults to newest first');
+  assert(sortSelect?.props.children.map((option) => option.props.value).join(',') === 'newest,oldest,title', 'sort control offers newest, oldest, and title');
+
+  const checkboxes = elements.filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
+  const alphaCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择 Alpha');
+  const betaCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择 Beta');
+  assert(alphaCheckbox?.props.checked === true, 'selected chat renders checked');
+  assert(betaCheckbox?.props.checked === false, 'unselected chat renders unchecked');
+  assert(checkboxes.some((el) => el.props?.['aria-checked'] === 'mixed'), 'partial visible selection exposes mixed state');
+
+  const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
+  assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
+  assert(elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('删除') && elementText(bulkBar).includes('清除'), 'bulk bar exposes unarchive, delete, and clear actions');
+
+  const requests = [];
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ archivedSessionIds: ['session-b'] }) };
+  };
+  const bulkButtons = collectElements(bulkBar).filter((el) => el.type === 'button');
+  const bulkUnarchive = bulkButtons.find((button) => elementText(button) === '取消归档');
+  await bulkUnarchive?.props.onClick();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+  assert(requests[0]?.url === '/plugins/dsh-archived-chats/unarchive-all', 'bulk unarchive uses the batch endpoint');
+  assert(JSON.parse(requests[0]?.options.body ?? '{}').sessionIds.join(',') === 'session-a', 'bulk unarchive sends exactly the selected ids');
 }
 
 console.log('\n[12] client half — sidebar refresh inject face');
