@@ -75,6 +75,14 @@ async function call(routes, path, req) {
   await handler(req, res);
   return res;
 }
+async function waitUntil(predicate, timeout = 1000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return predicate();
+}
 //#endregion
 
 //#region host-half fixture
@@ -144,11 +152,12 @@ const liveSessions = { get: (id) => (id === 'session-live' ? { id, header: { id,
 const services = { webServer: undefined, workspaceRegistry: registry, sessionPersistence: persistence, sessions: liveSessions };
 const routes = new Map();
 const listeners = [];
+const warnings = [];
 const ctx = {
   get: (key) => services[key],
   on: (event, cb) => { listeners.push([event, cb]); },
   effect: (fn) => { fn(); },
-  logger: { warn: () => {} },
+  logger: { warn: (message) => warnings.push(String(message)) },
 };
 
 const { apply, name } = await import(join(here, '../lib/index.js'));
@@ -236,6 +245,26 @@ console.log('\n[2c] unavailable metadata store');
       'session-live': { tags: ['parked'], note: 'keep until the deferred delete completes', updatedAt: '2026-08-18T12:00:00.000Z' },
     },
   }), 'utf8');
+}
+
+console.log('\n[2d] metadata write failures log only safe diagnostics');
+{
+  const id = 'session-a';
+  const secretTag = 'customer-secret-tag';
+  const secretNote = 'private incident details';
+  const tempPath = `${metadataFile}.${process.pid}.tmp`;
+  mkdirSync(tempPath);
+  const warningCount = warnings.length;
+  const saved = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST',
+    { 'x-dsh-archived-chats': '1' },
+    JSON.stringify({ sessionId: id, tags: [secretTag], note: secretNote }),
+  ));
+  rmSync(tempPath, { recursive: true, force: true });
+  const newWarnings = warnings.slice(warningCount).join('\n');
+  assert(saved.status === 500, `metadata filesystem failure answers 500 (got ${saved.status})`);
+  assert(newWarnings.includes(id) && newWarnings.includes('EISDIR'), 'metadata failure warning identifies the session and error code');
+  assert(!newWarnings.includes(secretTag) && !newWarnings.includes(secretNote), 'metadata failure warning excludes user-authored tags and notes');
 }
 
 console.log('\n[3] POST guard');
@@ -357,16 +386,39 @@ console.log('\n[7] delete fails without a resolvable physical location');
   const metadata = readMetadataStore();
   metadata.sessions[id] = { tags: ['keep'], note: 'physical log remains', updatedAt: '2026-08-18T12:00:00.000Z' };
   writeFileSync(metadataFile, JSON.stringify(metadata), 'utf8');
+  const header = { id, createdAt: 1786726700000, cwd: '/ws/one' };
+  headerRows.push(header);
+  events[id] = [{ type: 'session/title', data: { title: 'Cached before failed delete' } }];
+  registry.headers.set(id, header);
+  registry.sessionPaths.set(id, join(tmp, id));
+  registry.invalidSessionPaths.set(id, 'temporary parse warning');
+  const warmed = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(warmed.json().sessions.some((session) => session.id === id && session.title === 'Cached before failed delete'), 'fixture warms the title cache before deletion');
+  headerRows.splice(headerRows.indexOf(header), 1);
+  delete events[id];
   const list = persistence.list;
+  const locate = persistence.locate;
   persistence.list = async () => { throw new Error('temporary header listing outage'); };
+  persistence.locate = async () => undefined;
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, `{"sessionId":"${id}"}`));
   persistence.list = list;
+  persistence.locate = locate;
   assert(res.status === 409 && res.json().failed.some((failure) => failure.id === id), 'unconfirmed delete reports the session as failed');
   assert(existsSync(join(tmp, id)), 'unconfirmed delete leaves the physical session directory');
   assert(readMetadataStore().sessions[id] !== undefined, 'unconfirmed delete retains authoritative metadata');
   assert(workspaceState.archivedSessionIds.includes(id), 'unconfirmed delete keeps the session archived and visible');
   assert(!readPendingStore().includes(id), 'cold unconfirmed delete introduces no pending marker');
-  assert(!registry.headers.has(id), 'fixture never gave the unconfirmed id a registry header');
+  assert(registry.headers.has(id) && registry.sessionPaths.has(id) && registry.invalidSessionPaths.has(id), 'unconfirmed delete retains every registry index');
+  const afterFailure = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(afterFailure.json().sessions.some((session) => session.id === id && session.title === 'Cached before failed delete'), 'unconfirmed delete retains the cached title when persistence remains unavailable');
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id);
+  registry.headers.delete(id);
+  registry.sessionPaths.delete(id);
+  registry.invalidSessionPaths.delete(id);
+  const cleanedMetadata = readMetadataStore();
+  delete cleanedMetadata.sessions[id];
+  writeFileSync(metadataFile, JSON.stringify(cleanedMetadata), 'utf8');
+  rmSync(join(tmp, id), { recursive: true, force: true });
 }
 
 console.log('\n[8] delete-all — partial failure keeps going');
@@ -434,24 +486,186 @@ console.log('\n[10] unarchive of a parked session drops its pending-deletion mar
   assert(!workspaceState.archivedSessionIds.includes('session-live'), 'session-live unarchived');
 }
 
-console.log('\n[10b] concurrent parked deletes retain every pending session id');
+console.log('\n[10b] concurrent pending add/remove operations retain unrelated ids');
 {
-  const ids = ['session-live-race-a', 'session-live-race-b'];
+  const ids = ['session-live-race-a', 'session-live-race-b', 'session-live-race-c'];
   for (const id of ids) {
     mkdirSync(join(tmp, id), { recursive: true });
     writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
-    workspaceState.archivedSessionIds.push(id);
   }
+  workspaceState.archivedSessionIds.push(ids[0], ids[1]);
   const originalSessions = services.sessions;
   services.sessions = { get: (id) => ids.includes(id) ? { id, header: { id } } : undefined };
-  const responses = await Promise.all(ids.map((id) => call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+  const responses = await Promise.all(ids.slice(0, 2).map((id) => call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
     'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
   ))));
-  services.sessions = originalSessions;
   assert(responses.every((response) => response.json().pending.length === 1), 'each live delete is parked');
-  assert(ids.every((id) => readPendingStore().includes(id)), 'concurrent pending writes retain the union of parked ids');
-  await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[0] })));
-  assert(readPendingStore().includes(ids[1]), 'removing one pending id cannot erase an unrelated parked id');
+  assert(ids.slice(0, 2).every((id) => readPendingStore().includes(id)), 'concurrent pending writes retain the union of parked ids');
+  workspaceState.archivedSessionIds.push(ids[2]);
+  const [unarchiveResponse, deleteResponse] = await Promise.all([
+    call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq(
+      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[0] }),
+    )),
+    call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[2] }),
+    )),
+  ]);
+  services.sessions = originalSessions;
+  const pendingAfterRace = readPendingStore();
+  assert(unarchiveResponse.status === 200 && deleteResponse.json().pending.includes(ids[2]), 'concurrent unarchive and live delete both complete');
+  assert(!pendingAfterRace.includes(ids[0]), 'concurrent unarchive removes only its pending id');
+  assert(pendingAfterRace.includes(ids[1]) && pendingAfterRace.includes(ids[2]), 'concurrent pending add/remove retains old and newly parked ids');
+}
+
+console.log('\n[10c] failed boot sweep retains the pending marker and archive indexes');
+{
+  const originalHome = process.env.DSH_HOME;
+  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-failure-'));
+  process.env.DSH_HOME = isolatedHome;
+  const id = 'session-live-sweep-failure';
+  const directory = join(isolatedHome, 'sessions', id);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
+  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [id] };
+  const header = { id, createdAt: 1 };
+  const registryForPark = {
+    state,
+    get archivedSessionIds() { return state.archivedSessionIds; },
+    list: () => [],
+    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
+    headers: new Map([[id, header]]),
+    sessionPaths: new Map([[id, directory]]),
+    invalidSessionPaths: new Map(),
+  };
+  const persistenceForPark = {
+    list: async () => [header],
+    inspect: async () => ({ meta: header, events: [] }),
+    locate: () => ({ kind: 'jsonl', path: join(directory, 'session.jsonl.zstd') }),
+  };
+  const parkRoutes = new Map();
+  const parkServices = {
+    webServer: { register: (route) => { parkRoutes.set(route.path, route.handler); return () => {}; } },
+    workspaceRegistry: registryForPark,
+    sessionPersistence: persistenceForPark,
+    sessions: { get: (sessionId) => sessionId === id ? { id, header } : undefined },
+  };
+  apply({
+    get: (key) => parkServices[key],
+    on: () => {},
+    effect: (fn) => { fn(); },
+    logger: { warn: () => {}, info: () => {} },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const parked = await call(parkRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  assert(parked.json().pending.includes(id), 'fixture parks a live session through the real delete route');
+
+  const sweepWarnings = [];
+  const sweepInfo = [];
+  const registryForSweep = {
+    ...registryForPark,
+    headers: new Map(),
+    sessionPaths: new Map(),
+    invalidSessionPaths: new Map(),
+  };
+  const sweepServices = {
+    webServer: { register: () => () => {} },
+    workspaceRegistry: registryForSweep,
+    sessionPersistence: {
+      list: async () => [],
+      inspect: async () => { throw new Error('session unavailable'); },
+      locate: async () => undefined,
+    },
+    sessions: { get: () => undefined },
+  };
+  apply({
+    get: (key) => sweepServices[key],
+    on: () => {},
+    effect: (fn) => { fn(); },
+    logger: {
+      warn: (message) => sweepWarnings.push(String(message)),
+      info: (message) => sweepInfo.push(String(message)),
+    },
+  });
+  const sweepFailed = await waitUntil(() => sweepWarnings.some((message) => message.includes(`pending deletion ${id} failed again`)));
+  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
+  const pendingAfterFailure = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
+  assert(sweepFailed, 'boot sweep reports the unresolved physical location');
+  assert(pendingAfterFailure.includes(id), 'failed boot sweep retains the pending marker');
+  assert(state.archivedSessionIds.includes(id), 'failed boot sweep keeps the session archived');
+  assert(existsSync(directory), 'failed boot sweep leaves the physical session directory');
+  assert(!sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)), 'failed boot sweep never reports a successful deletion');
+  process.env.DSH_HOME = originalHome;
+  rmSync(isolatedHome, { recursive: true, force: true });
+}
+
+console.log('\n[10d] boot sweep cannot overwrite a pending id added after its snapshot');
+{
+  const originalHome = process.env.DSH_HOME;
+  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-race-'));
+  process.env.DSH_HOME = isolatedHome;
+  const sweptId = 'session-sweep-snapshot';
+  const addedId = 'session-added-during-sweep';
+  const sweptDirectory = join(isolatedHome, 'sessions', sweptId);
+  const addedDirectory = join(isolatedHome, 'sessions', addedId);
+  for (const directory of [sweptDirectory, addedDirectory]) {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
+  }
+  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
+  mkdirSync(dirname(pendingPath), { recursive: true });
+  writeFileSync(pendingPath, JSON.stringify({ ids: [sweptId] }), 'utf8');
+  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [sweptId, addedId] };
+  const sweptHeader = { id: sweptId, createdAt: 1 };
+  const registryForRace = {
+    state,
+    get archivedSessionIds() { return state.archivedSessionIds; },
+    list: () => [],
+    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
+    headers: new Map([[sweptId, sweptHeader]]),
+    sessionPaths: new Map([[sweptId, sweptDirectory]]),
+    invalidSessionPaths: new Map(),
+  };
+  let releaseList;
+  let markListEntered;
+  const listEntered = new Promise((resolve) => { markListEntered = resolve; });
+  const listReleased = new Promise((resolve) => { releaseList = resolve; });
+  const raceRoutes = new Map();
+  const raceServices = {
+    webServer: { register: (route) => { raceRoutes.set(route.path, route.handler); return () => {}; } },
+    workspaceRegistry: registryForRace,
+    sessionPersistence: {
+      list: async () => {
+        markListEntered();
+        await listReleased;
+        return [sweptHeader];
+      },
+      inspect: async () => ({ meta: sweptHeader, events: [] }),
+      locate: (header) => ({ kind: 'jsonl', path: join(isolatedHome, 'sessions', String(header.id), 'session.jsonl.zstd') }),
+    },
+    sessions: { get: (id) => id === addedId ? { id, header: { id } } : undefined },
+  };
+  apply({
+    get: (key) => raceServices[key],
+    on: () => {},
+    effect: (fn) => { fn(); },
+    logger: { warn: () => {}, info: () => {} },
+  });
+  await listEntered;
+  const added = await call(raceRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: addedId }),
+  ));
+  assert(added.json().pending.includes(addedId), 'live delete adds a pending id while the sweep is paused');
+  releaseList();
+  const swept = await waitUntil(() => !existsSync(sweptDirectory));
+  const pendingAfterSweep = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
+  assert(swept && !state.archivedSessionIds.includes(sweptId), 'snapshot entry completes deletion after the sweep resumes');
+  assert(pendingAfterSweep.includes(addedId), 'sweep cleanup retains the id added after its snapshot');
+  assert(!pendingAfterSweep.includes(sweptId), 'sweep cleanup removes only the completed snapshot id');
+  assert(existsSync(addedDirectory), 'newly parked session remains available for the next boot');
+  process.env.DSH_HOME = originalHome;
+  rmSync(isolatedHome, { recursive: true, force: true });
 }
 
 //#region client-half fixture
@@ -621,6 +835,7 @@ console.log('\n[11] client half — settings section registration');
     !/(?:#e5484d|#d13438|#30a46c|#2f9e68|rgba\(229,72,77|rgba\(48,164,108)/i.test(style?.textContent ?? ''),
     'legacy hard-coded destructive and success colors are absent',
   );
+  assert(style?.textContent.includes('.dac-tag-editor'), 'token tag editor has layout and focus styling');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
@@ -644,6 +859,74 @@ function elementText(node) {
   if (typeof node !== 'object') return '';
   if (typeof node.type === 'function') return elementText(node.type(node.props ?? {}));
   return elementText(node.props?.children);
+}
+
+function findComponentElement(node, componentName) {
+  if (node === null || node === undefined || node === false) return undefined;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findComponentElement(child, componentName);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (typeof node !== 'object') return undefined;
+  if (typeof node.type === 'function' && node.type.name === componentName) return node;
+  return findComponentElement(node.props?.children, componentName);
+}
+
+function createHookHarness(component) {
+  const states = [];
+  const refs = [];
+  const effects = [];
+  let pendingEffects = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let effectIndex = 0;
+  const sameDependencies = (left, right) => Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => Object.is(value, right[index]));
+  const hooks = {
+    useState(initial) {
+      const index = stateIndex++;
+      if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
+      return [states[index], (next) => {
+        states[index] = typeof next === 'function' ? next(states[index]) : next;
+      }];
+    },
+    useRef(initial) {
+      const index = refIndex++;
+      if (!(index in refs)) refs[index] = { current: initial };
+      return refs[index];
+    },
+    useEffect(effect, deps) {
+      const index = effectIndex++;
+      if (!sameDependencies(effects[index]?.deps, deps)) pendingEffects.push({ index, effect, deps });
+    },
+    useMemo: (fn) => fn(),
+    useCallback: (fn) => fn,
+  };
+  return {
+    render(props) {
+      stateIndex = 0;
+      refIndex = 0;
+      effectIndex = 0;
+      pendingEffects = [];
+      Object.assign(moduleTable.react, hooks);
+      return component(props);
+    },
+    flushEffects() {
+      for (const pending of pendingEffects) {
+        effects[pending.index]?.cleanup?.();
+        effects[pending.index] = { deps: pending.deps, cleanup: pending.effect() };
+      }
+      pendingEffects = [];
+    },
+    unmount() {
+      for (const effect of effects) effect?.cleanup?.();
+    },
+  };
 }
 
 console.log('\n[11b] client half — bulk selection workflow');
@@ -758,7 +1041,7 @@ console.log('\n[11c] client half — archive insights UI');
     {
       id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent',
       workspaceId: 'ws-1', workspaceTitle: '项目一',
-      tags: ['research'], note: '', metadataUpdatedAt: '2026-08-18T12:00:00.000Z',
+      tags: ['research,2026', 'all', 'Important'], note: '', metadataUpdatedAt: '2026-08-18T12:00:00.000Z',
     },
     {
       id: 'session-c', title: 'Gamma', createdAt: 30, origin: null,
@@ -819,9 +1102,19 @@ console.log('\n[11c] client half — archive insights UI');
   const tagSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '全部标签');
   assert(tagSelect !== undefined, 'tag filter select rendered');
   assert(tagSelect?.props.value === '', 'tag filter defaults to the non-colliding no-filter sentinel');
+  const importantOptions = tagSelect?.props.children.filter((option) => String(option.props.children).toLowerCase() === 'important') ?? [];
+  assert(importantOptions.length === 1, 'tag filter options de-duplicate labels case-insensitively');
+  states[12].value = 'all';
+  tree = renderSection();
+  elements = collectElements(tree);
+  const filteredRows = elements.filter(isRow);
+  assert(filteredRows.length === 1 && elementText(filteredRows[0]).includes('Beta'), 'selecting the literal all tag renders only sessions carrying that tag');
+  states[12].value = '';
+  tree = renderSection();
+  elements = collectElements(tree);
 
   const chips = elements.filter((el) => el.props?.className === 'dac-chip');
-  assert(chips.length === 5, `rows render at most three chips each (got ${chips.length})`);
+  assert(elements.filter(isRow).every((row) => collectElements(row).filter((el) => el.props?.className === 'dac-chip').length <= 3), 'rows render at most three tag chips each');
   const moreChips = elements.filter((el) => el.props?.className === 'dac-chip dac-chip-more');
   assert(moreChips.map((el) => elementText(el)).join(',') === '+1', 'overflow tags collapse into a +N indicator');
 
@@ -848,7 +1141,7 @@ console.log('\n[11c] client half — archive insights UI');
   const tagInput = elements.find((el) => el.props?.id === 'dac-meta-tags');
   const noteTextarea = elements.find((el) => el.props?.id === 'dac-meta-note');
   assert(tagInput?.props.type === 'text' && tagInput?.props.value === '', 'tag input starts as a draft beside committed tokens');
-  assert(elements.some((el) => el.type === 'button' && el.props?.['aria-label'] === 'Remove important'), 'existing tags render as removable tokens');
+  assert(elements.some((el) => el.type === 'button' && el.props?.['aria-label'] === '移除标签 important'), 'existing tags render as localized removable tokens');
   assert(noteTextarea !== undefined && noteTextarea?.props.value === 'keep this', 'note textarea prefilled from the row');
 
   let tagFocuses = 0;
@@ -915,6 +1208,94 @@ console.log('\n[11c] client half — archive insights UI');
   assert(dialogAfterFailure !== undefined, 'failed save keeps the dialog open');
   assert(elements.find((el) => el.props?.id === 'dac-meta-note')?.props.value === 'typed note', 'failed save preserves typed note text');
   globalThis.fetch = savedFetch;
+
+  // Exercise the real MetadataDialog with persistent hooks so token semantics,
+  // IME input, and effect cleanup are verified across actual re-renders.
+  const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
+  states[15].value = commaTagSession;
+  const rawSectionTree = renderSection();
+  const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
+  assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
+  const harness = createHookHarness(metadataElement.type);
+  const savedMetadata = [];
+  let restoredDirectFocus = 0;
+  let initialTagFocuses = 0;
+  const returnControl = { focus: () => { restoredDirectFocus += 1; documentMock.activeElement = returnControl; } };
+  const directTagControl = { focus: () => { initialTagFocuses += 1; documentMock.activeElement = directTagControl; } };
+  const directSaveControl = { focus: () => { documentMock.activeElement = directSaveControl; } };
+  let dialogProps = {
+    ...metadataElement.props,
+    returnFocus: returnControl,
+    onSave: (tags, note) => { savedMetadata.push({ tags, note }); },
+    onCancel: () => {},
+  };
+  let directTree = harness.render(dialogProps);
+  let directElements = collectElements(directTree);
+  let directDialog = directElements.find((el) => el.props?.role === 'dialog');
+  let directInput = directElements.find((el) => el.props?.id === 'dac-meta-tags');
+  if (directDialog?.props.ref) directDialog.props.ref.current = {
+    contains: (node) => node === directTagControl || node === directSaveControl,
+    querySelectorAll: () => [directTagControl, directSaveControl],
+  };
+  if (directInput?.props.ref) directInput.props.ref.current = directTagControl;
+  documentMock.activeElement = returnControl;
+  harness.flushEffects();
+  assert(initialTagFocuses === 1, 'metadata dialog focuses the tag field once on mount');
+
+  documentMock.activeElement = directSaveControl;
+  dialogProps = { ...dialogProps, onSave: (tags, note) => { savedMetadata.push({ tags, note }); }, onCancel: () => {} };
+  directTree = harness.render(dialogProps);
+  harness.flushEffects();
+  assert(initialTagFocuses === 1 && restoredDirectFocus === 0 && documentMock.activeElement === directSaveControl, 'parent re-render neither restores nor steals metadata dialog focus');
+
+  directElements = collectElements(directTree);
+  directInput = directElements.find((el) => el.props?.id === 'dac-meta-tags');
+  const directLabel = directElements.find((el) => el.type === 'label' && el.props?.htmlFor === 'dac-meta-tags');
+  assert(!elementText(directLabel).includes('逗号') && !String(directInput?.props.placeholder).includes('逗号'), 'token editor copy no longer instructs users to enter comma-separated text');
+  assert(String(directInput?.props.placeholder).includes('回车'), 'token editor explains the Enter-to-commit interaction');
+  assert(directElements.some((el) => el.type === 'button' && el.props?.['aria-label'] === '移除标签 research,2026'), 'token remove action is localized and preserves a comma inside one tag');
+
+  directElements.find((el) => el.props?.id === 'dac-meta-note')?.props.onChange({ target: { value: 'note only edit' } });
+  directTree = harness.render(dialogProps);
+  directElements = collectElements(directTree);
+  directElements.find((el) => el.type === 'button' && elementText(el) === '保存')?.props.onClick();
+  assert(
+    savedMetadata[0]?.tags.length === 1 && savedMetadata[0]?.tags[0] === 'research,2026' && savedMetadata[0]?.note === 'note only edit',
+    'note-only save keeps a tag containing a comma as one token',
+  );
+
+  directInput = directElements.find((el) => el.props?.id === 'dac-meta-tags');
+  directInput?.props.onChange({ target: { value: '研究' } });
+  directTree = harness.render(dialogProps);
+  directElements = collectElements(directTree);
+  directInput = directElements.find((el) => el.props?.id === 'dac-meta-tags');
+  let composingPrevented = false;
+  directInput?.props.onKeyDown({
+    key: 'Enter',
+    isComposing: true,
+    nativeEvent: { isComposing: true },
+    preventDefault: () => { composingPrevented = true; },
+  });
+  directTree = harness.render(dialogProps);
+  directElements = collectElements(directTree);
+  assert(
+    composingPrevented === false
+      && directElements.find((el) => el.props?.id === 'dac-meta-tags')?.props.value === '研究'
+      && !directElements.some((el) => el.type === 'button' && elementText(el) === '研究'),
+    'IME composition Enter leaves the draft untouched and does not create a token',
+  );
+  let committedPrevented = false;
+  directElements.find((el) => el.props?.id === 'dac-meta-tags')?.props.onKeyDown({
+    key: 'Enter',
+    isComposing: false,
+    nativeEvent: { isComposing: false },
+    preventDefault: () => { committedPrevented = true; },
+  });
+  directTree = harness.render(dialogProps);
+  directElements = collectElements(directTree);
+  assert(committedPrevented && directElements.some((el) => el.type === 'button' && elementText(el) === '研究'), 'ordinary Enter commits the current tag draft');
+  harness.unmount();
+  assert(restoredDirectFocus === 1 && documentMock.activeElement === returnControl, 'metadata dialog restores focus only when it unmounts');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
   states[13].value = 'unavailable';
