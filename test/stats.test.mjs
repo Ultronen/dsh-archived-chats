@@ -14,6 +14,16 @@ test('measureDirectory totals nested regular files and skips symbolic links', as
   assert.deepEqual(await measureDirectory(root), { sizeBytes: 6, fileCount: 2, status: 'ready' });
 });
 
+test('measureDirectory rejects a symbolic-link root instead of following files outside the session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-stats-root-link-'));
+  const outside = join(root, 'outside');
+  const linkedRoot = join(root, 'linked-session');
+  await mkdir(outside);
+  await writeFile(join(outside, 'private-log'), '1234');
+  await symlink(outside, linkedRoot);
+  await assert.rejects(measureDirectory(linkedRoot));
+});
+
 test('stats service summarizes available sessions, caches rows, and invalidates selected sessions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dac-stats-service-'));
   const paths = new Map();
@@ -83,4 +93,82 @@ test('stats service bounds concurrent directory measurements', async () => {
 
   await service.measure(headers.map((header) => header.id));
   assert.equal(maxActive <= 4, true);
+});
+
+test('stats service shares a four-measurement limit across overlapping requests', async () => {
+  const headers = Array.from({ length: 8 }, (_, index) => ({ id: `session-${index}` }));
+  let active = 0;
+  let maxActive = 0;
+  const service = createStatsService({
+    persistence: {
+      list: async () => headers,
+      locate: (header) => ({ path: `/sessions/${header.id}/session.jsonl.zstd` }),
+    },
+    measure: async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { sizeBytes: 1, fileCount: 1, status: 'ready' };
+    },
+  });
+  await Promise.all([
+    service.measure(headers.slice(0, 4).map((header) => header.id)),
+    service.measure(headers.slice(4).map((header) => header.id)),
+  ]);
+  assert.equal(maxActive <= 4, true);
+});
+
+test('stats service shares an in-flight measurement for identical overlapping requests', async () => {
+  let resolveMeasurement;
+  let calls = 0;
+  const service = createStatsService({
+    persistence: {
+      list: async () => [{ id: 'session-a' }],
+      locate: () => ({ path: '/sessions/session-a/session.jsonl.zstd' }),
+    },
+    measure: async () => {
+      calls += 1;
+      await new Promise((resolve) => { resolveMeasurement = resolve; });
+      return { sizeBytes: 3, fileCount: 1, status: 'ready' };
+    },
+  });
+  const first = service.measure(['session-a']);
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = service.measure(['session-a']);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  resolveMeasurement();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(firstResult.sessions['session-a'].sizeBytes, 3);
+  assert.equal(secondResult.sessions['session-a'].sizeBytes, 3);
+});
+
+test('stats invalidation prevents an older in-flight result from repopulating the cache', async () => {
+  const resolvers = [];
+  let calls = 0;
+  const service = createStatsService({
+    persistence: {
+      list: async () => [{ id: 'session-a' }],
+      locate: () => ({ path: '/sessions/session-a/session.jsonl.zstd' }),
+    },
+    measure: async () => {
+      calls += 1;
+      const result = calls;
+      await new Promise((resolve) => resolvers.push(resolve));
+      return { sizeBytes: result, fileCount: 1, status: 'ready' };
+    },
+  });
+  const oldRequest = service.measure(['session-a']);
+  await new Promise((resolve) => setImmediate(resolve));
+  service.invalidate(['session-a']);
+  const freshRequest = service.measure(['session-a']);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  resolvers[1]();
+  assert.equal((await freshRequest).sessions['session-a'].sizeBytes, 2);
+  resolvers[0]();
+  await oldRequest;
+  assert.equal((await service.measure(['session-a'])).sessions['session-a'].sizeBytes, 2);
+  assert.equal(calls, 2);
 });

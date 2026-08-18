@@ -231,6 +231,7 @@ console.log('\n[2c] unavailable metadata store');
   writeFileSync(metadataFile, JSON.stringify({
     version: 1,
     sessions: {
+      'session-a': { tags: ['Updated'], note: 'note', updatedAt: '2026-08-18T12:00:00.000Z' },
       'session-b': { tags: ['delete-me'], note: 'remove after physical deletion', updatedAt: '2026-08-18T12:00:00.000Z' },
       'session-live': { tags: ['parked'], note: 'keep until the deferred delete completes', updatedAt: '2026-08-18T12:00:00.000Z' },
     },
@@ -251,6 +252,7 @@ console.log('\n[4] unarchive');
   const res = await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-a"}'));
   assert(res.status === 200, `unarchive answers 200 (got ${res.status})`);
   assert(!workspaceState.archivedSessionIds.includes('session-a'), 'session-a left the archive set');
+  assert(readMetadataStore().sessions['session-a'] !== undefined, 'unarchive retains the session metadata entry');
   assert(res.json().archivedSessionIds.length === 2, 'response carries the updated set');
   const again = await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-a"}'));
   assert(again.status === 200, 'unarchiving a non-archived id is an idempotent 200');
@@ -346,7 +348,7 @@ console.log('\n[6] delete — full path');
   assert(statsAfterRearchive.json().sessions['session-b'].sizeBytes === 8, 'delete invalidates cached stats before a session is re-archived');
 }
 
-console.log('\n[7] delete preserves metadata when physical removal is unconfirmed');
+console.log('\n[7] delete fails without a resolvable physical location');
 {
   const id = 'session-unconfirmed';
   mkdirSync(join(tmp, id), { recursive: true });
@@ -359,9 +361,12 @@ console.log('\n[7] delete preserves metadata when physical removal is unconfirme
   persistence.list = async () => { throw new Error('temporary header listing outage'); };
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, `{"sessionId":"${id}"}`));
   persistence.list = list;
-  assert(res.status === 200 && res.json().deleted.includes(id), 'unconfirmed delete preserves the established completed response');
+  assert(res.status === 409 && res.json().failed.some((failure) => failure.id === id), 'unconfirmed delete reports the session as failed');
   assert(existsSync(join(tmp, id)), 'unconfirmed delete leaves the physical session directory');
   assert(readMetadataStore().sessions[id] !== undefined, 'unconfirmed delete retains authoritative metadata');
+  assert(workspaceState.archivedSessionIds.includes(id), 'unconfirmed delete keeps the session archived and visible');
+  assert(!readPendingStore().includes(id), 'cold unconfirmed delete introduces no pending marker');
+  assert(!registry.headers.has(id), 'fixture never gave the unconfirmed id a registry header');
 }
 
 console.log('\n[8] delete-all — partial failure keeps going');
@@ -427,6 +432,26 @@ console.log('\n[10] unarchive of a parked session drops its pending-deletion mar
   assert(un.status === 200, 'unarchive answers 200');
   assert(!readPendingStore().includes('session-live'), 'unarchive removed the pending-deletion mark');
   assert(!workspaceState.archivedSessionIds.includes('session-live'), 'session-live unarchived');
+}
+
+console.log('\n[10b] concurrent parked deletes retain every pending session id');
+{
+  const ids = ['session-live-race-a', 'session-live-race-b'];
+  for (const id of ids) {
+    mkdirSync(join(tmp, id), { recursive: true });
+    writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+    workspaceState.archivedSessionIds.push(id);
+  }
+  const originalSessions = services.sessions;
+  services.sessions = { get: (id) => ids.includes(id) ? { id, header: { id } } : undefined };
+  const responses = await Promise.all(ids.map((id) => call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ))));
+  services.sessions = originalSessions;
+  assert(responses.every((response) => response.json().pending.length === 1), 'each live delete is parked');
+  assert(ids.every((id) => readPendingStore().includes(id)), 'concurrent pending writes retain the union of parked ids');
+  await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[0] })));
+  assert(readPendingStore().includes(ids[1]), 'removing one pending id cannot erase an unrelated parked id');
 }
 
 //#region client-half fixture
@@ -552,6 +577,7 @@ console.log('\n[10b] client model — sorting and visible selection');
     'en-US',
   ) === true, 'search includes tags');
   assert(clientExports.__test.filterByTag({ tags: ['Important'] }, 'important') === true, 'tag filter is case-insensitive');
+  assert(clientExports.__test.filterByTag({ tags: ['other'] }, 'all') === false, 'literal all filters instead of acting as the no-filter sentinel');
 }
 
 console.log('\n[11] client half — settings section registration');
@@ -752,7 +778,7 @@ console.log('\n[11c] client half — archive insights UI');
   const states = [];
   const effectRecords = [];
   states[0] = { value: archivedRows, setter: null };
-  states[12] = { value: 'all', setter: null };
+  states[12] = { value: '', setter: null };
   states[13] = { value: 'ready', setter: null };
   states[14] = { value: statsFixture, setter: null };
   states[15] = { value: null, setter: null };
@@ -792,7 +818,7 @@ console.log('\n[11c] client half — archive insights UI');
 
   const tagSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '全部标签');
   assert(tagSelect !== undefined, 'tag filter select rendered');
-  assert(tagSelect?.props.value === 'all', 'tag filter defaults to all tags');
+  assert(tagSelect?.props.value === '', 'tag filter defaults to the non-colliding no-filter sentinel');
 
   const chips = elements.filter((el) => el.props?.className === 'dac-chip');
   assert(chips.length === 5, `rows render at most three chips each (got ${chips.length})`);
@@ -821,7 +847,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(dialog?.props['aria-describedby'] === 'dac-meta-limits', 'dialog limits are described');
   const tagInput = elements.find((el) => el.props?.id === 'dac-meta-tags');
   const noteTextarea = elements.find((el) => el.props?.id === 'dac-meta-note');
-  assert(tagInput?.props.type === 'text' && tagInput?.props.value === 'important', 'tag input prefilled from the row');
+  assert(tagInput?.props.type === 'text' && tagInput?.props.value === '', 'tag input starts as a draft beside committed tokens');
+  assert(elements.some((el) => el.type === 'button' && el.props?.['aria-label'] === 'Remove important'), 'existing tags render as removable tokens');
   assert(noteTextarea !== undefined && noteTextarea?.props.value === 'keep this', 'note textarea prefilled from the row');
 
   let tagFocuses = 0;
@@ -833,7 +860,7 @@ console.log('\n[11c] client half — archive insights UI');
   };
   if (tagInput?.props.ref) tagInput.props.ref.current = tagControl;
   documentMock.activeElement = editTrigger;
-  const metaEffect = [...effectRecords].reverse().find(({ deps }) => deps?.length === 3);
+  const metaEffect = [...effectRecords].reverse().find(({ deps }) => deps?.length === 0);
   const cleanupMeta = metaEffect?.effect();
   assert(tagFocuses === 1, 'metadata dialog moves initial focus to tag input');
   let stoppedEscape = false;
