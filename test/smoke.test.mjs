@@ -83,6 +83,12 @@ async function waitUntil(predicate, timeout = 1000) {
   }
   return predicate();
 }
+async function waitFor(promise, timeout = 1000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out after ${timeout}ms`)), timeout)),
+  ]);
+}
 //#endregion
 
 //#region host-half fixture
@@ -632,6 +638,7 @@ console.log('\n[10d] boot sweep cannot overwrite a pending id added after its sn
   const listEntered = new Promise((resolve) => { markListEntered = resolve; });
   const listReleased = new Promise((resolve) => { releaseList = resolve; });
   const raceRoutes = new Map();
+  const sweepInfo = [];
   const raceServices = {
     webServer: { register: (route) => { raceRoutes.set(route.path, route.handler); return () => {}; } },
     workspaceRegistry: registryForRace,
@@ -650,22 +657,94 @@ console.log('\n[10d] boot sweep cannot overwrite a pending id added after its sn
     get: (key) => raceServices[key],
     on: () => {},
     effect: (fn) => { fn(); },
-    logger: { warn: () => {}, info: () => {} },
+    logger: { warn: () => {}, info: (message) => sweepInfo.push(String(message)) },
   });
-  await listEntered;
+  await waitFor(listEntered);
   const added = await call(raceRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
     'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: addedId }),
   ));
   assert(added.json().pending.includes(addedId), 'live delete adds a pending id while the sweep is paused');
+  // The boot sweep must finish all post-rm cleanup before this fixture is torn down.
+  // Its info log is the observable completion boundary, not directory removal alone.
   releaseList();
-  const swept = await waitUntil(() => !existsSync(sweptDirectory));
+  const sweepFinished = await waitUntil(() => sweepInfo.some((message) => message.includes(`swept pending deletion ${sweptId}`)));
+  const swept = !existsSync(sweptDirectory);
   const pendingAfterSweep = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
-  assert(swept && !state.archivedSessionIds.includes(sweptId), 'snapshot entry completes deletion after the sweep resumes');
+  assert(sweepFinished && swept && !state.archivedSessionIds.includes(sweptId), 'snapshot entry completes deletion after the sweep resumes');
   assert(pendingAfterSweep.includes(addedId), 'sweep cleanup retains the id added after its snapshot');
   assert(!pendingAfterSweep.includes(sweptId), 'sweep cleanup removes only the completed snapshot id');
   assert(existsSync(addedDirectory), 'newly parked session remains available for the next boot');
   process.env.DSH_HOME = originalHome;
   rmSync(isolatedHome, { recursive: true, force: true });
+}
+
+console.log('\n[10e] unarchive wins when it cancels the same id during a paused sweep');
+{
+  const originalHome = process.env.DSH_HOME;
+  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-cancel-'));
+  process.env.DSH_HOME = isolatedHome;
+  const id = 'session-cancelled-during-sweep';
+  const directory = join(isolatedHome, 'sessions', id);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
+  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
+  mkdirSync(dirname(pendingPath), { recursive: true });
+  writeFileSync(pendingPath, JSON.stringify({ ids: [id] }), 'utf8');
+  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [id] };
+  const header = { id, createdAt: 1 };
+  const registry = {
+    state,
+    get archivedSessionIds() { return state.archivedSessionIds; },
+    list: () => [],
+    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
+    headers: new Map([[id, header]]),
+    sessionPaths: new Map([[id, directory]]),
+    invalidSessionPaths: new Map(),
+  };
+  let releaseList;
+  let markListEntered;
+  const listEntered = new Promise((resolve) => { markListEntered = resolve; });
+  const listReleased = new Promise((resolve) => { releaseList = resolve; });
+  const routesForCancel = new Map();
+  const sweepInfo = [];
+  const servicesForCancel = {
+    webServer: { register: (route) => { routesForCancel.set(route.path, route.handler); return () => {}; } },
+    workspaceRegistry: registry,
+    sessionPersistence: {
+      list: async () => {
+        markListEntered();
+        await listReleased;
+        return [header];
+      },
+      inspect: async () => ({ meta: header, events: [] }),
+      locate: () => ({ kind: 'jsonl', path: join(directory, 'session.jsonl.zstd') }),
+    },
+    sessions: { get: () => undefined },
+  };
+  try {
+    apply({
+      get: (key) => servicesForCancel[key],
+      on: () => {},
+      effect: (fn) => { fn(); },
+      logger: { warn: () => {}, info: (message) => sweepInfo.push(String(message)) },
+    });
+    await waitFor(listEntered);
+    const unarchived = await call(routesForCancel, '/plugins/dsh-archived-chats/unarchive', mockReq(
+      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+    ));
+    assert(unarchived.status === 200, 'same-id unarchive succeeds while the boot sweep is paused');
+    releaseList();
+    const sweepSettled = await waitUntil(() => sweepInfo.some((message) => message.includes(`cancelled pending deletion ${id}`))
+      || sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)));
+    const pendingAfterCancel = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
+    assert(sweepSettled && !sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)), 'cancelled sweep never reports a successful deletion');
+    assert(!state.archivedSessionIds.includes(id), 'same-id unarchive removes the session from the archive set');
+    assert(!pendingAfterCancel.includes(id), 'same-id unarchive removes the pending marker');
+    assert(existsSync(directory), 'same-id unarchive preserves the physical session directory');
+  } finally {
+    process.env.DSH_HOME = originalHome;
+    rmSync(isolatedHome, { recursive: true, force: true });
+  }
 }
 
 //#region client-half fixture
@@ -835,7 +914,7 @@ console.log('\n[11] client half — settings section registration');
     !/(?:#e5484d|#d13438|#30a46c|#2f9e68|rgba\(229,72,77|rgba\(48,164,108)/i.test(style?.textContent ?? ''),
     'legacy hard-coded destructive and success colors are absent',
   );
-  assert(style?.textContent.includes('.dac-tag-editor'), 'token tag editor has layout and focus styling');
+  assert(style?.textContent.includes('.dac-tag-editor') && style?.textContent.includes('.dac-tag-editor .dac-chip span{'), 'token tag editor has layout, focus, and long-label styling');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
