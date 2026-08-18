@@ -18,6 +18,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 // at a throwaway temp dir (the env var is read at call time by the module).
 const testHome = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-home-'));
 process.env.DSH_HOME = testHome;
+const metadataFile = join(testHome, 'plugin-data', 'archived-chats', 'metadata.json');
+mkdirSync(dirname(metadataFile), { recursive: true });
+writeFileSync(metadataFile, JSON.stringify({
+  version: 1,
+  sessions: {
+    'session-a': {
+      tags: ['important'],
+      note: 'keep this',
+      updatedAt: '2026-08-18T12:00:00.000Z',
+    },
+  },
+}), 'utf8');
 
 let failures = 0;
 function assert(cond, label) {
@@ -143,8 +155,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 5, `all five routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 6, `six routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 
@@ -153,15 +165,56 @@ console.log('\n[2] GET /state');
   const res = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
   assert(res.status === 200, `state answers 200 (got ${res.status})`);
   const body = res.json();
+  assert(body.metadataStatus === 'ready', 'state reports ready metadata');
   assert(body.sessions.length === 3, `three archived sessions listed (got ${body.sessions.length})`);
   const a = body.sessions.find((s) => s.id === 'session-a');
   assert(a.title === '改名后的归档', `last title event wins (got "${a.title}")`);
   assert(a.createdAt === 1786726311605, 'createdAt carried from the header');
   assert(a.workspaceId === 'ws-1' && a.workspaceTitle === '项目一', 'workspace resolved from accounting slot');
+  assert(Array.isArray(a.tags) && a.tags.length === 1 && a.tags[0] === 'important', 'persisted metadata tags are included');
+  assert(a.note === 'keep this', 'persisted metadata note is included');
+  assert(a.metadataUpdatedAt === '2026-08-18T12:00:00.000Z', 'persisted metadata timestamp is included');
   const b = body.sessions.find((s) => s.id === 'session-b');
   assert(b.origin === 'subagent', 'subagent origin surfaced for the type filter');
   const c = body.sessions.find((s) => s.id === 'session-c');
   assert(c.title === null, 'title-less session lists with null title');
+}
+
+console.log('\n[2b] POST /metadata');
+{
+  const saved = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST',
+    { 'x-dsh-archived-chats': '1' },
+    JSON.stringify({ sessionId: 'session-a', tags: [' Updated '], note: ' note ' }),
+  ));
+  assert(saved.status === 200, `metadata save answers 200 (got ${saved.status})`);
+  assert(JSON.stringify(saved.json().metadata.tags) === JSON.stringify(['Updated']), 'metadata save normalizes tags');
+  const forbidden = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST', {}, JSON.stringify({ sessionId: 'session-a', tags: [], note: '' }),
+  ));
+  assert(forbidden.status === 403, `metadata save without guard header rejected (got ${forbidden.status})`);
+  const invalid = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: 'session-a', tags: 'bad', note: '' }),
+  ));
+  assert(invalid.status === 400, `invalid metadata rejected (got ${invalid.status})`);
+  const unarchived = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: 'not-archived', tags: [], note: '' }),
+  ));
+  assert(unarchived.status === 404, `unarchived session metadata rejected (got ${unarchived.status})`);
+}
+
+console.log('\n[2c] unavailable metadata store');
+{
+  writeFileSync(metadataFile, '{broken', 'utf8');
+  const state = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(state.status === 200, `state remains available when metadata is corrupt (got ${state.status})`);
+  assert(state.json().metadataStatus === 'unavailable', 'state reports unavailable metadata');
+  const saved = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST',
+    { 'x-dsh-archived-chats': '1' },
+    JSON.stringify({ sessionId: 'session-a', tags: [], note: 'retry later' }),
+  ));
+  assert(saved.status === 503, `metadata save reports unavailable store (got ${saved.status})`);
 }
 
 console.log('\n[3] POST guard');
