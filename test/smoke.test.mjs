@@ -538,6 +538,20 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert([...deselectedVisible].join(',') === 'hidden', 'clear-visible preserves hidden selections');
   const reconciled = clientExports.__test.reconcileSelection(new Set(['hidden', 'b']), [{ id: 'b' }, { id: 'c' }]);
   assert([...reconciled].join(',') === 'b', 'selection drops chats removed by an operation or refresh');
+
+  assert(clientExports.__test.formatBytes(0) === '0 B', 'formats zero bytes');
+  assert(clientExports.__test.formatBytes(1536) === '1.5 KB', 'formats binary kilobytes');
+  assert(clientExports.__test.matchesArchivedSession(
+    { title: 'Alpha', workspaceTitle: '项目', tags: ['Research'], note: 'follow up' },
+    'follow',
+    'en-US',
+  ) === true, 'search includes note text');
+  assert(clientExports.__test.matchesArchivedSession(
+    { title: 'Alpha', workspaceTitle: '项目', tags: ['Research'], note: '' },
+    'research',
+    'en-US',
+  ) === true, 'search includes tags');
+  assert(clientExports.__test.filterByTag({ tags: ['Important'] }, 'important') === true, 'tag filter is case-insensitive');
 }
 
 console.log('\n[11] client half — settings section registration');
@@ -704,6 +718,166 @@ console.log('\n[11b] client half — bulk selection workflow');
   Object.assign(moduleTable.react, savedHooks);
   assert(requests[0]?.url === '/plugins/dsh-archived-chats/unarchive-all', 'bulk unarchive uses the batch endpoint');
   assert(JSON.parse(requests[0]?.options.body ?? '{}').sessionIds.join(',') === 'session-a', 'bulk unarchive sends exactly the selected ids');
+}
+
+console.log('\n[11c] client half — archive insights UI');
+{
+  const savedHooks = { ...moduleTable.react };
+  const archivedRows = [
+    {
+      id: 'session-a', title: 'Alpha', createdAt: 10, origin: null,
+      workspaceId: 'ws-1', workspaceTitle: '项目一',
+      tags: ['important'], note: 'keep this', metadataUpdatedAt: '2026-08-18T12:00:00.000Z',
+    },
+    {
+      id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent',
+      workspaceId: 'ws-1', workspaceTitle: '项目一',
+      tags: ['research'], note: '', metadataUpdatedAt: '2026-08-18T12:00:00.000Z',
+    },
+    {
+      id: 'session-c', title: 'Gamma', createdAt: 30, origin: null,
+      workspaceId: 'ws-2', workspaceTitle: '项目二',
+      tags: ['a', 'b', 'c', 'd'], note: '', metadataUpdatedAt: null,
+    },
+  ];
+  const statsFixture = {
+    status: 'ready',
+    summary: { sessionCount: 3, totalBytes: 1536, unavailableCount: 1 },
+    sessions: {
+      'session-a': { sizeBytes: 1024, fileCount: 3, status: 'ready' },
+      'session-b': { sizeBytes: 512, fileCount: 2, status: 'ready' },
+      'session-c': { sizeBytes: null, fileCount: null, status: 'unavailable' },
+    },
+  };
+  const states = [];
+  const effectRecords = [];
+  states[0] = { value: archivedRows, setter: null };
+  states[12] = { value: 'all', setter: null };
+  states[13] = { value: 'ready', setter: null };
+  states[14] = { value: statsFixture, setter: null };
+  states[15] = { value: null, setter: null };
+  states[16] = { value: false, setter: null };
+  const setterAt = (index) => (next) => {
+    states[index].value = typeof next === 'function' ? next(states[index].value) : next;
+  };
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const renderSection = () => {
+    let index = -1;
+    moduleTable.react.useState = (initial) => {
+      index += 1;
+      if (states[index] === undefined) {
+        const value = typeof initial === 'function' ? initial() : initial;
+        states[index] = { value, setter: setterAt(index) };
+      } else if (states[index].setter === null) {
+        states[index].setter = setterAt(index);
+      }
+      return [states[index].value, states[index].setter];
+    };
+    moduleTable.react.useEffect = (effect, deps) => { effectRecords.push({ effect, deps }); };
+    moduleTable.react.useMemo = (fn) => fn();
+    moduleTable.react.useCallback = (fn) => fn;
+    moduleTable.react.useRef = (value) => ({ current: value });
+    return clientCalls.slotRegister[0].component({ t, refreshSidebar: () => {} });
+  };
+  const isRow = (el) => el.props?.className === 'dac-row' || el.props?.className === 'dac-row dac-selected';
+  const editButtonsIn = (root) => collectElements(root).filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
+
+  let tree = renderSection();
+  let elements = collectElements(tree);
+  const summary = elements.find((el) => el.props?.className === 'dac-summary');
+  assert(summary !== undefined, 'summary strip rendered below the title');
+  assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
+  assert(elementText(summary).includes('1.5 KB'), 'summary reports the measured total size');
+  assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
+
+  const tagSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '全部标签');
+  assert(tagSelect !== undefined, 'tag filter select rendered');
+  assert(tagSelect?.props.value === 'all', 'tag filter defaults to all tags');
+
+  const chips = elements.filter((el) => el.props?.className === 'dac-chip');
+  assert(chips.length === 5, `rows render at most three chips each (got ${chips.length})`);
+  const moreChips = elements.filter((el) => el.props?.className === 'dac-chip dac-chip-more');
+  assert(moreChips.map((el) => elementText(el)).join(',') === '+1', 'overflow tags collapse into a +N indicator');
+
+  const rows = elements.filter(isRow);
+  const alphaRow = rows.find((row) => elementText(row).includes('Alpha'));
+  assert(alphaRow !== undefined && elementText(alphaRow).includes('1 KB'), 'per-row formatted size rendered');
+  const gammaRow = rows.find((row) => elementText(row).includes('Gamma'));
+  assert(gammaRow !== undefined && elementText(gammaRow).includes('—'), 'unavailable session size renders the dash');
+
+  const alphaEdit = editButtonsIn(alphaRow)[0];
+  assert(alphaEdit !== undefined, 'row exposes a metadata edit action');
+  assert(alphaEdit?.props.disabled !== true, 'edit action enabled when metadata is ready');
+  alphaEdit.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+
+  const dialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-modal'] === 'true');
+  assert(dialog !== undefined, 'metadata editor opens an accessible dialog');
+  assert(dialog?.props['aria-labelledby'] === 'dac-meta-title', 'dialog title is labelled');
+  assert(dialog?.props['aria-describedby'] === 'dac-meta-limits', 'dialog limits are described');
+  const tagInput = elements.find((el) => el.props?.id === 'dac-meta-tags');
+  const noteTextarea = elements.find((el) => el.props?.id === 'dac-meta-note');
+  assert(tagInput?.props.type === 'text' && tagInput?.props.value === 'important', 'tag input prefilled from the row');
+  assert(noteTextarea !== undefined && noteTextarea?.props.value === 'keep this', 'note textarea prefilled from the row');
+
+  const requests = [];
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return {
+      ok: true, status: 200,
+      json: async () => ({ ok: true, metadata: { tags: ['important'], note: 'keep this', updatedAt: '2026-08-18T12:00:00.000Z' } }),
+    };
+  };
+  const saveButton = elements.find((el) => el.type === 'button' && elementText(el) === '保存');
+  assert(saveButton?.props.disabled !== true, 'save enabled with valid input');
+  await saveButton?.props.onClick();
+  assert(requests[0]?.url === '/plugins/dsh-archived-chats/metadata', 'metadata save targets the guarded route');
+  assert(requests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'metadata save sends the guard header');
+  assert(
+    JSON.stringify(JSON.parse(requests[0]?.options.body ?? '{}')) === JSON.stringify({ sessionId: 'session-a', tags: ['important'], note: 'keep this' }),
+    'metadata save sends normalized tags and note',
+  );
+
+  // A rejected save keeps the dialog open with the typed values.
+  const betaRow = rows.find((row) => elementText(row).includes('Beta'));
+  editButtonsIn(betaRow)[0].props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({ error: 'metadata-save-failed', message: 'boom' }) });
+  const betaNote = elements.find((el) => el.props?.id === 'dac-meta-note');
+  betaNote.props.onChange({ target: { value: 'typed note' } });
+  tree = renderSection();
+  elements = collectElements(tree);
+  await elements.find((el) => el.type === 'button' && elementText(el) === '保存')?.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  const dialogAfterFailure = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-modal'] === 'true');
+  assert(dialogAfterFailure !== undefined, 'failed save keeps the dialog open');
+  assert(elements.find((el) => el.props?.id === 'dac-meta-note')?.props.value === 'typed note', 'failed save preserves typed note text');
+  globalThis.fetch = savedFetch;
+
+  // Unavailable metadata disables only metadata editing and shows a warning.
+  states[13].value = 'unavailable';
+  states[15].value = null;
+  tree = renderSection();
+  elements = collectElements(tree);
+  const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
+  assert(disabledEdits.length === 3 && disabledEdits.every((el) => el.props?.disabled === true), 'metadata edit disabled when metadata is unavailable');
+  assert(elements.find((el) => el.props?.className === 'dac-warn') !== undefined, 'unavailable metadata shows a warning');
+  assert(elements.filter(isRow).length === 3, 'unavailable metadata keeps all rows listed');
+
+  // Statistics failure never removes rows or lifecycle actions.
+  states[14].value = { status: 'error', summary: null, sessions: {} };
+  states[13].value = 'ready';
+  tree = renderSection();
+  elements = collectElements(tree);
+  assert(elements.filter(isRow).length === 3, 'statistics failure keeps all rows rendered');
+  assert(elements.filter((el) => el.type === 'button' && elementText(el) === '取消归档').length === 3, 'statistics failure keeps unarchive actions');
+  assert(elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注').every((el) => el.props?.disabled !== true), 'statistics failure keeps metadata editing usable');
+
+  Object.assign(moduleTable.react, savedHooks);
 }
 
 console.log('\n[12] client half — sidebar refresh inject face');
