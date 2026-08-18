@@ -1,5 +1,6 @@
 # Node
 node_modules/
+.worktrees/
 
 # npm 打包产物
 *.tgz
