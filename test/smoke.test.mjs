@@ -958,6 +958,9 @@ function makeElement(tag) {
   const el = {
     tagName: tag.toUpperCase(), id: '', attrs: {}, textContent: '',
     setAttribute(k, v) { this.attrs[k] = v; },
+    children: [],
+    appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    submit() { this.submitted = (this.submitted ?? 0) + 1; },
     remove() { this.removed = true; },
   };
   createdElements.push(el);
@@ -967,7 +970,7 @@ let mockDialogs = [];
 const documentMock = {
   createElement: (tag) => makeElement(tag),
   head: { appendChild: (c) => headChildren.push(c) },
-  body: {},
+  body: { children: [], appendChild(child) { this.children.push(child); child.parentNode = this; return child; } },
   activeElement: null,
   contains: () => true,
   querySelectorAll: (sel) => (sel === '[role="dialog"]' ? mockDialogs : []),
@@ -1104,6 +1107,22 @@ console.log('\n[10b] client model — sorting and visible selection');
   const cleanupUnrelatedPage = clientExports.__test.markArchiveDialog?.(unrelatedPage);
   cleanupUnrelatedPage?.();
   assert(unrelatedAttrs.size === 0, 'archive host adaptation ignores content outside a settings dialog');
+
+  const formsBefore = createdElements.filter((element) => element.tagName === 'FORM').length;
+  const submitted = clientExports.__test.submitExport?.(['session-b', 'session-a', 'session-b']);
+  const forms = createdElements.filter((element) => element.tagName === 'FORM');
+  const exportForm = forms.at(-1);
+  const exportInput = exportForm?.children.find((element) => element.tagName === 'INPUT');
+  assert(submitted === true && forms.length === formsBefore + 1, 'export form helper accepts a non-empty selection');
+  assert(exportForm?.method === 'POST', 'export form uses POST');
+  assert(exportForm?.action === '/plugins/dsh-archived-chats/export', 'export form targets the archive export route');
+  assert(exportForm?.hidden === true, 'export form stays hidden');
+  assert(exportInput?.name === 'sessionIds', 'export form names the sessionIds field');
+  assert(exportInput?.value === '["session-b","session-a"]', 'export form preserves first-seen id order');
+  assert(exportForm?.submitted === 1 && exportForm?.removed !== true, 'export form submits before cleanup');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(exportForm?.removed === true, 'export form is removed on the next task');
+  assert(clientExports.__test.submitExport?.([]) === false, 'export form rejects an empty selection');
 }
 
 console.log('\n[11] client half — settings section registration');
@@ -1117,6 +1136,8 @@ console.log('\n[11] client half — settings section registration');
   assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'confirm copy matches CodeX (title)');
   assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'confirm copy matches CodeX (body)');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
+  assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
+  assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
   assert(clientCalls.slotRegister.length === 1, `exactly one slot registration (got ${clientCalls.slotRegister.length})`);
   const meta = clientCalls.slotRegister[0].meta;
   assert(meta.name === 'settings.section', 'registration targets settings.section');
@@ -1323,7 +1344,15 @@ console.log('\n[11b] client half — bulk selection workflow');
 
   const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
   assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
-  assert(elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('删除') && elementText(bulkBar).includes('清除'), 'bulk bar exposes unarchive, delete, and clear actions');
+  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('删除') && elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, delete, and clear actions');
+
+  const formsBeforeExport = createdElements.filter((element) => element.tagName === 'FORM').length;
+  const bulkExport = collectElements(bulkBar).find((el) => el.type === 'button' && elementText(el) === '导出选中项');
+  bulkExport?.props.onClick();
+  const bulkExportForms = createdElements.filter((element) => element.tagName === 'FORM');
+  const bulkExportInput = bulkExportForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
+  assert(bulkExport?.props.disabled !== true, 'selected export is enabled when the selected scope is idle');
+  assert(bulkExportForms.length === formsBeforeExport + 1 && bulkExportInput?.value === '["session-a"]', 'selected export submits ids in archive-list order');
 
   const requests = [];
   const savedFetch = globalThis.fetch;
@@ -1439,6 +1468,19 @@ console.log('\n[11c] client half — archive insights UI');
 
   let tree = renderSection();
   let elements = collectElements(tree);
+  const exportAll = elements.find((el) => el.type === 'button' && elementText(el) === '全部导出');
+  assert(exportAll !== undefined && exportAll.props.disabled !== true, 'top actions expose export all for a non-empty idle archive');
+  const formsBeforeAll = createdElements.filter((element) => element.tagName === 'FORM').length;
+  exportAll?.props.onClick();
+  const allForms = createdElements.filter((element) => element.tagName === 'FORM');
+  const allInput = allForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
+  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'export all submits archive-list order');
+  tree = renderSection();
+  elements = collectElements(tree);
+  assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
+  states[9].value = null;
+  tree = renderSection();
+  elements = collectElements(tree);
   const summary = elements.find((el) => el.props?.className === 'dac-summary');
   assert(summary !== undefined, 'summary strip rendered below the title');
   assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
@@ -1469,6 +1511,17 @@ console.log('\n[11c] client half — archive insights UI');
   assert(alphaRow !== undefined && elementText(alphaRow).includes('1 KB'), 'per-row formatted size rendered');
   const gammaRow = rows.find((row) => elementText(row).includes('Gamma'));
   assert(gammaRow !== undefined && elementText(gammaRow).includes('—'), 'unavailable session size renders the dash');
+
+  const alphaExport = collectElements(alphaRow).find((el) => el.type === 'button' && el.props?.['aria-label'] === '导出备份');
+  const formsBeforeRow = createdElements.filter((element) => element.tagName === 'FORM').length;
+  alphaExport?.props.onClick();
+  const rowForms = createdElements.filter((element) => element.tagName === 'FORM');
+  const rowInput = rowForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
+  assert(alphaExport !== undefined && alphaExport.props.disabled !== true, 'each idle row exposes an enabled export icon');
+  assert(rowForms.length === formsBeforeRow + 1 && rowInput?.value === '["session-a"]', 'row export submits exactly that session');
+  const styleText = headChildren.find((child) => child.id === 'dsh-archived-chats-css')?.textContent ?? '';
+  assert(styleText.includes('.dac-iconbtn{') && styleText.includes('width:28px;height:28px'), 'row icon dimensions remain stable');
+  assert(styleText.includes('.dac-bulk-actions{width:100%;flex-wrap:wrap}'), 'narrow bulk export actions wrap without overlap');
 
   const alphaEdit = editButtonsIn(alphaRow)[0];
   assert(alphaEdit !== undefined, 'row exposes a metadata edit action');
