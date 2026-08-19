@@ -990,6 +990,24 @@ console.log('\n[10b] client model — sorting and visible selection');
   ) === true, 'search includes tags');
   assert(clientExports.__test.filterByTag({ tags: ['Important'] }, 'important') === true, 'tag filter is case-insensitive');
   assert(clientExports.__test.filterByTag({ tags: ['other'] }, 'all') === false, 'literal all filters instead of acting as the no-filter sentinel');
+
+  const dialogAttrs = new Map();
+  const responsiveDialog = {
+    setAttribute: (name, value) => dialogAttrs.set(name, String(value)),
+    getAttribute: (name) => dialogAttrs.get(name) ?? null,
+    removeAttribute: (name) => dialogAttrs.delete(name),
+  };
+  const archivePage = { closest: (selector) => selector === '[role="dialog"]' ? responsiveDialog : null };
+  const cleanupResponsiveDialog = clientExports.__test.markArchiveDialog?.(archivePage);
+  assert(dialogAttrs.get('data-dac-section-active') === '1', 'archive page marks only its host settings dialog for narrow-screen layout');
+  cleanupResponsiveDialog?.();
+  assert(!dialogAttrs.has('data-dac-section-active'), 'archive page removes the host layout marker when it unmounts');
+
+  const unrelatedAttrs = new Map();
+  const unrelatedPage = { closest: () => null };
+  const cleanupUnrelatedPage = clientExports.__test.markArchiveDialog?.(unrelatedPage);
+  cleanupUnrelatedPage?.();
+  assert(unrelatedAttrs.size === 0, 'archive host adaptation ignores content outside a settings dialog');
 }
 
 console.log('\n[11] client half — settings section registration');
