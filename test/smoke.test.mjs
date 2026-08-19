@@ -1345,6 +1345,7 @@ console.log('\n[11b] client half — bulk selection workflow');
   const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
   assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
   assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('删除') && elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, delete, and clear actions');
+  assert(!elements.some((el) => el.type === 'button' && elementText(el) === '全部导出'), 'top-level export all is hidden while the selection bar is active');
 
   const formsBeforeExport = createdElements.filter((element) => element.tagName === 'FORM').length;
   const bulkExport = collectElements(bulkBar).find((el) => el.type === 'button' && elementText(el) === '导出选中项');
