@@ -16,7 +16,7 @@ Restart DSH once after installing, then open **Settings → Archived Chats**.
 
 ## Compatibility
 
-Version 0.6.0 is tested against DeepSeek Harness `0.1.0-rc.7`. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
+Version 0.7.0 is tested against DeepSeek Harness `0.1.0-rc.7`. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
 
 ## Features
 
@@ -24,7 +24,8 @@ Version 0.6.0 is tested against DeepSeek Harness `0.1.0-rc.7`. The plugin regist
 - **Search and sort** by title, workspace title, tags, and note text; filter by type (all / regular / subagent), project, and tag; then order results by newest, oldest, or title.
 - **Tags and notes**: open an editor from any row to attach up to 8 tags (24 Unicode characters each) and a note (2,000 Unicode characters). Tag chips render per row, overflowing past three into a `+N` indicator, and the tag filter narrows the list case-insensitively.
 - **Storage insights**: a summary strip reports the archived count, total measured size, and how many sessions could not be measured; each row shows its own size. Measurement never follows symbolic links and skips sessions whose directories are unreadable.
-- **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can unarchive or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
+- **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
+- **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
 - Sessions still resident in the background are **deleted in place too**: the plugin disposes the session through the official lifecycle teardown order (cancel → quiesce → flush → fiber teardown → registry detach), the persistence layer releases the write path, and the physical delete completes within the same request — no restart. If the running DSH build does not expose the required internal seams, the plugin falls back to "park permanently + delete on the next start", with parked sessions staying hidden meanwhile.
@@ -34,9 +35,24 @@ Version 0.6.0 is tested against DeepSeek Harness `0.1.0-rc.7`. The plugin regist
 
 Tags and notes live **only on your machine** in `$DSH_HOME/plugin-data/archived-chats/metadata.json` — they are never uploaded, synced, or sent anywhere else. Unarchiving a session keeps its metadata; a completed physical deletion removes it, while a deferred or failed deletion keeps it intact. Metadata and statistics failures are always non-blocking: the list, unarchive, and deletion keep working even when the metadata store is unreadable or a session directory cannot be measured.
 
+## Export and backup
+
+Every export is a local browser download. A single session and a batch use the same ZIP format:
+
+```text
+manifest.json
+sessions/001-<safe-title>-<id>/session.json
+sessions/001-<safe-title>-<id>/transcript.md
+```
+
+`session.json` is the authoritative backup record: it contains the complete metadata and event values returned by Harness persistence plus the archive title, workspace, timestamps, origin, tags, note, and storage facts. `transcript.md` is a readable companion derived with Harness's canonical message projection. ZIP paths are sanitized and collision-safe, and batches are generated one session at a time instead of buffering every transcript together.
+
+Attachment references remain in JSON, but **attachment bytes and descendant sessions are not included**. Use Harness's official Session log export when you need its attachment-complete conversation-tree package. Version 0.7.0 exports only; validated import/restore and conflict handling are planned for 0.8.0.
+
 ## How it works
 
-- **Host half** (`lib/index.js`) registers the `/plugins/dsh-archived-chats/*` routes on the DSH web server: `GET /state`, `GET /stats`, `POST /metadata`, `POST /unarchive`, `POST /unarchive-all`, `POST /delete`, `POST /delete-all`. `/state` joins tags, notes, and `metadataUpdatedAt` onto every row and reports `metadataStatus`; `/stats` returns per-session byte/file totals and a summary. Unarchiving writes through the workspace registry's own state path, so every connected client receives the `host/archived-sessions-changed` push. Mutating routes require a custom `x-dsh-archived-chats: 1` header as CSRF hardening.
+- **Host half** (`lib/index.js`) registers the `/plugins/dsh-archived-chats/*` routes on the DSH web server: `GET /state`, `GET /stats`, `POST /export`, `POST /metadata`, `POST /unarchive`, `POST /unarchive-all`, `POST /delete`, `POST /delete-all`. `/state` joins tags, notes, and `metadataUpdatedAt` onto every row; `/stats` returns byte/file totals; `/export` streams a ZIP response from a bounded native-form request. Unarchiving writes through the workspace registry's own state path, so every connected client receives the `host/archived-sessions-changed` push. Mutating routes require a custom `x-dsh-archived-chats: 1` header as CSRF hardening; read-only export does not mutate plugin or Harness state.
+- **Export writer** (`lib/export.js`): owns format-versioned records, safe filenames, Harness transcript projection, and sequential ZIP entries. It preflights the first session before response headers and keeps at most one inspected session payload during a batch.
 - **Metadata store** (`lib/metadata.js`): a versioned, atomic JSON store. Writes serialize through a queue and replace the file via a temp-file rename, so simultaneous saves cannot interleave; unreadable or unsupported files are never overwritten.
 - **Storage statistics** (`lib/stats.js`): measures session directories at concurrency 4, skips symbolic links, caches results for 30 seconds, and reports unavailable rows instead of failing the request. Delete invalidates the cached row.
 - **In-place live deletion**: deleting a resident session replays the agent factory's own disposer sequence — `cancel({ kind: 'disposed' })` → `whenIdle` → `flush` → `agent.scope.dispose()` → detach of the `agents` and `sessions` store entries. The session detach emits `session/disposed`, the persistence coordinator retires (drains and releases) the write path, and the ordinary cold delete completes in the same request. The store entries are internal surfaces, so every step is feature-detected; anything missing falls back to park-and-defer.
@@ -50,7 +66,7 @@ Tags and notes live **only on your machine** in `$DSH_HOME/plugin-data/archived-
 npm test
 ```
 
-The suite (`test/*.test.mjs`) covers the metadata store, the statistics service, and a host-and-browser smoke test. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
+The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, the metadata store, the statistics service, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Uninstall
 

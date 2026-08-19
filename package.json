@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.6.0",
-  "description": "DeepSeek Harness 已归档会话管理页：标签、备注与存储统计，加上搜索、排序、批量选择、取消归档和删除。An Archived Chats settings page for DeepSeek Harness with tags, notes, storage insights, search, sorting, bulk selection, unarchive, and delete.",
+  "version": "0.7.0",
+  "description": "DeepSeek Harness 已归档会话管理页：JSON/Markdown ZIP 备份、标签、备注、存储统计、搜索、批量操作、取消归档和删除。Archived Chats management with JSON/Markdown ZIP backups, metadata, storage insights, search, bulk actions, unarchive, and delete.",
   "license": "MIT",
   "author": "Ultronen",
   "repository": {
@@ -39,6 +39,7 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
+    "lib/export.js",
     "lib/metadata.js",
     "lib/stats.js",
     "lib/types",
