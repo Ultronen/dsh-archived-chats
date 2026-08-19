@@ -10,6 +10,9 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter, once } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { unzipSync, strFromU8 } from 'fflate';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -52,27 +55,37 @@ function readMetadataStore() {
 
 //#region shared mocks
 function mockReq(method, headers, bodyText) {
-  const cbs = {};
-  const req = { method, headers, on: (event, cb) => { cbs[event] = cb; } };
+  const req = new EventEmitter();
+  req.method = method;
+  req.headers = headers;
   queueMicrotask(() => {
-    if (bodyText !== undefined) cbs.data?.(Buffer.from(bodyText));
-    cbs.end?.();
+    if (bodyText !== undefined) req.emit('data', Buffer.from(bodyText));
+    req.emit('end');
   });
   return req;
 }
 function mockRes() {
-  return {
-    status: 0, headers: {}, body: '',
-    writeHead(s, h) { this.status = s; this.headers = h ?? {}; },
-    end(b) { this.body = b ?? ''; },
-    json() { return JSON.parse(this.body); },
+  const res = new PassThrough();
+  const chunks = [];
+  res.status = 0;
+  res.headers = {};
+  res.writeHead = (status, headers) => {
+    res.status = status;
+    res.headers = headers ?? {};
+    return res;
   };
+  res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+  res.bytes = () => Buffer.concat(chunks);
+  Object.defineProperty(res, 'body', { get: () => res.bytes().toString('utf8') });
+  res.json = () => JSON.parse(res.body);
+  return res;
 }
 async function call(routes, path, req) {
   const handler = routes.get(path);
   if (!handler) throw new Error(`no route registered for ${path}`);
   const res = mockRes();
   await handler(req, res);
+  if (!res.writableFinished) await once(res, 'finish');
   return res;
 }
 async function waitUntil(predicate, timeout = 1000) {
@@ -175,9 +188,80 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 7, `seven routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 8, `eight routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'export', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
+}
+
+console.log('\n[1a] POST /export validation');
+{
+  const path = '/plugins/dsh-archived-chats/export';
+  if (routes.has(path)) {
+    const originalInspect = persistence.inspect;
+    let inspectCalls = 0;
+    persistence.inspect = async (...args) => {
+      inspectCalls += 1;
+      return originalInspect(...args);
+    };
+    const request = (body, method = 'POST') => call(routes, path, mockReq(method, {
+      'content-type': 'application/x-www-form-urlencoded',
+    }, body));
+    const before = inspectCalls;
+    const wrongMethod = await request('sessionIds=%5B%22session-a%22%5D', 'GET');
+    assert(wrongMethod.status === 405, `export rejects non-POST methods (got ${wrongMethod.status})`);
+    const malformed = await request('sessionIds=%5Bbroken');
+    assert(malformed.status === 400, `export rejects malformed selection JSON (got ${malformed.status})`);
+    const empty = await request('sessionIds=%5B%5D');
+    assert(empty.status === 400, `export rejects an empty selection (got ${empty.status})`);
+    const nonString = await request('sessionIds=%5B1%5D');
+    assert(nonString.status === 400, `export rejects non-string ids (got ${nonString.status})`);
+    const tooMany = encodeURIComponent(JSON.stringify(Array.from({ length: 2001 }, (_, index) => `session-${index}`)));
+    const oversizedSelection = await request(`sessionIds=${tooMany}`);
+    assert(oversizedSelection.status === 400, `export rejects more than 2,000 ids (got ${oversizedSelection.status})`);
+    const oversizedBody = await request(`sessionIds=${'x'.repeat(512 * 1024)}`);
+    assert(oversizedBody.status === 413, `export rejects bodies over 512 KiB (got ${oversizedBody.status})`);
+    const invisible = await request(`sessionIds=${encodeURIComponent('["missing-session"]')}`);
+    assert(invisible.status === 404, `export rejects invisible sessions (got ${invisible.status})`);
+    assert(inspectCalls === before, 'invalid export requests never inspect persistence');
+    persistence.inspect = originalInspect;
+  }
+}
+
+console.log('\n[1b] POST /export ZIP downloads');
+{
+  const path = '/plugins/dsh-archived-chats/export';
+  const request = (ids) => call(routes, path, mockReq('POST', {
+    'content-type': 'application/x-www-form-urlencoded',
+  }, `sessionIds=${encodeURIComponent(JSON.stringify(ids))}`));
+
+  const single = await request(['session-a']);
+  assert(single.status === 200, `single export answers 200 (got ${single.status})`);
+  if (single.status === 200) {
+    assert(single.headers['content-type'] === 'application/zip', 'single export uses the ZIP content type');
+    assert(/attachment;/.test(single.headers['content-disposition']), 'single export uses an attachment disposition');
+    assert(/dsh-archived-chat-/.test(single.headers['content-disposition']), 'single export filename identifies one archived chat');
+    assert(single.headers['cache-control'] === 'no-store', 'single export disables response caching');
+    const entries = unzipSync(new Uint8Array(single.bytes()));
+    const manifest = JSON.parse(strFromU8(entries['manifest.json']));
+    assert(manifest.sessionCount === 1, 'single export manifest contains one session');
+    assert(manifest.sessions[0].id === 'session-a', 'single export manifest identifies the requested session');
+    assert(manifest.sessions[0].tags.includes('important'), 'single export manifest includes plugin tags');
+    assert(manifest.sessions[0].note === 'keep this', 'single export manifest includes the plugin note');
+    assert(manifest.sessions[0].storage.status === 'ready', 'single export manifest includes storage status');
+    const record = JSON.parse(strFromU8(entries[manifest.sessions[0].files.json]));
+    assert(record.source.events.some((event) => event.type === 'session/title'), 'single export JSON retains persistence events');
+    assert(strFromU8(entries[manifest.sessions[0].files.markdown]).includes('# 改名后的归档'), 'single export includes a readable Markdown file');
+  }
+
+  const batch = await request(['session-c', 'session-a', 'session-c']);
+  assert(batch.status === 200, `batch export answers 200 (got ${batch.status})`);
+  if (batch.status === 200) {
+    assert(/dsh-archived-chats-2-/.test(batch.headers['content-disposition']), 'batch filename contains the unique session count');
+    const entries = unzipSync(new Uint8Array(batch.bytes()));
+    const manifest = JSON.parse(strFromU8(entries['manifest.json']));
+    assert(JSON.stringify(manifest.sessions.map((session) => session.id)) === JSON.stringify(['session-c', 'session-a']), 'batch export preserves first-seen order and removes duplicates');
+    assert(Object.keys(entries).length === 5, 'batch export contains one manifest and two files per unique session');
+  }
 }
 
 console.log('\n[2] GET /state');
