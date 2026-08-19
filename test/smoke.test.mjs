@@ -804,6 +804,68 @@ console.log('\n[10f] unarchive cannot interleave while a live session is being d
   delete events[id];
 }
 
+console.log('\n[10g] delete rechecks archive state after a queued unarchive commits');
+{
+  const id = 'session-live-unarchive-first';
+  mkdirSync(join(tmp, id), { recursive: true });
+  writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+  const header = { id, createdAt: 1786726900000, cwd: '/ws/one' };
+  headerRows.push(header);
+  events[id] = [];
+  workspaceState.archivedSessionIds.push(id);
+  let releaseState;
+  let markStateEntered;
+  const stateEntered = new Promise((resolve) => { markStateEntered = resolve; });
+  const stateReleased = new Promise((resolve) => { releaseState = resolve; });
+  const originalSetState = registry.setState;
+  registry.setState = async (next) => {
+    markStateEntered();
+    await stateReleased;
+    return originalSetState.call(registry, next);
+  };
+  let cancelCount = 0;
+  const sessionObj = { id, header };
+  const sessionsStore = new Map([[id, {
+    session: sessionObj,
+    detach: () => { sessionsStore.delete(id); },
+  }]]);
+  const agentObj = {
+    cancel: () => { cancelCount += 1; },
+    whenIdle: async () => {},
+    scope: { dispose: async () => {} },
+  };
+  const agentsStore = new Map([[id, { id, agent: agentObj, announcing: false }]]);
+  const originalSessions = services.sessions;
+  services.sessions = {
+    get: (sessionId) => sessionsStore.get(sessionId)?.session,
+    store: sessionsStore,
+    flush: async () => {},
+  };
+  services.agents = {
+    get: (sessionId) => agentsStore.get(sessionId)?.agent,
+    store: agentsStore,
+    detachEntered: (entry) => agentsStore.delete(entry.id),
+  };
+  const unarchivePromise = call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  await waitFor(stateEntered);
+  const deletePromise = call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  releaseState();
+  const [unarchiveResponse, deleteResponse] = await Promise.all([unarchivePromise, deletePromise]);
+  assert(unarchiveResponse.status === 200 && deleteResponse.status === 409, 'queued unarchive wins before the delete lifecycle callback starts');
+  assert(cancelCount === 0 && sessionsStore.has(id) && agentsStore.has(id), 'delete does not dispose a live session after unarchive already removed its archive state');
+  assert(existsSync(join(tmp, id)), 'queued unarchive preserves the live session directory');
+  registry.setState = originalSetState;
+  services.sessions = originalSessions;
+  delete services.agents;
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id);
+  headerRows.splice(headerRows.indexOf(header), 1);
+  delete events[id];
+}
+
 //#region client-half fixture
 const clientSource = readFileSync(join(here, '../lib/client.js'), 'utf8');
 const headChildren = [];
