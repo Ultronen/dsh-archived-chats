@@ -1145,6 +1145,40 @@ function createHookHarness(component) {
   };
 }
 
+console.log('\n[11a] client half — responsive host marker follows the loaded page lifecycle');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => String(url).endsWith('/state')
+      ? { metadataStatus: 'ready', sessions: [] }
+      : { summary: { sessionCount: 0, totalBytes: 0, unavailableCount: 0 }, sessions: {} },
+  });
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const loadedTree = harness.render({ t, refreshSidebar: () => {} });
+  const attrs = new Map();
+  const hostDialog = {
+    setAttribute: (name, value) => attrs.set(name, String(value)),
+    getAttribute: (name) => attrs.get(name) ?? null,
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  loadedTree.props.ref.current = { closest: () => hostDialog };
+  harness.flushEffects();
+  assert(attrs.get('data-dac-section-active') === '1', 'host dialog is marked after the loading state mounts the archive page');
+  harness.unmount();
+  assert(!attrs.has('data-dac-section-active'), 'loaded archive page removes its host marker on unmount');
+
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
 console.log('\n[11b] client half — bulk selection workflow');
 {
   const savedHooks = { ...moduleTable.react };
