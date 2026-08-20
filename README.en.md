@@ -8,7 +8,7 @@ A settings page for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 
 Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds an **Archived Chats** page under Settings where every archived session is visible, searchable, and manageable.
 
-## Install
+## 🚀 Install
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
@@ -112,16 +112,11 @@ On hosts that expose the required lifecycle hooks, deletion tears down the live 
 
 </details>
 
-## How it works
+## Implementation overview
 
-- **Host half** (`lib/index.js`) registers the `/plugins/dsh-archived-chats/*` routes on the DSH web server: `GET /state`, `GET /stats`, `POST /export`, `POST /import/inspect`, `POST /import/restore`, `POST /metadata`, `POST /unarchive`, `POST /unarchive-all`, `POST /delete`, `POST /delete-all`. `/state` joins tags, notes, and `metadataUpdatedAt` onto every row; `/stats` returns byte/file totals; `/export` streams a ZIP response from a bounded native-form request; the import routes validate a bounded multipart ZIP, keep a short-lived single-use preview token, and commit through the feature-detected restore adapter. Unarchiving writes through the workspace registry's own state path, so every connected client receives the `host/archived-sessions-changed` push. Mutating routes require a custom `x-dsh-archived-chats: 1` header as CSRF hardening; read-only export does not mutate plugin or Harness state.
-- **Export writer** (`lib/export.js`): owns format-versioned records, safe filenames, Harness transcript projection, and sequential ZIP entries. It preflights the first session before response headers and keeps at most one inspected session payload during a batch.
-- **Metadata store** (`lib/metadata.js`): a versioned, atomic JSON store. Writes serialize through a queue and replace the file via a temp-file rename, so simultaneous saves cannot interleave; unreadable or unsupported files are never overwritten.
-- **Storage statistics** (`lib/stats.js`): measures session directories at concurrency 4, skips symbolic links, caches results for 30 seconds, and reports unavailable rows instead of failing the request. Delete invalidates the cached row.
-- **In-place live deletion**: deleting a resident session replays the agent factory's own disposer sequence — `cancel({ kind: 'disposed' })` → `whenIdle` → `flush` → `agent.scope.dispose()` → detach of the `agents` and `sessions` store entries. The session detach emits `session/disposed`, the persistence coordinator retires (drains and releases) the write path, and the ordinary cold delete completes in the same request. The store entries are internal surfaces, so every step is feature-detected; anything missing falls back to park-and-defer.
-- **Pending-deletion store** (fallback path and crash bracket): the id is recorded in `$DSH_HOME/plugin-data/archived-chats/pending-deletions.json` while the session stays archived and hidden; the next boot sweeps the queue through the ordinary delete path. In-place deletes are bracketed by the same store (recorded before disposal, cleared once the files are gone), so a crash mid-delete is completed on the next start. Parked sessions are excluded from the listing; unarchiving cancels a pending deletion.
-- **Title cache**: resolved titles are memoized per id across list refreshes instead of re-reading every archived log; delete and unarchive invalidate their entries.
-- **Browser half** (`lib/client.js`) registers a `settings.section` slot entry (order 30) and renders the page with React and the rc.7 DSH overlay/state design tokens.
+The plugin has two halves: the Host service reads and mutates local archive data, while the browser settings page provides search, filtering, backup, and restore actions. Mutations go through guarded local routes; imports are previewed before writing, and live deletion uses the safest lifecycle path available on the host before falling back to next-boot cleanup.
+
+User-facing storage, backup limits, deletion outcomes, and compatibility notes stay in this README. Maintainer details such as route contracts, data flow, restore transactions, live-deletion lifecycle, and failure fallbacks are documented in [ARCHITECTURE.md](docs/ARCHITECTURE.en.md).
 
 ## Development
 

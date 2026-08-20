@@ -8,7 +8,7 @@
 
 在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「已归档的聊天」页面，让所有归档会话都可见、可搜索、可管理。
 
-## 安装
+## 🚀 安装
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
@@ -112,16 +112,11 @@ JSON 会保留附件引用，但**本版不复制附件二进制，也不包含�
 
 </details>
 
-## 实现原理
+## 实现概览
 
-- **Host 半**（`lib/index.js`）在 DSH Web 服务器上注册 `/plugins/dsh-archived-chats/*` 路由：`GET /state`、`GET /stats`、`POST /export`、`POST /import/inspect`、`POST /import/restore`、`POST /metadata`、`POST /unarchive`、`POST /unarchive-all`、`POST /delete`、`POST /delete-all`。`/state` 拼接标签与备注，`/stats` 返回字节数/文件数，`/export` 从有界的原生表单请求流式返回 ZIP；导入路由对 multipart ZIP 做有界校验，使用短期一次性预览令牌，并通过能力探测的恢复适配器提交。取消归档走 workspace registry 自身的状态写入通道，所有已连接的客户端都会收到 `host/archived-sessions-changed` 推送。会改变状态的路由要求 `x-dsh-archived-chats: 1` 作为 CSRF 加固；只读导出不会修改插件或 Harness 状态。
-- **导出生成器**（`lib/export.js`）：负责带版本的备份记录、安全文件名、Harness 对话投影和顺序 ZIP 条目。首个会话会在发送响应头前预检，批量过程中最多保留一个已检查会话的载荷。
-- **元数据存储**（`lib/metadata.js`）：带版本号的原子 JSON 存储。写入通过队列串行化，并以临时文件重命名的方式替换原文件，因此并发保存不会互相交叠；无法读取或不支持的版本绝不被覆盖。
-- **存储统计**（`lib/stats.js`）：以并发 4 测量会话目录，跳过符号链接，结果缓存 30 秒，无法统计的会话上报为「不可用」而不是让请求失败。删除会使对应缓存失效。
-- **活会话原地删除**：删除仍驻留后台的会话时，插件复刻 agent 工厂自身 disposer 的顺序——`cancel({ kind: 'disposed' })` → `whenIdle` → `flush` → `agent.scope.dispose()` → 依次 detach `agents` 与 `sessions` 两个 store 条目；session detach 发出 `session/disposed`，持久化协调器随之 retire（排空并释放）该会话的写入通道，之后冷删除路径在同一请求内完成。所涉 store 条目属于内部接口，每一步都做特性探测，探测失败即回退为停用+延后。
-- **待删队列**（回退路径与崩溃兜底）：id 记入 `$DSH_HOME/plugin-data/archived-chats/pending-deletions.json`，会话保持归档与隐藏；下次启动时插件清扫该队列，通过常规删除路径完成物理删除。原地删除也用该队列包裹（删除前登记、文件移除后清除），中途崩溃由下次启动补完。已入队的会话不会出现在列表中；取消归档会撤销待删标记。
-- **标题缓存**：列表刷新时按 id 记忆已解析的标题，不再每次全量读日志；删除与取消归档会使对应缓存失效。
-- **浏览器半**（`lib/client.js`）注册 `settings.section` 插槽项（order 30），用 React 和 rc.7 的 DSH 浮层/状态设计令牌渲染页面。
+插件由两部分组成：Host 服务层负责读取和修改本地归档数据，浏览器设置页负责搜索、筛选、备份和恢复操作。所有修改都通过受保护的本地路由完成；导入会先预览，删除会优先尝试安全的生命周期拆除，能力不足时回退到下次启动处理。
+
+普通用户需要了解的数据保存、备份限制、删除结果和兼容性说明已列在本 README 中。路由清单、数据流、恢复事务、实时删除生命周期和失败回退等维护者细节请参阅 [架构文档](docs/ARCHITECTURE.md)。
 
 ## 开发
 
