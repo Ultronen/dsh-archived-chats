@@ -68,3 +68,32 @@ test('exports deterministic transcript JSONL and identifies handoff limitations'
   assert.ok(first.report.warnings.some((warning) => warning.code === 'transcript-handoff'));
   assert.ok(first.report.warnings.some((warning) => warning.code === 'attachments-not-included'));
 });
+
+test('reserves explicit call IDs before generating fallback IDs and preserves empty messages', () => {
+  const result = exportCodexJsonl({
+    id: 'collision-session',
+    messages: [
+      { role: 'assistant', content: '', toolCall: { name: 'first', arguments: {} }, toolCallId: 'call-1' },
+      { role: 'tool', content: 'result-with-generated-id' },
+      { role: 'user', content: '' },
+    ],
+  });
+  const records = new TextDecoder().decode(result.bytes).trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(records.slice(1).map((record) => record.payload.type), ['function_call', 'function_call_output', 'message']);
+  assert.equal(records[1].payload.call_id, 'call-1');
+  assert.equal(records[2].payload.call_id, 'call-2');
+  assert.equal(records[3].payload.content[0].text, '');
+});
+
+test('reports malformed session metadata with line and session context', () => {
+  const input = [
+    JSON.stringify({ type: 'session_meta', payload: null }),
+    JSON.stringify({ type: 'session_meta', payload: {} }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'still grouped' } }),
+  ].join('\n');
+  const result = inspectCodexJsonl(input);
+  const malformed = result.report.losses.filter((item) => item.code === 'record-invalid');
+  assert.equal(malformed.length, 2);
+  assert.deepEqual(malformed.map((item) => item.line), [1, 2]);
+  assert.ok(malformed.every((item) => item.sessionId === 'session-1'));
+});
