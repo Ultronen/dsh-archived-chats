@@ -77,3 +77,16 @@ test('reports unsupported roles and invalid inputs without throwing', () => {
   assert.ok(result.report.losses.some((item) => item.code === 'unsupported-message-role'));
   assert.deepEqual(inspectClaudeJsonl({}).sessions, []);
 });
+
+test('maps top-level Claude tool events and accepts an unterminated final JSONL line', () => {
+  const input = [
+    JSON.stringify({ type: 'tool_use', sessionId: 'top-level-tools', id: 'toolu-top', name: 'Bash', input: { command: 'pwd' } }),
+    JSON.stringify({ type: 'tool_result', sessionId: 'top-level-tools', tool_use_id: 'toolu-top', content: 'done' }),
+  ].join('\n');
+  const result = inspectClaudeJsonl(input);
+  assert.deepEqual(result.sessions[0].messages.map(({ role, toolCallId, content }) => ({ role, toolCallId, content })), [
+    { role: 'assistant', toolCallId: 'toolu-top', content: '' },
+    { role: 'tool', toolCallId: 'toolu-top', content: 'done' },
+  ]);
+  assert.ok(!result.report.losses.some((item) => item.code === 'line-count-bounded'));
+});
