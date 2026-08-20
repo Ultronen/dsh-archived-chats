@@ -1235,6 +1235,10 @@ console.log('\n[11] client half — settings section registration');
   assert(style?.attrs['data-plugin-css'] === 'dsh-archived-chats', 'stylesheet carries the data-plugin-css marker');
   assert(style?.textContent.includes('.dac-row'), 'stylesheet paints the chat rows');
   assert(
+    /\.dac-title\{[^}]*flex:none[^}]*white-space:nowrap[^}]*\}/u.test(style?.textContent ?? ''),
+    'page title stays on one line when header actions wrap',
+  );
+  assert(
     style?.textContent.includes('background:var(--dsw-specific-menu)')
       && style?.textContent.includes('border:1px solid var(--dsw-alias-border-inverted)')
       && style?.textContent.includes('box-shadow:var(--dsw-shadow-lv3)'),
