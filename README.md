@@ -149,6 +149,11 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 - Added tags, notes, storage statistics, metadata persistence, and the archive insights UI.
 - Hardened live deletion and added fallback handling for hosts that do not expose the internal lifecycle hooks.
 
+### 0.5.1
+
+- Published a compatibility-focused patch release for DeepSeek Harness `0.1.0-rc.7`.
+- Updated the browser settings section to use the rc.7 overlay and state design tokens.
+
 ### 0.5.0
 
 - Added bulk selection and bulk unarchive/delete workflows.
@@ -164,6 +169,10 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 - First published release of the Archived Chats settings page.
 - Added workspace-grouped browsing, title search, type/project filters, unarchive, and confirmed single/group/all deletion.
 - Added host routes, the browser settings section, and the pending-deletion sweep for live sessions.
+
+### 0.1.0 and 0.2.0
+
+- These versions were never published to npm and have no repository tags. `0.3.0` is the first public release.
 
 ## Uninstall
 
