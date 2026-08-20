@@ -99,6 +99,29 @@ test('produces stable SHA-256 values without mutating source objects', () => {
   assert.equal(validateInteropManifest(first).ok, true);
 });
 
+test('locks the SHA-256 digest for the canonical wire manifest', () => {
+  assert.equal(
+    manifest().sha256,
+    '446512aadd5c125a881f8d5344f8adba6978f42c53ea4aab32522e8849f4dcc5',
+  );
+});
+
+test('bounds digest traversal for deeply nested known values and ignores extensions', () => {
+  let deep = { leaf: 'x' };
+  for (let index = 0; index < 100; index += 1) deep = { nested: deep };
+
+  const knownValue = manifest();
+  knownValue.sessions[0].messages[0].content = [deep];
+  const bounded = validateInteropManifest(knownValue);
+  assert.equal(bounded.ok, false);
+  assert.ok(bounded.errors.some((item) => item.code === 'manifest-bounded'));
+
+  const extensionValue = manifest();
+  extensionValue.extension = deep;
+  assert.doesNotThrow(() => validateInteropManifest(extensionValue));
+  assert.equal(validateInteropManifest(extensionValue).ok, true);
+});
+
 test('never throws when validating untrusted values', () => {
   for (const value of [null, undefined, 1, 'text', [], { sessions: null }, { get format() { throw new Error('boom'); } }]) {
     assert.doesNotThrow(() => validateInteropManifest(value));
