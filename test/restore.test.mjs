@@ -96,3 +96,16 @@ test('commit failure rolls back persistence, metadata, archive state, and stagin
   assert.deepEqual(await readdir(f.root), []);
   await rm(f.root, { recursive: true, force: true });
 });
+
+test('restore reports warnings for missing workspaces and attachment references', async () => {
+  const f = await fixture();
+  const record = item('missing-workspace', 'ws-missing');
+  record.hasAttachmentReferences = true;
+  const adapter = createRestoreAdapter({ persistence: f.persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  const tx = await adapter.prepare([record], { knownIds: new Set() });
+  await tx.stage(record);
+  const result = await tx.commit();
+  assert.ok(result.warnings.some((warning) => warning.id === 'missing-workspace' && warning.reason === 'workspace-unresolved'));
+  assert.ok(result.warnings.some((warning) => warning.id === 'missing-workspace' && warning.reason === 'attachments-not-included'));
+  await rm(f.root, { recursive: true, force: true });
+});

@@ -16,7 +16,19 @@ dsh plugin --profile web add dsh-archived-chats
 
 ## 兼容性
 
-0.7.0 版本以 DeepSeek Harness `0.1.0-rc.7` 为验证基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
+0.8.0 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件；同时已在 Harness `0.1.0-rc.8` 上完成真实宿主页面复核，覆盖归档列表、搜索、元数据编辑、批量操作、分组操作和导入预览。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
+
+## 截图
+
+以下截图来自当前 `0.8.0` 构建，并在本地 DeepSeek Harness Web profile 中实际操作生成。
+
+![已归档的聊天总览](assets/screenshots/1-archived-chats.png)
+![搜索与筛选](assets/screenshots/2-search.png)
+![删除确认](assets/screenshots/3-delete-confirm.png)
+![分组操作](assets/screenshots/4-group-menu.png)
+![标签与备注编辑](assets/screenshots/5-metadata-editor.png)
+![批量操作](assets/screenshots/6-bulk-actions.png)
+![导入预览](assets/screenshots/7-import-preview.png)
 
 ## 功能
 
@@ -25,6 +37,7 @@ dsh plugin --profile web add dsh-archived-chats
 - **标签与备注**：任意行打开编辑器即可添加最多 8 个标签（每个最多 24 个 Unicode 字符）和一条备注（最多 2,000 个 Unicode 字符）。每行渲染标签小徽章，超过 3 个折叠为 `+N`，标签筛选不区分大小写。
 - **存储统计**：概览条显示归档数量、已统计总大小与无法统计的会话数；每行显示各自占用。统计不会跟随符号链接，无法读取的会话目录显示为「无法统计」而非让请求失败。
 - **JSON + Markdown 备份**：可导出单条、当前选中项或全部归档会话。每个 ZIP 都包含带版本的清单、用于机器恢复的完整会话 JSON，以及方便阅读的 Markdown 对话稿。
+- **预览后导入与恢复**：选择 ZIP 备份后先检查全部会话，默认选中无冲突 ID 的项目，确认后作为已归档聊天恢复。已有 ID 会跳过，绝不会覆盖。
 - **灵活多选**：逐条选择、选择当前筛选结果或选择整个项目；选中后可一次导出、取消归档或永久删除，隐藏在其他筛选结果中的选择不会丢失。
 - **取消归档**单个聊天，或从分组的 `⋯` 菜单整组取消——恢复的聊天会立刻回到侧边栏。
 - **删除**单个聊天、某个项目分组或全部（**全部删除**），均有确认弹窗。删除是彻底的：会话日志从磁盘移除、从工作区记录中摘除、注册表内存索引同步清理，主侧边栏的条目也会立即消失。
@@ -47,11 +60,15 @@ sessions/001-<安全标题>-<id>/transcript.md
 
 `session.json` 是权威备份记录：原样保存 Harness 持久层返回的完整元数据和事件，并附带归档标题、工作区、时间、来源、标签、备注和存储统计。`transcript.md` 是通过 Harness 官方消息投影生成的可读副本。ZIP 路径会净化并处理重名，批量导出逐个会话生成，不会同时把所有会话内容堆进内存。
 
-JSON 会保留附件引用，但**本版不复制附件二进制，也不包含子会话**。需要带完整附件的会话树时，请使用 Harness 官方的 Session log 导出。0.7.0 只负责导出；经过校验的导入/恢复与冲突策略留到 0.8.0。
+JSON 会保留附件引用，但**本版不复制附件二进制，也不包含子会话**。需要带完整附件的会话树时，请使用 Harness 官方的 Session log 导出。
+
+## 导入与恢复
+
+导入只接受本插件版本一的导出 ZIP。浏览器会先上传并进行有界校验，然后展示标题、项目、标签、备注、存储信息、ID 冲突、项目不存在警告和附件引用警告；预览不会渲染原始事件或 Markdown。已有会话 ID 会被禁用并跳过，找不到的项目会恢复为未分组。确认令牌 10 分钟后过期且只能使用一次。标签和备注通过现有本地元数据限制恢复，不会恢复附件二进制。宿主没有可用的 Harness 写入能力时返回 `restore-unsupported`，不会写入任何数据。
 
 ## 实现原理
 
-- **Host 半**（`lib/index.js`）在 DSH Web 服务器上注册 `/plugins/dsh-archived-chats/*` 路由：`GET /state`、`GET /stats`、`POST /export`、`POST /metadata`、`POST /unarchive`、`POST /unarchive-all`、`POST /delete`、`POST /delete-all`。`/state` 拼接标签与备注，`/stats` 返回字节数/文件数，`/export` 从有界的原生表单请求流式返回 ZIP。取消归档走 workspace registry 自身的状态写入通道，所有已连接的客户端都会收到 `host/archived-sessions-changed` 推送。会改变状态的路由要求 `x-dsh-archived-chats: 1` 作为 CSRF 加固；只读导出不会修改插件或 Harness 状态。
+- **Host 半**（`lib/index.js`）在 DSH Web 服务器上注册 `/plugins/dsh-archived-chats/*` 路由：`GET /state`、`GET /stats`、`POST /export`、`POST /import/inspect`、`POST /import/restore`、`POST /metadata`、`POST /unarchive`、`POST /unarchive-all`、`POST /delete`、`POST /delete-all`。`/state` 拼接标签与备注，`/stats` 返回字节数/文件数，`/export` 从有界的原生表单请求流式返回 ZIP；导入路由对 multipart ZIP 做有界校验，使用短期一次性预览令牌，并通过能力探测的恢复适配器提交。取消归档走 workspace registry 自身的状态写入通道，所有已连接的客户端都会收到 `host/archived-sessions-changed` 推送。会改变状态的路由要求 `x-dsh-archived-chats: 1` 作为 CSRF 加固；只读导出不会修改插件或 Harness 状态。
 - **导出生成器**（`lib/export.js`）：负责带版本的备份记录、安全文件名、Harness 对话投影和顺序 ZIP 条目。首个会话会在发送响应头前预检，批量过程中最多保留一个已检查会话的载荷。
 - **元数据存储**（`lib/metadata.js`）：带版本号的原子 JSON 存储。写入通过队列串行化，并以临时文件重命名的方式替换原文件，因此并发保存不会互相交叠；无法读取或不支持的版本绝不被覆盖。
 - **存储统计**（`lib/stats.js`）：以并发 4 测量会话目录，跳过符号链接，结果缓存 30 秒，无法统计的会话上报为「不可用」而不是让请求失败。删除会使对应缓存失效。
@@ -66,7 +83,7 @@ JSON 会保留附件引用，但**本版不复制附件二进制，也不包含�
 npm test
 ```
 
-测试套件（`test/*.test.mjs`）覆盖导出记录与真实 ZIP 解包、元数据存储、统计服务以及宿主+浏览器冒烟测试，使用隔离的临时 DSH 主目录和模拟运行时，不会读取或修改真实会话。
+测试套件（`test/*.test.mjs`）覆盖导出记录与真实 ZIP 解包、有界导入校验、恢复事务、元数据存储、统计服务以及宿主+浏览器冒烟测试，使用隔离的临时 DSH 主目录和模拟运行时，不会读取或修改真实会话。
 
 ## 卸载
 

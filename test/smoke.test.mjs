@@ -64,6 +64,13 @@ function mockReq(method, headers, bodyText) {
   });
   return req;
 }
+function multipartZip(zip, boundary = 'dsh-import-test') {
+  return Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="backup.zip"\r\nContent-Type: application/zip\r\n\r\n`),
+    Buffer.from(zip),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+}
 function mockRes() {
   const res = new PassThrough();
   const chunks = [];
@@ -188,9 +195,17 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 8, `eight routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'export', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 10, `ten routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
+}
+{
+  const inspectGet = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('GET', {}));
+  assert(inspectGet.status === 405, `import inspect rejects non-POST methods (got ${inspectGet.status})`);
+  const inspectNoGuard = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('POST', { 'content-type': 'multipart/form-data; boundary=x' }, ''));
+  assert(inspectNoGuard.status === 403, `import inspect rejects missing guard header (got ${inspectNoGuard.status})`);
+  const restoreGet = await call(routes, '/plugins/dsh-archived-chats/import/restore', mockReq('GET', {}));
+  assert(restoreGet.status === 405, `import restore rejects non-POST methods (got ${restoreGet.status})`);
 }
 
 console.log('\n[1a] POST /export validation');
@@ -262,6 +277,35 @@ console.log('\n[1b] POST /export ZIP downloads');
     assert(JSON.stringify(manifest.sessions.map((session) => session.id)) === JSON.stringify(['session-c', 'session-a']), 'batch export preserves first-seen order and removes duplicates');
     assert(Object.keys(entries).length === 5, 'batch export contains one manifest and two files per unique session');
   }
+}
+
+console.log('\n[1c] POST /import inspect and restore token flow');
+{
+  const exported = await call(routes, '/plugins/dsh-archived-chats/export', mockReq('POST', {
+    'content-type': 'application/x-www-form-urlencoded',
+  }, `sessionIds=${encodeURIComponent(JSON.stringify(['session-a']))}`));
+  const boundary = 'dsh-import-test';
+  const inspected = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('POST', {
+    'content-type': `multipart/form-data; boundary=${boundary}`,
+    'x-dsh-archived-chats': '1',
+  }, multipartZip(exported.bytes(), boundary)));
+  assert(inspected.status === 200, `import inspect accepts an exported ZIP (got ${inspected.status})`);
+  const preview = inspected.json();
+  assert(typeof preview.token === 'string' && typeof preview.nonce === 'string', 'import inspect returns a short-lived token and nonce');
+  assert(preview.sessions?.[0]?.conflict === true, 'import preview marks an existing session ID conflict');
+  const nothing = await call(routes, '/plugins/dsh-archived-chats/import/restore', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: preview.token, nonce: preview.nonce, sessionIds: ['session-a'] }),
+  ));
+  assert(nothing.status === 409 && nothing.json().error === 'nothing-to-restore', 'restore skips a package containing only conflicting sessions');
+  const replay = await call(routes, '/plugins/dsh-archived-chats/import/restore', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: preview.token, nonce: preview.nonce, sessionIds: ['session-a'] }),
+  ));
+  assert(replay.status === 409 && replay.json().error === 'import-token-invalid', 'restore tokens are single-use');
+  const malformed = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('POST', {
+    'content-type': `multipart/form-data; boundary=${boundary}`,
+    'x-dsh-archived-chats': '1',
+  }, Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="other"\r\n\r\nnope\r\n--${boundary}--\r\n`)));
+  assert(malformed.status === 400, `import inspect rejects a multipart body without a ZIP field (got ${malformed.status})`);
 }
 
 console.log('\n[2] GET /state');
@@ -1123,6 +1167,20 @@ console.log('\n[10b] client model — sorting and visible selection');
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert(exportForm?.removed === true, 'export form is removed on the next task');
   assert(clientExports.__test.submitExport?.([]) === false, 'export form rejects an empty selection');
+
+  const savedFetch = globalThis.fetch;
+  const inspectRequests = [];
+  globalThis.fetch = async (url, options) => {
+    inspectRequests.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ ok: true, token: 'token-a', nonce: 'nonce-a', sessions: [] }) };
+  };
+  const importPreview = await clientExports.__test.submitImportFile?.(new Blob(['zip'], { type: 'application/zip' }));
+  assert(importPreview?.token === 'token-a', 'import helper returns inspect preview');
+  assert(inspectRequests[0]?.url === '/plugins/dsh-archived-chats/import/inspect', 'import helper targets inspect route');
+  assert(inspectRequests[0]?.options.method === 'POST', 'import helper uses POST');
+  assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
+  assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
+  globalThis.fetch = savedFetch;
 }
 
 console.log('\n[11] client half — settings section registration');
@@ -1487,6 +1545,50 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
   assert(elementText(summary).includes('1.5 KB'), 'summary reports the measured total size');
   assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
+
+  const importButton = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
+  const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file');
+  assert(importButton !== undefined, 'archive page exposes an import backup action');
+  assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
+
+  states[17].value = {
+    token: 'token-ui',
+    nonce: 'nonce-ui',
+    package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
+    sessions: [
+      { id: 'new-session', title: 'New chat', workspace: { id: 'ws-1', title: '项目一' }, conflict: false, warnings: ['workspace-unresolved'] },
+      { id: 'old-session', title: 'Existing chat', workspace: null, conflict: true, warnings: [] },
+    ],
+    selectedIds: ['new-session'],
+    result: null,
+  };
+  states[18].value = false;
+  tree = renderSection();
+  elements = collectElements(tree);
+  const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
+  assert(importDialog !== undefined, 'import preview opens an accessible dialog');
+  assert(elementText(importDialog).includes('dsh-archived-chats v0.8.0 · format v1'), 'import preview renders generator and format versions');
+  assert(elementText(importDialog).includes('项目不存在，将保持未分组'), 'import preview renders workspace warnings');
+  const importCheckboxes = collectElements(importDialog).filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
+  assert(importCheckboxes.some((checkbox) => checkbox.props.disabled === true && checkbox.props.checked === false), 'conflicting import rows are disabled and unselected');
+  const restoreRequests = [];
+  const savedImportFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    restoreRequests.push({ url, options });
+    return String(url).endsWith('/import/restore')
+      ? { ok: true, status: 200, json: async () => ({ ok: true, restored: ['new-session'], skipped: [], warnings: [] }) }
+      : { ok: true, status: 200, json: async () => ({ metadataStatus: 'ready', sessions: archivedRows }) };
+  };
+  const restoreButton = collectElements(importDialog).find((el) => el.type === 'button' && elementText(el) === '恢复选中项');
+  await restoreButton?.props.onClick();
+  assert(restoreRequests[0]?.url === '/plugins/dsh-archived-chats/import/restore', 'import confirmation targets the restore route');
+  assert(restoreRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import confirmation sends the guard header');
+  assert(JSON.parse(restoreRequests[0]?.options.body ?? '{}').sessionIds.join(',') === 'new-session', 'import confirmation sends only selected non-conflicting IDs');
+  globalThis.fetch = savedImportFetch;
+  states[17].value = null;
+  states[14].value = statsFixture;
+  tree = renderSection();
+  elements = collectElements(tree);
 
   const tagSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '全部标签');
   assert(tagSelect !== undefined, 'tag filter select rendered');
