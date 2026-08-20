@@ -1004,6 +1004,7 @@ function makeElement(tag) {
     setAttribute(k, v) { this.attrs[k] = v; },
     children: [],
     appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    click() { this.clicked = (this.clicked ?? 0) + 1; },
     submit() { this.submitted = (this.submitted ?? 0) + 1; },
     remove() { this.removed = true; },
   };
@@ -1180,6 +1181,30 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.method === 'POST', 'import helper uses POST');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
+
+  inspectRequests.length = 0;
+  const interopPreview = await clientExports.__test.submitInteropFile?.(new Blob(['jsonl'], { type: 'application/jsonl' }), 'claude');
+  assert(interopPreview?.token === 'token-a', 'external import helper returns inspect preview');
+  assert(inspectRequests[0]?.url === '/plugins/dsh-archived-chats/interop/inspect', 'external import helper targets the interop inspect route');
+  assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external import helper sends the guard header');
+  assert(inspectRequests[0]?.options.body?.get('source') === 'claude' && inspectRequests[0]?.options.body?.get('file') !== null, 'external import helper sends source and JSONL file fields');
+
+  const interopDownloads = [];
+  globalThis.fetch = async (url, options) => {
+    interopDownloads.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'attachment; filename="interop.jsonl"' },
+      blob: async () => new Blob(['{}\n'], { type: 'application/jsonl' }),
+    };
+  };
+  const downloaded = await clientExports.__test.downloadInteropExport?.(['session-b', 'session-a', 'session-b'], 'claude');
+  const downloadAnchor = createdElements.filter((element) => element.tagName === 'A').at(-1);
+  assert(downloaded === true && interopDownloads[0]?.url === '/plugins/dsh-archived-chats/interop/export', 'external export helper downloads from the interop route');
+  assert(interopDownloads[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external export helper sends the guard header');
+  assert(String(interopDownloads[0]?.options.body).includes('target=claude') && String(interopDownloads[0]?.options.body).includes('session-b'), 'external export helper sends target and selected session IDs');
+  assert(downloadAnchor?.clicked === 1 && downloadAnchor?.download === 'interop.jsonl', 'external export helper starts a named JSONL download');
   globalThis.fetch = savedFetch;
 }
 
@@ -1547,9 +1572,51 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
 
   const importButton = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
-  const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file');
+  const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importButton !== undefined, 'archive page exposes an import backup action');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
+
+  const interopSource = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '外部来源');
+  const interopImportButton = elements.find((el) => el.type === 'button' && elementText(el) === '从外部工具导入');
+  const interopExportButton = elements.find((el) => el.type === 'button' && elementText(el) === '导出到外部工具');
+  const interopInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && String(el.props?.accept).includes('.jsonl'));
+  assert(interopSource?.props.children.map((option) => option.props.value).join(',') === 'codex,claude', 'external import offers Codex and Claude Code sources');
+  assert(interopImportButton !== undefined && interopExportButton !== undefined, 'archive page exposes external import and export controls');
+  assert(interopInput?.props.hidden === true, 'external JSONL file picker stays hidden');
+  assert(importButton !== undefined && exportAll !== undefined, 'external controls keep the existing backup actions available');
+
+  states[19] = { value: {
+    source: 'codex',
+    target: 'claude',
+    busy: false,
+    exportIds: null,
+    preview: {
+      kind: 'interop', token: 'interop-token', nonce: 'interop-nonce',
+      report: { source: 'codex', summary: { sessions: 2, losses: 2, conflicts: 1, warnings: 1 } },
+      sessions: [
+        { id: 'external-new', title: 'External new', workspace: { id: '/work', title: '/work' }, conflict: false, warnings: ['interop-losses'] },
+        { id: 'session-a', title: 'Existing', workspace: null, conflict: true, warnings: [] },
+      ],
+      selectedIds: ['external-new'],
+      result: null,
+    },
+  }, setter: null };
+  tree = renderSection();
+  elements = collectElements(tree);
+  const interopDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-interop-import-title');
+  assert(interopDialog !== undefined, 'external import preview opens an accessible dialog');
+  assert(elementText(interopDialog).includes('转换报告') && elementText(interopDialog).includes('信息损失：2'), 'external preview renders report categories and loss count');
+  assert(elementText(interopDialog).includes('冲突：1') && elementText(interopDialog).includes('可读迁移'), 'external preview renders conflicts and fidelity level');
+  const interopCheckboxes = collectElements(interopDialog).filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
+  assert(interopCheckboxes.some((checkbox) => checkbox.props.disabled === true), 'external preview disables conflicting sessions');
+
+  states[19].value = { source: 'codex', target: 'claude', busy: false, preview: null, exportIds: ['session-a'] };
+  tree = renderSection();
+  elements = collectElements(tree);
+  const interopExportDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-interop-export-title');
+  assert(interopExportDialog !== undefined, 'external export opens an accessible target dialog');
+  assert(elementText(interopExportDialog).includes('不支持原生继续') && elementText(interopExportDialog).includes('可读迁移'), 'external export previews handoff fidelity before download');
+  delete states[19];
 
   states[17].value = {
     token: 'token-ui',
