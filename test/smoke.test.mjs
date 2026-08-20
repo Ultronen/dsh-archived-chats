@@ -195,8 +195,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 10, `ten routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 12, `twelve routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'interop/inspect', 'interop/export', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 {
