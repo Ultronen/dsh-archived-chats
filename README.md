@@ -24,11 +24,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 兼容性
 
-0.8.0 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件；同时已在 Harness `0.1.0-rc.8` 上完成真实宿主页面复核，覆盖归档列表、搜索、元数据编辑、批量操作、分组操作和导入预览。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
+0.8.1 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件；同时已在 Harness `0.1.0-rc.8` 上完成真实宿主页面复核，覆盖归档列表、搜索、元数据编辑、批量操作、分组操作和导入预览。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
 
 ## 截图
 
-以下截图来自当前 `0.8.0` 构建，并在本地 DeepSeek Harness Web profile 中实际操作生成。
+以下截图来自当前 `0.8.1` 文档发布对应的 `0.8.x` UI，并在本地 DeepSeek Harness Web profile 中实际操作生成；本次 patch 不改变界面行为。
 
 ![已归档的聊天总览](assets/screenshots/1-archived-chats.png)
 ![搜索与筛选](assets/screenshots/2-search.png)
@@ -127,6 +127,12 @@ npm test
 测试套件（`test/*.test.mjs`）覆盖导出记录与真实 ZIP 解包、有界导入校验、恢复事务、元数据存储、统计服务以及宿主+浏览器冒烟测试，使用隔离的临时 DSH 主目录和模拟运行时，不会读取或修改真实会话。
 
 ## 版本更新记录
+
+### 0.8.1
+
+- 将中文 README 设为仓库和 npm 包的默认入口，英文文档改为 `README.en.md`。
+- 将维护者架构、路由、恢复事务和删除生命周期细节移到 `docs/ARCHITECTURE.md` 与 `docs/ARCHITECTURE.en.md`。
+- 安装章节增加快速识别用的 🚀 图标；插件运行时行为保持与 0.8.0 一致。
 
 ### 0.8.0
 

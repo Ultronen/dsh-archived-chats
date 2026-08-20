@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "DeepSeek Harness 已归档会话管理页：搜索、标签、备注、存储统计、批量取消归档/删除、JSON/Markdown ZIP 备份，以及预览后导入恢复。Archived Chats management with search, tags, notes, storage insights, bulk actions, unarchive, delete, and preview-first JSON/Markdown ZIP import and restore.",
   "license": "MIT",
   "author": "Ultronen",

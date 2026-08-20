@@ -24,11 +24,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 0.8.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk actions, group actions, and import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
+Version 0.8.1 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk actions, group actions, and import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
 
 ## Screenshots
 
-These screenshots were captured from the current 0.8.0 build in a local DeepSeek Harness web profile.
+These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI and were captured in a local DeepSeek Harness web profile.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
@@ -127,6 +127,12 @@ npm test
 The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, the metadata store, the statistics service, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 0.8.1
+
+- Made the Chinese README the default repository and npm entry point; the English guide is now `README.en.md`.
+- Moved maintainer architecture, routes, restore transactions, and deletion lifecycle details to `docs/ARCHITECTURE.md` and `docs/ARCHITECTURE.en.md`.
+- Added a 🚀 marker to the install heading; runtime behavior remains unchanged from 0.8.0.
 
 ### 0.8.0
 
