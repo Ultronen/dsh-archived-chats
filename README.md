@@ -26,7 +26,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 0.8.1 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件；同时已在 Harness `0.1.0-rc.8` 上完成真实宿主页面复核，覆盖归档列表、搜索、元数据编辑、批量操作、分组操作和导入预览。以后 Harness 发布新版本时，仍应在发布插件更新前重跑冒烟测试并检查真实宿主页面，因为客户端插槽和设计令牌契约仍可能演进。
 
-## 截图
+## 预览
 
 以下截图来自当前 `0.8.1` 文档发布对应的 `0.8.x` UI，并在本地 DeepSeek Harness Web profile 中实际操作生成；本次 patch 不改变界面行为。
 

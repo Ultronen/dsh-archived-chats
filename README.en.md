@@ -26,7 +26,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 Version 0.8.1 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk actions, group actions, and import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
 
-## Screenshots
+## Preview
 
 These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI and were captured in a local DeepSeek Harness web profile.
 
