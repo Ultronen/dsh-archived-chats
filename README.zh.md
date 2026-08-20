@@ -1,5 +1,7 @@
 # dsh-archived-chats
 
+[English](README.md) | 中文
+
 > ⚡ **删除即生效，无需重启。** 即使会话仍驻留在后台，也会沿官方生命周期当场安全拆除并从磁盘彻底删除——点下删除的那一刻就删干净，而不是"停用后等下次重启"。
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 新增一个「已归档的聊天」设置页，把被归档的会话重新找回来。
@@ -9,10 +11,16 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-archived-chats
+dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
 安装后重启一次 DSH，然后打开 **设置 → 已归档的聊天**。
+
+更新已有安装：
+
+```sh
+dsh plugin --profile web update dsh-archived-chats
+```
 
 ## 兼容性
 
@@ -29,6 +37,14 @@ dsh plugin --profile web add dsh-archived-chats
 ![标签与备注编辑](assets/screenshots/5-metadata-editor.png)
 ![批量操作](assets/screenshots/6-bulk-actions.png)
 ![导入预览](assets/screenshots/7-import-preview.png)
+
+## 使用流程
+
+1. 在 DSH 正常聊天的会话菜单中点击归档。归档只会把会话从侧边栏隐藏，工作区存档仍会保留会话数据。
+2. 打开 **设置 → 已归档的聊天**。页面按工作区分组，并在当前浏览器中记住分组的折叠状态。
+3. 搜索、筛选、排序或选择会话；打开某一行的元数据编辑器添加标签与备注，或使用分组菜单执行项目级操作。
+4. 使用 **导出备份** 导出单条、当前选中项或全部归档会话。恢复备份时点击 **导入备份**，先查看预览，保留无冲突会话的勾选状态后确认恢复。
+5. 点击 **取消归档** 将会话放回侧边栏；只有确实需要永久删除时才点击 **删除**，确认弹窗会明确显示受影响的范围。
 
 ## 功能
 
@@ -66,6 +82,36 @@ JSON 会保留附件引用，但**本版不复制附件二进制，也不包含�
 
 导入只接受本插件版本一的导出 ZIP。浏览器会先上传并进行有界校验，然后展示标题、项目、标签、备注、存储信息、ID 冲突、项目不存在警告和附件引用警告；预览不会渲染原始事件或 Markdown。已有会话 ID 会被禁用并跳过，找不到的项目会恢复为未分组。确认令牌 10 分钟后过期且只能使用一次。标签和备注通过现有本地元数据限制恢复，不会恢复附件二进制。宿主没有可用的 Harness 写入能力时返回 `restore-unsupported`，不会写入任何数据。
 
+## 常见问题
+
+<details>
+<summary><b>归档会删除聊天吗？</b></summary>
+
+不会。DSH 只是把聊天从侧边栏隐藏，并保留归档会话记录。这个插件提供设置页，用来查找、导出、恢复、取消归档或删除这些记录。
+
+</details>
+
+<details>
+<summary><b>导入备份包含已存在的会话 ID 时会怎样？</b></summary>
+
+冲突行会在预览中明确标记，默认禁用并跳过。导入流程绝不会覆盖已有会话。
+
+</details>
+
+<details>
+<summary><b>ZIP 备份包含附件吗？</b></summary>
+
+`session.json` 会保留附件引用，但不会包含附件二进制或子会话。需要完整附件会话树时，请使用 Harness 官方 Session log 导出。
+
+</details>
+
+<details>
+<summary><b>删除仍在运行的会话需要重启吗？</b></summary>
+
+在提供所需生命周期接口的宿主上，删除会在同一次请求中拆除运行中的会话并移除文件。较旧或不兼容的宿主会使用安全的待删队列，在下次启动时完成物理删除。
+
+</details>
+
 ## 实现原理
 
 - **Host 半**（`lib/index.js`）在 DSH Web 服务器上注册 `/plugins/dsh-archived-chats/*` 路由：`GET /state`、`GET /stats`、`POST /export`、`POST /import/inspect`、`POST /import/restore`、`POST /metadata`、`POST /unarchive`、`POST /unarchive-all`、`POST /delete`、`POST /delete-all`。`/state` 拼接标签与备注，`/stats` 返回字节数/文件数，`/export` 从有界的原生表单请求流式返回 ZIP；导入路由对 multipart ZIP 做有界校验，使用短期一次性预览令牌，并通过能力探测的恢复适配器提交。取消归档走 workspace registry 自身的状态写入通道，所有已连接的客户端都会收到 `host/archived-sessions-changed` 推送。会改变状态的路由要求 `x-dsh-archived-chats: 1` 作为 CSRF 加固；只读导出不会修改插件或 Harness 状态。
@@ -84,6 +130,40 @@ npm test
 ```
 
 测试套件（`test/*.test.mjs`）覆盖导出记录与真实 ZIP 解包、有界导入校验、恢复事务、元数据存储、统计服务以及宿主+浏览器冒烟测试，使用隔离的临时 DSH 主目录和模拟运行时，不会读取或修改真实会话。
+
+## 版本更新记录
+
+### 0.8.0
+
+- 新增版本一 ZIP 备份的预览后导入。
+- 新增不会覆盖已有会话的冲突安全恢复和事务式写入。
+- 新增工作区/附件警告、有界校验、一次性确认令牌和元数据恢复。
+
+### 0.7.0
+
+- 新增单条、选中项和全部归档会话的带版本 JSON + Markdown ZIP 备份。
+- 新增流式导出、安全 ZIP 路径、清单记录和官方消息投影生成的 Markdown 对话稿。
+
+### 0.6.0
+
+- 新增标签、备注、存储统计、元数据持久化和归档洞察界面。
+- 加固仍在运行会话的删除流程，并为不提供内部生命周期接口的宿主增加回退处理。
+
+### 0.5.0
+
+- 新增多选以及批量取消归档/删除流程。
+- 改进破坏性操作后的焦点恢复和项目范围选择行为。
+
+### 0.4.0
+
+- 在宿主提供所需生命周期接口时，新增仍在运行会话的原地删除。
+- 新增安全的待删队列回退、标题缓存，以及破坏性操作完成后的成功提示。
+
+### 0.3.0
+
+- 首个公开发布版本，提供「已归档的聊天」设置页。
+- 新增按工作区分组浏览、标题搜索、类型/项目筛选、取消归档，以及带确认的单条/分组/全部删除。
+- 新增 Host 路由、浏览器设置区块，以及用于处理运行中会话的待删队列清扫。
 
 ## 卸载
 

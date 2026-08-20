@@ -1,5 +1,7 @@
 # dsh-archived-chats
 
+[English](README.md) | [中文](README.zh.md)
+
 > ⚡ **Deletion takes effect immediately — no restart.** Even sessions still resident in the background are torn down safely along the official lifecycle and wiped from disk the moment you click delete, instead of being "parked until the next restart".
 
 A settings page for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) that brings archived chats back into view.
@@ -9,10 +11,16 @@ Once a conversation is archived in DeepSeek Harness it disappears from the sideb
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-archived-chats
+dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
 Restart DSH once after installing, then open **Settings → Archived Chats**.
+
+To update an existing installation:
+
+```sh
+dsh plugin --profile web update dsh-archived-chats
+```
 
 ## Compatibility
 
@@ -29,6 +37,14 @@ These screenshots were captured from the current 0.8.0 build in a local DeepSeek
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)
 ![Import preview](assets/screenshots/7-import-preview.png)
+
+## Usage
+
+1. Archive a conversation from the normal DSH session menu. Archiving removes it from the sidebar but keeps its session data in the workspace store.
+2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
+3. Search, filter, sort, or select conversations. Open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
+4. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
+5. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
 
 ## Features
 
@@ -66,6 +82,36 @@ Attachment references remain in JSON, but **attachment bytes and descendant sess
 
 Import accepts only this plugin's version-one export ZIPs. The browser first uploads the package for bounded validation and shows a preview containing titles, workspaces, tags, notes, storage facts, ID conflicts, unresolved-workspace warnings, and attachment-reference warnings; raw events and Markdown are never rendered in the preview. Existing session IDs are disabled and skipped, and unresolved workspaces are restored ungrouped. A confirmation token expires after 10 minutes and can be used once. Tags and notes are restored through the same local metadata limits as manual edits. No attachment bytes are restored. Hosts without the supported Harness writer capability return `restore-unsupported` without writing anything.
 
+## FAQ
+
+<details>
+<summary><b>Does archiving delete the conversation?</b></summary>
+
+No. DSH hides the conversation from the sidebar and keeps its archived session record. This plugin gives you a settings page for finding, exporting, restoring, unarchiving, or deleting that record.
+
+</details>
+
+<details>
+<summary><b>What happens when an imported backup contains an existing session ID?</b></summary>
+
+The conflicting row is shown in the preview, disabled by default, and skipped. Import never overwrites an existing session.
+
+</details>
+
+<details>
+<summary><b>Are attachments included in ZIP backups?</b></summary>
+
+Attachment references are preserved in `session.json`, but attachment bytes and descendant sessions are not included. Use Harness's official Session log export for a complete attachment-bearing conversation tree.
+
+</details>
+
+<details>
+<summary><b>Does deleting a live session require a restart?</b></summary>
+
+On hosts that expose the required lifecycle hooks, deletion tears down the live session and removes its files in the same request. Older or incompatible hosts use the safe fallback queue and finish the physical delete on the next start.
+
+</details>
+
 ## How it works
 
 - **Host half** (`lib/index.js`) registers the `/plugins/dsh-archived-chats/*` routes on the DSH web server: `GET /state`, `GET /stats`, `POST /export`, `POST /import/inspect`, `POST /import/restore`, `POST /metadata`, `POST /unarchive`, `POST /unarchive-all`, `POST /delete`, `POST /delete-all`. `/state` joins tags, notes, and `metadataUpdatedAt` onto every row; `/stats` returns byte/file totals; `/export` streams a ZIP response from a bounded native-form request; the import routes validate a bounded multipart ZIP, keep a short-lived single-use preview token, and commit through the feature-detected restore adapter. Unarchiving writes through the workspace registry's own state path, so every connected client receives the `host/archived-sessions-changed` push. Mutating routes require a custom `x-dsh-archived-chats: 1` header as CSRF hardening; read-only export does not mutate plugin or Harness state.
@@ -84,6 +130,40 @@ npm test
 ```
 
 The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, the metadata store, the statistics service, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
+
+## Version history
+
+### 0.8.0
+
+- Added preview-first import for version-one ZIP backups.
+- Added conflict-safe, transaction-based restore without overwriting existing sessions.
+- Added workspace and attachment warnings, bounded validation, single-use confirmation tokens, and metadata restoration.
+
+### 0.7.0
+
+- Added versioned JSON + Markdown ZIP backups for single, selected, and all archived sessions.
+- Added streaming export, safe ZIP paths, manifest records, and canonical Markdown transcripts.
+
+### 0.6.0
+
+- Added tags, notes, storage statistics, metadata persistence, and the archive insights UI.
+- Hardened live deletion and added fallback handling for hosts that do not expose the internal lifecycle hooks.
+
+### 0.5.0
+
+- Added bulk selection and bulk unarchive/delete workflows.
+- Improved destructive-action focus handling and project-wide selection behavior.
+
+### 0.4.0
+
+- Added in-place deletion for live sessions when the host exposes the required lifecycle hooks.
+- Added the safe pending-deletion fallback, title caching, and a success toast after destructive actions.
+
+### 0.3.0
+
+- First published release of the Archived Chats settings page.
+- Added workspace-grouped browsing, title search, type/project filters, unarchive, and confirmed single/group/all deletion.
+- Added host routes, the browser settings section, and the pending-deletion sweep for live sessions.
 
 ## Uninstall
 
