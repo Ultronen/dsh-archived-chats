@@ -195,10 +195,12 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 12, `twelve routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'interop/inspect', 'interop/export', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 10, `ten archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
+assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
+assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
 {
   const inspectGet = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('GET', {}));
   assert(inspectGet.status === 405, `import inspect rejects non-POST methods (got ${inspectGet.status})`);
@@ -1182,44 +1184,8 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
 
-  inspectRequests.length = 0;
-  const interopPreview = await clientExports.__test.submitInteropFile?.(new Blob(['jsonl'], { type: 'application/jsonl' }), 'claude');
-  assert(interopPreview?.token === 'token-a', 'external import helper returns inspect preview');
-  assert(inspectRequests[0]?.url === '/plugins/dsh-archived-chats/interop/inspect', 'external import helper targets the interop inspect route');
-  assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external import helper sends the guard header');
-  assert(inspectRequests[0]?.options.body?.get('source') === 'claude' && inspectRequests[0]?.options.body?.get('file') !== null, 'external import helper sends source and JSONL file fields');
-
-  inspectRequests.length = 0;
-  globalThis.fetch = async (url, options) => {
-    inspectRequests.push({ url, options });
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ ok: true, target: 'claude', report: { summary: { sessions: 1, losses: 1, warnings: 2 }, losses: [{ code: 'unsupported-message-role', count: 1 }], warnings: [] } }),
-    };
-  };
-  const exportPreview = await clientExports.__test.submitInteropExportPreview?.(['session-b'], 'claude');
-  assert(exportPreview?.report?.summary?.losses === 1, 'external export preview helper returns the adapter report');
-  assert(inspectRequests[0]?.url === '/plugins/dsh-archived-chats/interop/export', 'external export preview uses the export route');
-  assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external export preview sends the guard header');
-  assert(String(inspectRequests[0]?.options.body).includes('preview=1') && String(inspectRequests[0]?.options.body).includes('target=claude'), 'external export preview requests a report before download');
-
-  const interopDownloads = [];
-  globalThis.fetch = async (url, options) => {
-    interopDownloads.push({ url, options });
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => 'attachment; filename="interop.jsonl"' },
-      blob: async () => new Blob(['{}\n'], { type: 'application/jsonl' }),
-    };
-  };
-  const downloaded = await clientExports.__test.downloadInteropExport?.(['session-b', 'session-a', 'session-b'], 'claude');
-  const downloadAnchor = createdElements.filter((element) => element.tagName === 'A').at(-1);
-  assert(downloaded === true && interopDownloads[0]?.url === '/plugins/dsh-archived-chats/interop/export', 'external export helper downloads from the interop route');
-  assert(interopDownloads[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external export helper sends the guard header');
-  assert(String(interopDownloads[0]?.options.body).includes('target=claude') && String(interopDownloads[0]?.options.body).includes('session-b'), 'external export helper sends target and selected session IDs');
-  assert(downloadAnchor?.clicked === 1 && downloadAnchor?.download === 'interop.jsonl', 'external export helper starts a named JSONL download');
+  assert(clientExports.__test.submitInteropFile === undefined, 'client test surface omits external import helpers');
+  assert(clientExports.__test.submitInteropExportPreview === undefined && clientExports.__test.downloadInteropExport === undefined, 'client test surface omits external export helpers');
   globalThis.fetch = savedFetch;
 }
 
@@ -1231,8 +1197,8 @@ console.log('\n[11] client half — settings section registration');
   const zhDict = clientCalls.localeRegister[0].dicts.zh;
   assert(zhDict['nav'] === '已归档的聊天', 'zh nav label is 已归档的聊天');
   assert(zhDict['delete.all'] === '全部删除', 'zh delete-all label present');
-  assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'confirm copy matches CodeX (title)');
-  assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'confirm copy matches CodeX (body)');
+  assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'delete-one confirmation title is localized');
+  assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'delete-one confirmation body is localized');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
   assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
@@ -1412,22 +1378,7 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
     { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
     { id: 'session-c', title: 'Gamma', createdAt: 30, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二' },
   ];
-  globalThis.fetch = async (url, options = {}) => {
-    if (String(url).endsWith('/interop/export')) {
-      if (String(options.body).includes('preview=1')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ report: { summary: { sessions: 1, losses: 0, warnings: 0 }, losses: [], warnings: [] } }),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: () => 'attachment; filename="interop-selection.jsonl"' },
-        blob: async () => new Blob(['{}\n'], { type: 'application/jsonl' }),
-      };
-    }
+  globalThis.fetch = async (url) => {
     return {
       ok: true,
       status: 200,
@@ -1452,15 +1403,15 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
   assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
 
-  const importTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '导入');
-  importTrigger?.props.onClick();
+  const moreTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '更多');
+  moreTrigger?.props.onClick();
   const openMenuTree = harness.render({ t, refreshSidebar: () => {} });
   const openMenuElements = collectElements(openMenuTree);
   const actionPopover = openMenuElements.find((element) => element.props?.className === 'dac-action-menu');
   const actionContainer = openMenuElements.find((element) => element.props?.className === 'dac-head-actions');
-  const renderedImportTrigger = openMenuElements.find((element) => element.type === 'button' && elementText(element) === '导入');
+  const renderedMoreTrigger = openMenuElements.find((element) => element.type === 'button' && elementText(element) === '更多');
   let triggerFocuses = 0;
-  if (renderedImportTrigger?.props.ref) renderedImportTrigger.props.ref.current = { focus: () => { triggerFocuses += 1; } };
+  if (renderedMoreTrigger?.props.ref) renderedMoreTrigger.props.ref.current = { focus: () => { triggerFocuses += 1; } };
   let menuEscapePrevented = false;
   let menuEscapeStopped = false;
   actionContainer?.props.onKeyDown?.({
@@ -1535,25 +1486,6 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   const deletedCheckboxes = collectElements(deletedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
   assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
 
-  const restartForInteropExport = collectElements(deletedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  restartForInteropExport?.props.onClick();
-  const interopSelectionTree = harness.render({ t, refreshSidebar: () => {} });
-  const gammaCheckbox = collectElements(interopSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Gamma');
-  gammaCheckbox?.props.onChange({ target: { checked: true } });
-  const interopSelectedTree = harness.render({ t, refreshSidebar: () => {} });
-  const interopExportTrigger = collectElements(interopSelectedTree).find((element) => element.type === 'button' && elementText(element) === '导出');
-  interopExportTrigger?.props.onClick();
-  const interopExportMenuTree = harness.render({ t, refreshSidebar: () => {} });
-  const codexExport = collectElements(interopExportMenuTree).find((element) => element.type === 'button' && elementText(element) === '导出为 Codex');
-  codexExport?.props.onClick();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const interopPreviewTree = harness.render({ t, refreshSidebar: () => {} });
-  const interopDownload = collectElements(interopPreviewTree).find((element) => element.type === 'button' && elementText(element) === '下载 JSONL');
-  await interopDownload?.props.onClick();
-  const interopExportedTree = harness.render({ t, refreshSidebar: () => {} });
-  const interopExportedCheckboxes = collectElements(interopExportedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(interopExportedCheckboxes.length === 0, 'successful selected external export exits selection mode');
-
   harness.unmount();
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
@@ -1578,7 +1510,7 @@ console.log('\n[11c] client half — bulk selection workflow');
         ? 'Alpha'
       : index === 7
           ? { title: '删除选中的已归档聊天？', body: '这将永久删除选中的 1 个已归档聊天', ids: ['session-a'] }
-          : index === 20
+          : index === 19
             ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
@@ -1734,49 +1666,27 @@ console.log('\n[11c] client half — archive insights UI');
 
   let tree = renderSection();
   let elements = collectElements(tree);
-  const importTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导入');
-  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出');
+  const importTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
+  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出备份');
   const moreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
-  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger !== undefined, 'top actions collapse into import, export, and more menus');
+  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger !== undefined, 'top actions expose direct backup import, direct backup export, and more');
   assert(
-    !elements.some((el) => el.type === 'select' && el.props?.['aria-label'] === '外部来源')
-      && !elements.some((el) => el.type === 'button' && ['导入备份', '从外部工具导入', '导出到外部工具', '全部导出', '全部删除'].includes(elementText(el))),
-    'legacy source selector and persistent action buttons are absent',
+    !elements.some((el) => /Codex|Claude|JSONL/.test(elementText(el)))
+      && !elements.some((el) => el.type === 'input' && String(el.props?.accept).includes('.jsonl')),
+    'archive manager exposes no cross-tool JSONL controls',
   );
 
+  const initialImportInput = elements.find((el) => el.type === 'input' && el.props?.accept === '.zip,application/zip');
+  let importPickerClicks = 0;
+  if (initialImportInput?.props.ref) initialImportInput.props.ref.current = { click: () => { importPickerClicks += 1; } };
   importTrigger?.props.onClick();
-  tree = renderSection();
-  elements = collectElements(tree);
-  const importMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
-  assert(
-    elementText(importMenu).includes('导入 DSH 备份')
-      && elementText(importMenu).includes('从 Codex 导入')
-      && elementText(importMenu).includes('从 Claude Code 导入'),
-    'import menu distinguishes backup, Codex, and Claude Code sources',
-  );
-  const claudeImport = collectElements(importMenu).find((el) => el.type === 'button' && elementText(el) === '从 Claude Code 导入');
-  claudeImport?.props.onClick();
-  assert(states[19]?.value?.source === 'claude', 'Claude import menu item selects the Claude adapter before file choice');
+  assert(importPickerClicks === 1, 'direct import action opens the DSH ZIP picker');
 
-  tree = renderSection();
-  elements = collectElements(tree);
-  const renderedExportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出');
-  renderedExportTrigger?.props.onClick();
-  tree = renderSection();
-  elements = collectElements(tree);
-  const exportMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
-  assert(
-    elementText(exportMenu).includes('导出 DSH 备份')
-      && elementText(exportMenu).includes('导出为 Codex')
-      && elementText(exportMenu).includes('导出为 Claude Code'),
-    'export menu distinguishes backup, Codex, and Claude Code targets',
-  );
   const formsBeforeAll = createdElements.filter((element) => element.tagName === 'FORM').length;
-  const backupExport = collectElements(exportMenu).find((el) => el.type === 'button' && elementText(el) === '导出 DSH 备份');
-  backupExport?.props.onClick();
+  exportTrigger?.props.onClick();
   const allForms = createdElements.filter((element) => element.tagName === 'FORM');
   const allInput = allForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'backup export menu submits archive-list order');
+  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'direct backup export submits archive-list order');
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
@@ -1800,54 +1710,6 @@ console.log('\n[11c] client half — archive insights UI');
 
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
-
-  const interopInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && String(el.props?.accept).includes('.jsonl'));
-  assert(interopInput?.props.hidden === true, 'external JSONL file picker stays hidden');
-
-  states[19] = { value: {
-    source: 'codex',
-    target: 'claude',
-    busy: false,
-    exportIds: null,
-    preview: {
-      kind: 'interop', token: 'interop-token', nonce: 'interop-nonce',
-      report: { source: 'codex', summary: { sessions: 2, losses: 2, conflicts: 1, warnings: 1 } },
-      sessions: [
-        { id: 'external-new', title: 'External new', workspace: { id: '/work', title: '/work' }, conflict: false, warnings: ['interop-losses'] },
-        { id: 'session-a', title: 'Existing', workspace: null, conflict: true, warnings: [] },
-      ],
-      selectedIds: ['external-new'],
-      result: null,
-    },
-  }, setter: null };
-  tree = renderSection();
-  elements = collectElements(tree);
-  const interopDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-interop-import-title');
-  assert(interopDialog !== undefined, 'external import preview opens an accessible dialog');
-  assert(elementText(interopDialog).includes('转换报告') && elementText(interopDialog).includes('信息损失：2'), 'external preview renders report categories and loss count');
-  assert(elementText(interopDialog).includes('冲突：1') && elementText(interopDialog).includes('可读迁移'), 'external preview renders conflicts and fidelity level');
-  const interopCheckboxes = collectElements(interopDialog).filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
-  assert(interopCheckboxes.some((checkbox) => checkbox.props.disabled === true), 'external preview disables conflicting sessions');
-
-  states[19].value = {
-    source: 'codex', target: 'claude', busy: false, preview: null, exportIds: ['session-a'],
-    exportReport: {
-      summary: { sessions: 1, losses: 1, warnings: 2 },
-      losses: [{ code: 'unsupported-message-role', detail: 'role:critic', count: 1 }],
-      warnings: [
-        { code: 'native-resume-unsupported', count: 1 },
-        { code: 'transcript-handoff', count: 1 },
-      ],
-    },
-  };
-  tree = renderSection();
-  elements = collectElements(tree);
-  const interopExportDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-interop-export-title');
-  assert(interopExportDialog !== undefined, 'external export opens an accessible target dialog');
-  assert(elementText(interopExportDialog).includes('不支持原生继续') && elementText(interopExportDialog).includes('可读迁移'), 'external export previews handoff fidelity before download');
-  assert(elementText(interopExportDialog).includes('信息损失：1') && elementText(interopExportDialog).includes('警告：2'), 'external export preview renders exact loss and warning counts');
-  assert(elementText(interopExportDialog).includes('不支持的消息角色 ×1') && !elementText(interopExportDialog).includes('private unsupported body'), 'external export preview lists sanitized loss categories without message bodies');
-  delete states[19];
 
   states[17].value = {
     token: 'token-ui',

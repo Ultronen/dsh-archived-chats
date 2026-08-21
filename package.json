@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-chats",
   "version": "0.9.0",
-  "description": "DeepSeek Harness 已归档会话管理页：搜索、标签、备份恢复，以及 Codex/Claude Code JSONL 迁移。Archived Chats management with backup restore and Codex/Claude Code JSONL migration.",
+  "description": "DeepSeek Harness 已归档会话管理页：搜索、标签、批量操作与备份恢复。Archived Chats management with search, metadata, bulk actions, and backup restore.",
   "license": "MIT",
   "author": "Ultronen",
   "repository": {
@@ -17,9 +17,7 @@
     "dsh",
     "dsh-plugin",
     "archive",
-    "codex",
-    "claude-code",
-    "chat-migration",
+    "backup",
     "sessions",
     "web-ui"
   ],
@@ -47,7 +45,6 @@
     "lib/metadata.js",
     "lib/restore.js",
     "lib/stats.js",
-    "lib/interop",
     "lib/types",
     "assets/screenshots",
     "cordis.patch.yml"

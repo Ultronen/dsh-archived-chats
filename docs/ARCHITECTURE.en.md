@@ -10,7 +10,7 @@ The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
 - The browser client in lib/client.js registers the Archived Chats settings.section and renders state and actions.
-- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/stats.js, and lib/interop/{format,report,codex,claude}.js so it can be tested independently.
+- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, and lib/stats.js so it can be tested independently.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
 
@@ -24,8 +24,6 @@ GET  /plugins/dsh-archived-chats/stats
 POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
-POST /plugins/dsh-archived-chats/interop/inspect
-POST /plugins/dsh-archived-chats/interop/export
 POST /plugins/dsh-archived-chats/metadata
 POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
@@ -33,7 +31,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-Every mutating route, plus browser-initiated external-format import and export, requires the x-dsh-archived-chats: 1 header. Export is read-only. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
+Every mutating route requires the x-dsh-archived-chats: 1 header. Export is read-only. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
 
 ## State and local data
 
@@ -74,25 +72,6 @@ import/inspect accepts only version-one ZIPs produced by this plugin. Host valid
 
 The confirmation token expires quickly and can be used once. Hosts without the supported writer capability return restore-unsupported without writing.
 
-## External-tool interoperability flow
-
-Four pure modules form the interoperability boundary: format.js defines and validates the exchange model, report.js aggregates losses, warnings, and conflicts, and codex.js plus claude.js read and project their respective JSONL formats. The canonical model fixes format: "dsh-interop" and formatVersion: 1, with source, sourceVersion, sessions, and a SHA-256 digest. Each session projection carries an ID, title, workspace, messages, attachment references, losses, and source. Harness events remain authoritative; the exchange model and target JSONL are adapter projections only.
-
-External import flow:
-
-1. The browser uploads a source and one JSONL file to interop/inspect as multipart with the guard header.
-2. Host reads within an 8 MiB request cap; adapters further bound line count, line bytes, nesting depth, and collection size. Unknown or malformed records enter the report, never log bodies.
-3. Host returns only sanitized session summaries, a report, and a short-lived token. The browser shows fidelity, losses, warnings, and existing-ID conflicts.
-4. Confirmation calls the existing import/restore route. Interop sessions are converted to valid Harness restore records and then use the same conflict recheck, feature detection, transactional commit, and rollback path.
-
-External export flow:
-
-1. The browser chooses a target and archived IDs, then posts preview=1 to the guarded interop/export route.
-2. Host rechecks that every ID is still a visible archived session, reads and projects each authoritative persistence record, and returns bounded, category-aggregated session, loss-count, and warning data without message bodies.
-3. After review, the browser posts the download request to the same route and saves the Codex or Claude Code JSONL through a Blob. The output is explicitly a readable migration or handoff transcript; native target-tool resume is not promised, and attachment bytes are absent.
-
-Inspection and export do not mutate external source files, target-tool directories, or DSH archive records. Adapters do not read credentials, MCP keys, or local tool configuration, and Host logs must not contain raw messages or local paths.
-
 ## Deletion lifecycle
 
 A cold delete confirms the physical location, removes the session log, workspace record, and registry indexes, then cleans metadata and stats caches.
@@ -126,7 +105,6 @@ client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, 
 - Tag and note editor.
 - Selected-item export, unarchive, and delete.
 - Import preview, disabled conflicts, and restore results.
-- Codex / Claude Code source and target selectors, a JSONL file control, conversion report, and external-download limitation notice.
 - Responsive settings-page markers and sidebar refresh injection.
 
 The browser never mutates files directly. After an operation, the Host response becomes the new list baseline.
@@ -135,9 +113,6 @@ The browser never mutates files directly. After an operation, the Host response 
 
 - All state-changing routes require POST and the guard header.
 - Import limits ZIP size, entries, paths, versions, and JSON structure, rejecting traversal, duplicates, and prototype-pollution keys.
-- External JSONL import bounds total bytes, lines, per-line size, nesting depth, and collection size. Unknown or malformed records are reported while inspection stays read-only.
-- Interop attachment paths must be safe and relative; only references remain. Attachment bytes, credentials, keys, and external configuration are never copied, and raw messages are not logged.
-- External import repeats the ID-conflict check and never overwrites. External export reads only currently visible archived IDs and mutates neither source sessions nor target-tool state.
 - Delete reports success only when the physical location is confirmed; otherwise the session and authoritative metadata remain.
 - Metadata or stats outages do not disable listing, unarchive, or delete.
 - Unknown host capabilities must degrade or return a clear error; they must not be inferred.
@@ -153,9 +128,6 @@ Coverage includes:
 - restore.js transactional commit, rollback, and unsupported capabilities.
 - metadata.js versioning, concurrency, and atomic writes.
 - stats.js symlink handling, caching, and concurrency limits.
-- interop/format.js version, SHA-256, bounds, and prototype-pollution rejection.
-- Codex / Claude Code minimal, multi-turn, tool-call, malformed-line, attachment-reference, target-projection, and round-trip fixtures.
-- Interop route guard, request cap, source/target rejection, read-only inspection, and transactional-restore reuse.
 - Host routes and browser settings smoke/responsive behavior.
 
 Run:

@@ -1,7 +1,0 @@
-{"type":"system","subtype":"init","sessionId":"claude-simple","cwd":"/tmp/project","model":"claude-sonnet"}
-{"type":"user","sessionId":"claude-simple","timestamp":"2026-08-21T00:00:01.000Z","message":{"role":"user","content":"Hello Claude"}}
-{"type":"assistant","sessionId":"claude-simple","timestamp":"2026-08-21T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Hello!"}]}}
-{"type":"user","sessionId":"claude-simple","message":{"content":"Second turn"}}
-{"type":"assistant","sessionId":"claude-simple","message":{"content":[{"type":"text","text":"Second answer"}]}}
-{"type":"summary","sessionId":"claude-simple","summary":"future summary event"}
-not-json

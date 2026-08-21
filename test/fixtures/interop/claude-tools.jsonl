@@ -1,5 +1,0 @@
-{"type":"system","subtype":"init","sessionId":"claude-tools","cwd":"/work/repo","model":"claude-sonnet"}
-{"type":"user","sessionId":"claude-tools","message":{"role":"user","content":[{"type":"text","text":"List files"}]}}
-{"type":"assistant","sessionId":"claude-tools","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-1","name":"Bash","input":{"command":"ls"}}]}}
-{"type":"user","sessionId":"claude-tools","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-1","content":"README.md\nsrc/"}]}}
-{"type":"assistant","sessionId":"claude-tools","message":{"role":"assistant","content":[{"type":"text","text":"I found the files."},{"type":"image","source":{"path":"attachments/diagram.png","mediaType":"image/png"}}]}}
