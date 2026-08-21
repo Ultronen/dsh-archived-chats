@@ -24,11 +24,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 0.8.1 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk actions, group actions, and import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
+Version 0.9.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk and group actions, backup import preview, and the Codex / Claude Code interoperability controls and conversion report. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
 
 ## Preview
 
-These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI and were captured in a local DeepSeek Harness web profile.
+The overview and external-import preview were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile. The remaining screenshots retain unchanged 0.8.x workflows.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
@@ -37,14 +37,17 @@ These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)
 ![Import preview](assets/screenshots/7-import-preview.png)
+![Codex external-import conversion report](assets/screenshots/8-interop-import-preview.png)
 
 ## Usage
 
 1. Archive a conversation from the normal DSH session menu. Archiving removes it from the sidebar but keeps its session data in the workspace store.
 2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
 3. Search, filter, sort, or select conversations. Open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
-4. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
-5. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
+4. To migrate from Codex or Claude Code, choose the external source, click **Import from external tool**, and select a JSONL file. Review the conversion report, information losses, warnings, and ID conflicts before confirming only the non-conflicting sessions you want.
+5. To hand archived chats to Codex or Claude Code, select one or more sessions (or use all sessions when nothing is selected), click **Export to external tool**, then review the target and native-resume limitation before downloading JSONL.
+6. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
+7. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
 
 ## Features
 
@@ -54,6 +57,7 @@ These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI
 - **Storage insights**: a summary strip reports the archived count, total measured size, and how many sessions could not be measured; each row shows its own size. Measurement never follows symbolic links and skips sessions whose directories are unreadable.
 - **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
 - **Preview-first import and restore**: choose a ZIP backup, inspect every session before writing, preselect only non-conflicting IDs, and restore selected sessions as archived chats. Existing IDs are skipped and never overwritten.
+- **Codex / Claude Code interoperability**: inspect external JSONL read-only and show session, information-loss, conflict, warning, and fidelity counts before any write. Selected DSH archives can also be exported as readable target-specific JSONL handoffs.
 - **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
@@ -82,6 +86,14 @@ Attachment references remain in JSON, but **attachment bytes and descendant sess
 
 Import accepts only this plugin's version-one export ZIPs. The browser first uploads the package for bounded validation and shows a preview containing titles, workspaces, tags, notes, storage facts, ID conflicts, unresolved-workspace warnings, and attachment-reference warnings; raw events and Markdown are never rendered in the preview. Existing session IDs are disabled and skipped, and unresolved workspaces are restored ungrouped. A confirmation token expires after 10 minutes and can be used once. Tags and notes are restored through the same local metadata limits as manual edits. No attachment bytes are restored. Hosts without the supported Harness writer capability return `restore-unsupported` without writing anything.
 
+## Codex and Claude Code interoperability
+
+Version 0.9.0 can convert local Codex or Claude Code JSONL into archived DSH sessions and export DSH archives to the selected target's JSONL. External import accepts one JSONL file. The upload request is capped at 8 MiB, with additional limits on line count, individual line size, and structural complexity. Inspection reads the source without rewriting, moving, or deleting it, and raw messages and local paths are not written to plugin logs.
+
+Every import is preview-first. “High-fidelity conversion” means no known information loss was found; “Readable migration” means the conversation remains readable but some event, field, or content-block detail could not be mapped completely. Malformed JSON, unknown events, attachment references, and duplicate/existing sessions are surfaced as losses, warnings, or conflicts. Conflicts start deselected and are never overwritten. Confirmation reuses the 10-minute, single-use token and transactional rollback path.
+
+Attachments keep only safe relative references; **binary files are not copied or restored**. Exported external JSONL is a conversation projection for reading, migration, or handoff and does not promise native Codex or Claude Code `resume`. Export does not mutate DSH sessions or access the target tool's source directories, credentials, MCP keys, or local configuration.
+
 ## FAQ
 
 <details>
@@ -106,6 +118,13 @@ Attachment references are preserved in `session.json`, but attachment bytes and 
 </details>
 
 <details>
+<summary><b>Can Codex or Claude Code resume the exported JSONL as the original session?</b></summary>
+
+Not guaranteed. It is a readable migration and handoff format that preserves mappable messages and tool traces, not a native target-tool session archive. The download dialog states that native resume is unsupported.
+
+</details>
+
+<details>
 <summary><b>Does deleting a live session require a restart?</b></summary>
 
 On hosts that expose the required lifecycle hooks, deletion tears down the live session and removes its files in the same request. Older or incompatible hosts use the safe fallback queue and finish the physical delete on the next start.
@@ -114,7 +133,7 @@ On hosts that expose the required lifecycle hooks, deletion tears down the live 
 
 ## Implementation overview
 
-The plugin has two halves: the Host service reads and mutates local archive data, while the browser settings page provides search, filtering, backup, and restore actions. Mutations go through guarded local routes; imports are previewed before writing, and live deletion uses the safest lifecycle path available on the host before falling back to next-boot cleanup.
+The plugin has two halves: the Host service reads and mutates local archive data, while the browser settings page provides search, filtering, backup, restore, and cross-tool conversion actions. Codex / Claude Code adapters project into a versioned `dsh-interop` v1 domain model with SHA-256 integrity validation. Mutations go through guarded local routes; imports are previewed before writing, and live deletion uses the safest lifecycle path available on the host before falling back to next-boot cleanup.
 
 User-facing storage, backup limits, deletion outcomes, and compatibility notes stay in this README. Maintainer details such as route contracts, data flow, restore transactions, live-deletion lifecycle, and failure fallbacks are documented in [ARCHITECTURE.md](docs/ARCHITECTURE.en.md).
 
@@ -124,9 +143,16 @@ User-facing storage, backup limits, deletion outcomes, and compatibility notes s
 npm test
 ```
 
-The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, the metadata store, the statistics service, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
+The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, the metadata store, the statistics service, `dsh-interop` schema and SHA-256 checks, Codex / Claude Code fixtures and round trips, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 0.9.0
+
+- Added preview-first Codex and Claude Code JSONL import, reusing conflict-safe single-use tokens and transactional restore.
+- Added readable migration and handoff export for Codex / Claude Code, with explicit native-resume and attachment-binary limitations.
+- Added the `dsh-interop` v1 exchange model, SHA-256 integrity checks, conversion loss/warning/conflict reports, and matching fixtures, route tests, and browser tests.
+- Verified the new controls, conversion preview, and single-line page title in a real DeepSeek Harness `0.1.0-rc.8` host.
 
 ### 0.8.1
 
