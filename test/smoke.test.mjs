@@ -1398,7 +1398,100 @@ console.log('\n[11a] client half — responsive host marker follows the loaded p
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11b] client half — bulk selection workflow');
+console.log('\n[11b] client half — selection mode hides list checkboxes by default');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const archivedRows = [
+    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' },
+    { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
+    { id: 'session-c', title: 'Gamma', createdAt: 30, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二' },
+  ];
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => String(url).endsWith('/state')
+      ? { metadataStatus: 'ready', sessions: archivedRows }
+      : String(url).endsWith('/delete-all')
+        ? { deleted: ['session-b'], pending: [], failed: [] }
+        : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} },
+  });
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const defaultTree = harness.render({ t, refreshSidebar: () => {} });
+  const defaultElements = collectElements(defaultTree);
+  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
+  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+
+  startSelection?.props.onClick();
+  const selectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const selectionElements = collectElements(selectionTree);
+  const selectionCheckboxes = selectionElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  const finishSelection = selectionElements.find((element) => element.type === 'button' && elementText(element) === '完成');
+  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择当前结果'), 'selection mode exposes the visible-results checkbox');
+  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择 Alpha'), 'selection mode exposes chat checkboxes');
+  assert(finishSelection !== undefined, 'selection mode exposes a completion action');
+
+  finishSelection?.props.onClick();
+  const finishedTree = harness.render({ t, refreshSidebar: () => {} });
+  const finishedCheckboxes = collectElements(finishedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(finishedCheckboxes.length === 0, 'completing selection mode hides the checkboxes again');
+
+  const restartSelection = collectElements(finishedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartSelection?.props.onClick();
+  const restartedTree = harness.render({ t, refreshSidebar: () => {} });
+  const alphaCheckbox = collectElements(restartedTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
+  alphaCheckbox?.props.onChange({ target: { checked: true } });
+  const selectedTree = harness.render({ t, refreshSidebar: () => {} });
+  const selectedBulkBar = collectElements(selectedTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedExport = collectElements(selectedBulkBar).find((element) => element.type === 'button' && elementText(element) === '导出选中项');
+  selectedExport?.props.onClick();
+  const exportedTree = harness.render({ t, refreshSidebar: () => {} });
+  const exportedCheckboxes = collectElements(exportedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(exportedCheckboxes.length === 0, 'successful bulk export exits selection mode');
+
+  const restartForUnarchive = collectElements(exportedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartForUnarchive?.props.onClick();
+  const unarchiveSelectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchiveCheckbox = collectElements(unarchiveSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
+  unarchiveCheckbox?.props.onChange({ target: { checked: true } });
+  const unarchiveBulkTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchiveBulkBar = collectElements(unarchiveBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedUnarchive = collectElements(unarchiveBulkBar).find((element) => element.type === 'button' && elementText(element) === '取消归档');
+  await selectedUnarchive?.props.onClick();
+  const unarchivedTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchivedCheckboxes = collectElements(unarchivedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(unarchivedCheckboxes.length === 0, 'successful bulk unarchive exits selection mode');
+
+  const restartForDelete = collectElements(unarchivedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartForDelete?.props.onClick();
+  const deleteSelectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const deleteCheckbox = collectElements(deleteSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Beta');
+  deleteCheckbox?.props.onChange({ target: { checked: true } });
+  const deleteBulkTree = harness.render({ t, refreshSidebar: () => {} });
+  const deleteBulkBar = collectElements(deleteBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedDelete = collectElements(deleteBulkBar).find((element) => element.type === 'button' && elementText(element) === '删除');
+  selectedDelete?.props.onClick();
+  const deleteConfirmTree = harness.render({ t, refreshSidebar: () => {} });
+  const confirmDelete = collectElements(deleteConfirmTree).find((element) => element.type === 'button' && element.props?.className === 'dac-btn-danger');
+  await confirmDelete?.props.onClick();
+  const deletedTree = harness.render({ t, refreshSidebar: () => {} });
+  const deletedCheckboxes = collectElements(deletedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11c] client half — bulk selection workflow');
 {
   const savedHooks = { ...moduleTable.react };
   const archivedRows = [
@@ -1415,8 +1508,10 @@ console.log('\n[11b] client half — bulk selection workflow');
       ? archivedRows
       : index === 2
         ? 'Alpha'
-        : index === 7
+      : index === 7
           ? { title: '删除选中的已归档聊天？', body: '这将永久删除选中的 1 个已归档聊天', ids: ['session-a'] }
+          : index === 20
+            ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
       ? (next) => { selectedAfterGroup = typeof next === 'function' ? next(current) : next; }
@@ -1571,38 +1666,75 @@ console.log('\n[11c] client half — archive insights UI');
 
   let tree = renderSection();
   let elements = collectElements(tree);
-  const exportAll = elements.find((el) => el.type === 'button' && elementText(el) === '全部导出');
-  assert(exportAll !== undefined && exportAll.props.disabled !== true, 'top actions expose export all for a non-empty idle archive');
+  const importTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导入');
+  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出');
+  const moreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
+  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger !== undefined, 'top actions collapse into import, export, and more menus');
+  assert(
+    !elements.some((el) => el.type === 'select' && el.props?.['aria-label'] === '外部来源')
+      && !elements.some((el) => el.type === 'button' && ['导入备份', '从外部工具导入', '导出到外部工具', '全部导出', '全部删除'].includes(elementText(el))),
+    'legacy source selector and persistent action buttons are absent',
+  );
+
+  importTrigger?.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  const importMenu = elements.find((el) => el.props?.className === 'dac-action-menu' && el.props?.role === 'menu');
+  assert(
+    elementText(importMenu).includes('导入 DSH 备份')
+      && elementText(importMenu).includes('从 Codex 导入')
+      && elementText(importMenu).includes('从 Claude Code 导入'),
+    'import menu distinguishes backup, Codex, and Claude Code sources',
+  );
+  const claudeImport = collectElements(importMenu).find((el) => el.type === 'button' && elementText(el) === '从 Claude Code 导入');
+  claudeImport?.props.onClick();
+  assert(states[19]?.value?.source === 'claude', 'Claude import menu item selects the Claude adapter before file choice');
+
+  tree = renderSection();
+  elements = collectElements(tree);
+  const renderedExportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出');
+  renderedExportTrigger?.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  const exportMenu = elements.find((el) => el.props?.className === 'dac-action-menu' && el.props?.role === 'menu');
+  assert(
+    elementText(exportMenu).includes('导出 DSH 备份')
+      && elementText(exportMenu).includes('导出为 Codex')
+      && elementText(exportMenu).includes('导出为 Claude Code'),
+    'export menu distinguishes backup, Codex, and Claude Code targets',
+  );
   const formsBeforeAll = createdElements.filter((element) => element.tagName === 'FORM').length;
-  exportAll?.props.onClick();
+  const backupExport = collectElements(exportMenu).find((el) => el.type === 'button' && elementText(el) === '导出 DSH 备份');
+  backupExport?.props.onClick();
   const allForms = createdElements.filter((element) => element.tagName === 'FORM');
   const allInput = allForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'export all submits archive-list order');
+  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'backup export menu submits archive-list order');
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
   states[9].value = null;
   tree = renderSection();
   elements = collectElements(tree);
+
+  const renderedMoreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
+  renderedMoreTrigger?.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  const moreMenu = elements.find((el) => el.props?.className === 'dac-action-menu' && el.props?.role === 'menu');
+  const deleteAllMenuItem = collectElements(moreMenu).find((el) => el.type === 'button' && elementText(el) === '全部删除');
+  assert(deleteAllMenuItem?.props.className === 'dac-action-menu-item dac-danger', 'delete all is a danger item inside the more menu');
+
   const summary = elements.find((el) => el.props?.className === 'dac-summary');
   assert(summary !== undefined, 'summary strip rendered below the title');
   assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
   assert(elementText(summary).includes('1.5 KB'), 'summary reports the measured total size');
   assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
 
-  const importButton = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
-  assert(importButton !== undefined, 'archive page exposes an import backup action');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-  const interopSource = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '外部来源');
-  const interopImportButton = elements.find((el) => el.type === 'button' && elementText(el) === '从外部工具导入');
-  const interopExportButton = elements.find((el) => el.type === 'button' && elementText(el) === '导出到外部工具');
   const interopInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && String(el.props?.accept).includes('.jsonl'));
-  assert(interopSource?.props.children.map((option) => option.props.value).join(',') === 'codex,claude', 'external import offers Codex and Claude Code sources');
-  assert(interopImportButton !== undefined && interopExportButton !== undefined, 'archive page exposes external import and export controls');
   assert(interopInput?.props.hidden === true, 'external JSONL file picker stays hidden');
-  assert(importButton !== undefined && exportAll !== undefined, 'external controls keep the existing backup actions available');
 
   states[19] = { value: {
     source: 'codex',

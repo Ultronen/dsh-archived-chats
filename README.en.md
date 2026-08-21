@@ -28,7 +28,7 @@ Version 0.9.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility 
 
 ## Preview
 
-The overview and external-import preview were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile. The remaining screenshots retain unchanged 0.8.x workflows.
+The overview, bulk-action, and external-import previews were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile. The remaining screenshots retain unchanged 0.8.x workflows.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
@@ -44,10 +44,10 @@ The overview and external-import preview were captured from 0.9.0 in a local Dee
 
 1. Archive a conversation from the normal DSH session menu. Archiving removes it from the sidebar but keeps its session data in the workspace store.
 2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
-3. Search, filter, sort, or select conversations. Open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
-4. To migrate from Codex or Claude Code, choose the external source, click **Import from external tool**, and select a JSONL file. Review the conversion report, information losses, warnings, and ID conflicts before confirming only the non-conflicting sessions you want.
-5. To hand archived chats to Codex or Claude Code, select one or more sessions (or use all sessions when nothing is selected), click **Export to external tool**, then review the target, session count, loss categories/counts, warnings, and native-resume limitation before downloading JSONL.
-6. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
+3. Search, filter, or sort conversations. When you need multi-select, click **Select multiple** to reveal the checkboxes; completing the workflow returns to the clean list automatically. You can also open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
+4. To migrate from Codex or Claude Code, choose the matching source directly from the top **Import** menu and open a JSONL file. Review the conversion report, information losses, warnings, and ID conflicts before confirming only the non-conflicting sessions you want.
+5. To hand archived chats to Codex or Claude Code, select one or more sessions (or use all sessions when nothing is selected), choose the target from the top **Export** menu, then review the session count, loss categories/counts, warnings, and native-resume limitation before downloading JSONL.
+6. DSH ZIP backups and cross-tool JSONL handoffs serve different purposes: use **Export → Export DSH backup** for one conversation, the current selection, or all archived chats; restore one with **Import → Import DSH backup**, review the preview, and confirm the non-conflicting sessions.
 7. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
 
 ## Features
@@ -59,7 +59,8 @@ The overview and external-import preview were captured from 0.9.0 in a local Dee
 - **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
 - **Preview-first import and restore**: choose a ZIP backup, inspect every session before writing, preselect only non-conflicting IDs, and restore selected sessions as archived chats. Existing IDs are skipped and never overwritten.
 - **Codex / Claude Code interoperability**: inspect external JSONL read-only and show session, information-loss, conflict, warning, and fidelity counts before any write. Export also produces a message-body-free loss/warning report before selected DSH archives can be downloaded as readable target-specific JSONL handoffs.
-- **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
+- **Compact top-level actions**: backup and cross-tool migration live under the **Import** / **Export** menus, while the low-frequency destructive action lives under **More**, removing the persistent source selector and long row of buttons.
+- **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
 - Sessions still resident in the background are **deleted in place too**: the plugin disposes the session through the official lifecycle teardown order (cancel → quiesce → flush → fiber teardown → registry detach), the persistence layer releases the write path, and the physical delete completes within the same request — no restart. If the running DSH build does not expose the required internal seams, the plugin falls back to "park permanently + delete on the next start", with parked sessions staying hidden meanwhile.
@@ -153,6 +154,8 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 - Added preview-first Codex and Claude Code JSONL import, reusing conflict-safe single-use tokens and transactional restore.
 - Added readable migration and handoff export for Codex / Claude Code, with a sanitized pre-download loss/warning report and explicit native-resume and attachment-binary limitations.
 - Added the `dsh-interop` v1 exchange model, SHA-256 integrity checks, conversion loss/warning/conflict reports, and matching fixtures, route tests, and browser tests.
+- Added an on-demand multi-select mode: list checkboxes stay hidden until requested, then disappear automatically after a completed bulk action.
+- Grouped backup, Codex / Claude Code interoperability, and destructive actions into compact **Import / Export / More** menus.
 - Verified the new controls, conversion preview, and single-line page title in a real DeepSeek Harness `0.1.0-rc.8` host.
 
 ### 0.8.1
