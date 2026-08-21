@@ -31,7 +31,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-所有修改路由要求 x-dsh-archived-chats: 1 请求头。导出是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
+所有修改路由都要求 x-dsh-archived-chats: 1 请求头。导出是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
 
 ## 状态和本地数据
 

@@ -195,10 +195,12 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 10, `ten routes registered after webServer binds (got ${routes.size})`);
+assert(routes.size === 10, `ten archive-management routes registered after webServer binds (got ${routes.size})`);
 for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
+assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
+assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
 {
   const inspectGet = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('GET', {}));
   assert(inspectGet.status === 405, `import inspect rejects non-POST methods (got ${inspectGet.status})`);
@@ -1004,6 +1006,7 @@ function makeElement(tag) {
     setAttribute(k, v) { this.attrs[k] = v; },
     children: [],
     appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    click() { this.clicked = (this.clicked ?? 0) + 1; },
     submit() { this.submitted = (this.submitted ?? 0) + 1; },
     remove() { this.removed = true; },
   };
@@ -1180,6 +1183,9 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.method === 'POST', 'import helper uses POST');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
+
+  assert(clientExports.__test.submitInteropFile === undefined, 'client test surface omits external import helpers');
+  assert(clientExports.__test.submitInteropExportPreview === undefined && clientExports.__test.downloadInteropExport === undefined, 'client test surface omits external export helpers');
   globalThis.fetch = savedFetch;
 }
 
@@ -1191,8 +1197,8 @@ console.log('\n[11] client half — settings section registration');
   const zhDict = clientCalls.localeRegister[0].dicts.zh;
   assert(zhDict['nav'] === '已归档的聊天', 'zh nav label is 已归档的聊天');
   assert(zhDict['delete.all'] === '全部删除', 'zh delete-all label present');
-  assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'confirm copy matches CodeX (title)');
-  assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'confirm copy matches CodeX (body)');
+  assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'delete-one confirmation title is localized');
+  assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'delete-one confirmation body is localized');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
   assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
@@ -1209,6 +1215,15 @@ console.log('\n[11] client half — settings section registration');
   assert(style !== undefined, 'page stylesheet injected into <head>');
   assert(style?.attrs['data-plugin-css'] === 'dsh-archived-chats', 'stylesheet carries the data-plugin-css marker');
   assert(style?.textContent.includes('.dac-row'), 'stylesheet paints the chat rows');
+  assert(
+    /\.dac-title\{[^}]*flex:none[^}]*white-space:nowrap[^}]*\}/u.test(style?.textContent ?? ''),
+    'page title stays on one line when header actions wrap',
+  );
+  assert(
+    style?.textContent.includes('.dac-head{align-items:flex-start;flex-wrap:wrap}')
+      && style?.textContent.includes('.dac-head-actions{width:100%;justify-content:flex-start}'),
+    'narrow layouts move the compact action group below the single-line title',
+  );
   assert(
     style?.textContent.includes('background:var(--dsw-specific-menu)')
       && style?.textContent.includes('border:1px solid var(--dsw-alias-border-inverted)')
@@ -1354,7 +1369,129 @@ console.log('\n[11a] client half — responsive host marker follows the loaded p
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11b] client half — bulk selection workflow');
+console.log('\n[11b] client half — selection mode hides list checkboxes by default');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const archivedRows = [
+    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' },
+    { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
+    { id: 'session-c', title: 'Gamma', createdAt: 30, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二' },
+  ];
+  globalThis.fetch = async (url) => {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => String(url).endsWith('/state')
+        ? { metadataStatus: 'ready', sessions: archivedRows }
+        : String(url).endsWith('/delete-all')
+          ? { deleted: ['session-b'], pending: [], failed: [] }
+          : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} },
+    };
+  };
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const defaultTree = harness.render({ t, refreshSidebar: () => {} });
+  const defaultElements = collectElements(defaultTree);
+  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
+  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+
+  const moreTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '更多');
+  moreTrigger?.props.onClick();
+  const openMenuTree = harness.render({ t, refreshSidebar: () => {} });
+  const openMenuElements = collectElements(openMenuTree);
+  const actionPopover = openMenuElements.find((element) => element.props?.className === 'dac-action-menu');
+  const actionContainer = openMenuElements.find((element) => element.props?.className === 'dac-head-actions');
+  const renderedMoreTrigger = openMenuElements.find((element) => element.type === 'button' && elementText(element) === '更多');
+  let triggerFocuses = 0;
+  if (renderedMoreTrigger?.props.ref) renderedMoreTrigger.props.ref.current = { focus: () => { triggerFocuses += 1; } };
+  let menuEscapePrevented = false;
+  let menuEscapeStopped = false;
+  actionContainer?.props.onKeyDown?.({
+    key: 'Escape',
+    preventDefault: () => { menuEscapePrevented = true; },
+    stopPropagation: () => { menuEscapeStopped = true; },
+  });
+  const escapedMenuTree = harness.render({ t, refreshSidebar: () => {} });
+  assert(actionPopover?.props.role === undefined && collectElements(actionPopover).every((element) => element.props?.role !== 'menuitem'), 'compact action popovers use ordinary button disclosure semantics');
+  assert(menuEscapePrevented && menuEscapeStopped && triggerFocuses === 1, 'action popover contains Escape and restores focus to its trigger');
+  assert(!collectElements(escapedMenuTree).some((element) => element.props?.className === 'dac-action-menu'), 'Escape closes only the open action popover');
+
+  startSelection?.props.onClick();
+  const selectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const selectionElements = collectElements(selectionTree);
+  const selectionCheckboxes = selectionElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  const finishSelection = selectionElements.find((element) => element.type === 'button' && elementText(element) === '完成');
+  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择当前结果'), 'selection mode exposes the visible-results checkbox');
+  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择 Alpha'), 'selection mode exposes chat checkboxes');
+  assert(finishSelection !== undefined, 'selection mode exposes a completion action');
+
+  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索已归档聊天');
+  selectionSearch?.props.onChange({ target: { value: 'no visible results' } });
+  const emptySelectionTree = harness.render({ t, refreshSidebar: () => {} });
+  assert(collectElements(emptySelectionTree).some((element) => element.type === 'button' && elementText(element) === '完成'), 'selection mode can finish when filters have no visible results');
+  selectionSearch?.props.onChange({ target: { value: '' } });
+
+  finishSelection?.props.onClick();
+  const finishedTree = harness.render({ t, refreshSidebar: () => {} });
+  const finishedCheckboxes = collectElements(finishedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(finishedCheckboxes.length === 0, 'completing selection mode hides the checkboxes again');
+
+  const restartSelection = collectElements(finishedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartSelection?.props.onClick();
+  const restartedTree = harness.render({ t, refreshSidebar: () => {} });
+  const alphaCheckbox = collectElements(restartedTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
+  alphaCheckbox?.props.onChange({ target: { checked: true } });
+  const selectedTree = harness.render({ t, refreshSidebar: () => {} });
+  const selectedBulkBar = collectElements(selectedTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedExport = collectElements(selectedBulkBar).find((element) => element.type === 'button' && elementText(element) === '导出选中项');
+  selectedExport?.props.onClick();
+  const exportedTree = harness.render({ t, refreshSidebar: () => {} });
+  const exportedCheckboxes = collectElements(exportedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(exportedCheckboxes.length === 0, 'successful bulk export exits selection mode');
+
+  const restartForUnarchive = collectElements(exportedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartForUnarchive?.props.onClick();
+  const unarchiveSelectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchiveCheckbox = collectElements(unarchiveSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
+  unarchiveCheckbox?.props.onChange({ target: { checked: true } });
+  const unarchiveBulkTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchiveBulkBar = collectElements(unarchiveBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedUnarchive = collectElements(unarchiveBulkBar).find((element) => element.type === 'button' && elementText(element) === '取消归档');
+  await selectedUnarchive?.props.onClick();
+  const unarchivedTree = harness.render({ t, refreshSidebar: () => {} });
+  const unarchivedCheckboxes = collectElements(unarchivedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(unarchivedCheckboxes.length === 0, 'successful bulk unarchive exits selection mode');
+
+  const restartForDelete = collectElements(unarchivedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  restartForDelete?.props.onClick();
+  const deleteSelectionTree = harness.render({ t, refreshSidebar: () => {} });
+  const deleteCheckbox = collectElements(deleteSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Beta');
+  deleteCheckbox?.props.onChange({ target: { checked: true } });
+  const deleteBulkTree = harness.render({ t, refreshSidebar: () => {} });
+  const deleteBulkBar = collectElements(deleteBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
+  const selectedDelete = collectElements(deleteBulkBar).find((element) => element.type === 'button' && elementText(element) === '删除');
+  selectedDelete?.props.onClick();
+  const deleteConfirmTree = harness.render({ t, refreshSidebar: () => {} });
+  const confirmDelete = collectElements(deleteConfirmTree).find((element) => element.type === 'button' && element.props?.className === 'dac-btn-danger');
+  await confirmDelete?.props.onClick();
+  const deletedTree = harness.render({ t, refreshSidebar: () => {} });
+  const deletedCheckboxes = collectElements(deletedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11c] client half — bulk selection workflow');
 {
   const savedHooks = { ...moduleTable.react };
   const archivedRows = [
@@ -1371,8 +1508,10 @@ console.log('\n[11b] client half — bulk selection workflow');
       ? archivedRows
       : index === 2
         ? 'Alpha'
-        : index === 7
+      : index === 7
           ? { title: '删除选中的已归档聊天？', body: '这将永久删除选中的 1 个已归档聊天', ids: ['session-a'] }
+          : index === 19
+            ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
       ? (next) => { selectedAfterGroup = typeof next === 'function' ? next(current) : next; }
@@ -1527,28 +1666,49 @@ console.log('\n[11c] client half — archive insights UI');
 
   let tree = renderSection();
   let elements = collectElements(tree);
-  const exportAll = elements.find((el) => el.type === 'button' && elementText(el) === '全部导出');
-  assert(exportAll !== undefined && exportAll.props.disabled !== true, 'top actions expose export all for a non-empty idle archive');
+  const importTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
+  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出备份');
+  const moreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
+  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger !== undefined, 'top actions expose direct backup import, direct backup export, and more');
+  assert(
+    !elements.some((el) => /Codex|Claude|JSONL/.test(elementText(el)))
+      && !elements.some((el) => el.type === 'input' && String(el.props?.accept).includes('.jsonl')),
+    'archive manager exposes no cross-tool JSONL controls',
+  );
+
+  const initialImportInput = elements.find((el) => el.type === 'input' && el.props?.accept === '.zip,application/zip');
+  let importPickerClicks = 0;
+  if (initialImportInput?.props.ref) initialImportInput.props.ref.current = { click: () => { importPickerClicks += 1; } };
+  importTrigger?.props.onClick();
+  assert(importPickerClicks === 1, 'direct import action opens the DSH ZIP picker');
+
   const formsBeforeAll = createdElements.filter((element) => element.tagName === 'FORM').length;
-  exportAll?.props.onClick();
+  exportTrigger?.props.onClick();
   const allForms = createdElements.filter((element) => element.tagName === 'FORM');
   const allInput = allForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'export all submits archive-list order');
+  assert(allForms.length === formsBeforeAll + 1 && allInput?.value === '["session-a","session-b","session-c"]', 'direct backup export submits archive-list order');
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
   states[9].value = null;
   tree = renderSection();
   elements = collectElements(tree);
+
+  const renderedMoreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
+  renderedMoreTrigger?.props.onClick();
+  tree = renderSection();
+  elements = collectElements(tree);
+  const moreMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
+  const deleteAllMenuItem = collectElements(moreMenu).find((el) => el.type === 'button' && elementText(el) === '全部删除');
+  assert(deleteAllMenuItem?.props.className === 'dac-action-menu-item dac-danger', 'delete all is a danger item inside the more menu');
+
   const summary = elements.find((el) => el.props?.className === 'dac-summary');
   assert(summary !== undefined, 'summary strip rendered below the title');
   assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
   assert(elementText(summary).includes('1.5 KB'), 'summary reports the measured total size');
   assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
 
-  const importButton = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
-  const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file');
-  assert(importButton !== undefined, 'archive page exposes an import backup action');
+  const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
   states[17].value = {

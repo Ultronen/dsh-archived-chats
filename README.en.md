@@ -24,11 +24,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 0.8.1 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk actions, group actions, and import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
+Version 0.9.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. A local real-host UI pass was also completed on Harness `0.1.0-rc.8` for the archive list, search, metadata editor, bulk and group actions, and backup import preview. Future Harness releases should still be checked with the smoke suite and a real-host UI pass before publishing a plugin update, because client slot and design-token contracts may evolve.
 
-## Screenshots
+## Preview
 
-These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI and were captured in a local DeepSeek Harness web profile.
+All screenshots below were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
@@ -42,9 +42,9 @@ These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI
 
 1. Archive a conversation from the normal DSH session menu. Archiving removes it from the sidebar but keeps its session data in the workspace store.
 2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
-3. Search, filter, sort, or select conversations. Open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
-4. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
-5. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
+3. Search, filter, or sort conversations. When you need multi-select, click **Select multiple** to reveal the checkboxes; completing the workflow returns to the clean list automatically. You can also open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
+4. Click **Import backup** to choose a ZIP produced by this plugin and confirm non-conflicting sessions after the preview. Click **Export backup** to export the current selection, or every archived chat when nothing is selected. Individual rows also have an export action.
+5. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope. **Delete All** lives under the top **More** menu.
 
 ## Features
 
@@ -54,7 +54,8 @@ These screenshots represent the 0.8.1 documentation release's unchanged 0.8.x UI
 - **Storage insights**: a summary strip reports the archived count, total measured size, and how many sessions could not be measured; each row shows its own size. Measurement never follows symbolic links and skips sessions whose directories are unreadable.
 - **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
 - **Preview-first import and restore**: choose a ZIP backup, inspect every session before writing, preselect only non-conflicting IDs, and restore selected sessions as archived chats. Existing IDs are skipped and never overwritten.
-- **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
+- **Compact top-level actions**: common **Import backup** / **Export backup** actions are direct, while the low-frequency destructive action lives under **More**. The page stays focused on DSH archive management without a persistent source selector or redundant menus.
+- **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
 - Sessions still resident in the background are **deleted in place too**: the plugin disposes the session through the official lifecycle teardown order (cancel → quiesce → flush → fiber teardown → registry detach), the persistence layer releases the write path, and the physical delete completes within the same request — no restart. If the running DSH build does not expose the required internal seams, the plugin falls back to "park permanently + delete on the next start", with parked sessions staying hidden meanwhile.
@@ -127,6 +128,13 @@ npm test
 The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, the metadata store, the statistics service, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 0.9.0
+
+- Added an on-demand multi-select mode: list checkboxes stay hidden until requested, then disappear automatically after a completed bulk action.
+- Made common ZIP backup actions direct **Import backup / Export backup** controls and moved the destructive action under **More** for a cleaner header.
+- Removed the cross-tool JSONL migration surface that could not provide native resume, keeping the plugin focused on DSH archived-chat management.
+- Verified the new controls, backup preview, and single-line page title in a real DeepSeek Harness `0.1.0-rc.8` host.
 
 ### 0.8.1
 
