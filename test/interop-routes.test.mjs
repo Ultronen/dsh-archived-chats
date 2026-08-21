@@ -73,6 +73,10 @@ async function setup() {
     type: 'user/message',
     surfaceOp: 'append',
     data: { id: 'user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'archived' }] },
+  }, {
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { id: 'unsupported-1', role: 'critic', source: { kind: 'critic' }, content: [{ type: 'text', text: 'private unsupported body' }] },
   }];
   const registry = {
     state,
@@ -141,6 +145,9 @@ test('interop inspect is guarded, bounded, source-specific, and read-only', asyn
   assert.equal(typeof value.nonce, 'string');
   assert.equal(value.report.source, 'codex');
   assert.equal(value.sessions[0].id, 'codex-simple');
+  assert.equal(preview.body().includes('Hello Codex'), false);
+  assert.equal(preview.body().includes('preserve this loss'), false);
+  assert.deepEqual(Object.keys(value.sessions[0]).sort(), ['conflict', 'hasAttachmentReferences', 'id', 'lossCount', 'title', 'workspace']);
   assert.deepEqual(state.archivedSessionIds, before);
 });
 
@@ -178,10 +185,20 @@ test('interop preview token restores selected external sessions as archived reco
 });
 
 test('interop export selects archived records and emits target-specific JSONL', async () => {
-  const { routes } = await setup();
+  const { routes, state } = await setup();
   const path = '/plugins/dsh-archived-chats/interop/export';
   const headers = { 'content-type': 'application/x-www-form-urlencoded', 'x-dsh-archived-chats': '1' };
   const body = form({ sessionIds: JSON.stringify(['session-a']), target: 'claude' });
+  const before = [...state.archivedSessionIds];
+  const preview = await invoke(routes, path, request('POST', headers, `${body}&preview=1`));
+  assert.equal(preview.status, 200);
+  assert.match(preview.headers['content-type'], /^application\/json/u);
+  assert.equal(preview.json().report.summary.sessions, 1);
+  assert.equal(preview.json().report.summary.losses, 1);
+  assert.ok(preview.json().report.losses.some((loss) => loss.code === 'unsupported-message-role' && loss.count === 1));
+  assert.ok(preview.json().report.warnings.some((warning) => warning.code === 'native-resume-unsupported'));
+  assert.equal(preview.body().includes('private unsupported body'), false);
+  assert.deepEqual(state.archivedSessionIds, before);
   const result = await invoke(routes, path, request('POST', headers, body));
   assert.equal(result.status, 200);
   assert.match(result.headers['content-disposition'], /attachment;/);

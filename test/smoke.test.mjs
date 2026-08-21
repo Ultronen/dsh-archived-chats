@@ -1189,6 +1189,21 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external import helper sends the guard header');
   assert(inspectRequests[0]?.options.body?.get('source') === 'claude' && inspectRequests[0]?.options.body?.get('file') !== null, 'external import helper sends source and JSONL file fields');
 
+  inspectRequests.length = 0;
+  globalThis.fetch = async (url, options) => {
+    inspectRequests.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, target: 'claude', report: { summary: { sessions: 1, losses: 1, warnings: 2 }, losses: [{ code: 'unsupported-message-role', count: 1 }], warnings: [] } }),
+    };
+  };
+  const exportPreview = await clientExports.__test.submitInteropExportPreview?.(['session-b'], 'claude');
+  assert(exportPreview?.report?.summary?.losses === 1, 'external export preview helper returns the adapter report');
+  assert(inspectRequests[0]?.url === '/plugins/dsh-archived-chats/interop/export', 'external export preview uses the export route');
+  assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'external export preview sends the guard header');
+  assert(String(inspectRequests[0]?.options.body).includes('preview=1') && String(inspectRequests[0]?.options.body).includes('target=claude'), 'external export preview requests a report before download');
+
   const interopDownloads = [];
   globalThis.fetch = async (url, options) => {
     interopDownloads.push({ url, options });
@@ -1614,12 +1629,24 @@ console.log('\n[11c] client half — archive insights UI');
   const interopCheckboxes = collectElements(interopDialog).filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
   assert(interopCheckboxes.some((checkbox) => checkbox.props.disabled === true), 'external preview disables conflicting sessions');
 
-  states[19].value = { source: 'codex', target: 'claude', busy: false, preview: null, exportIds: ['session-a'] };
+  states[19].value = {
+    source: 'codex', target: 'claude', busy: false, preview: null, exportIds: ['session-a'],
+    exportReport: {
+      summary: { sessions: 1, losses: 1, warnings: 2 },
+      losses: [{ code: 'unsupported-message-role', detail: 'role:critic', count: 1 }],
+      warnings: [
+        { code: 'native-resume-unsupported', count: 1 },
+        { code: 'transcript-handoff', count: 1 },
+      ],
+    },
+  };
   tree = renderSection();
   elements = collectElements(tree);
   const interopExportDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-interop-export-title');
   assert(interopExportDialog !== undefined, 'external export opens an accessible target dialog');
   assert(elementText(interopExportDialog).includes('不支持原生继续') && elementText(interopExportDialog).includes('可读迁移'), 'external export previews handoff fidelity before download');
+  assert(elementText(interopExportDialog).includes('信息损失：1') && elementText(interopExportDialog).includes('警告：2'), 'external export preview renders exact loss and warning counts');
+  assert(elementText(interopExportDialog).includes('不支持的消息角色 ×1') && !elementText(interopExportDialog).includes('private unsupported body'), 'external export preview lists sanitized loss categories without message bodies');
   delete states[19];
 
   states[17].value = {

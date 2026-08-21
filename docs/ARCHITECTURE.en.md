@@ -87,9 +87,9 @@ External import flow:
 
 External export flow:
 
-1. The browser chooses a target and archived IDs, then requests the guarded interop/export download.
-2. Host rechecks that every ID is still a visible archived session, reads each authoritative persistence record, and projects it to Codex or Claude Code JSONL.
-3. The browser downloads the response through a Blob. The output is explicitly a readable migration or handoff transcript; native target-tool resume is not promised, and attachment bytes are absent.
+1. The browser chooses a target and archived IDs, then posts preview=1 to the guarded interop/export route.
+2. Host rechecks that every ID is still a visible archived session, reads and projects each authoritative persistence record, and returns bounded, category-aggregated session, loss-count, and warning data without message bodies.
+3. After review, the browser posts the download request to the same route and saves the Codex or Claude Code JSONL through a Blob. The output is explicitly a readable migration or handoff transcript; native target-tool resume is not promised, and attachment bytes are absent.
 
 Inspection and export do not mutate external source files, target-tool directories, or DSH archive records. Adapters do not read credentials, MCP keys, or local tool configuration, and Host logs must not contain raw messages or local paths.
 

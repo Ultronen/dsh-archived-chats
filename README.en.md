@@ -38,6 +38,7 @@ The overview and external-import preview were captured from 0.9.0 in a local Dee
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)
 ![Import preview](assets/screenshots/7-import-preview.png)
 ![Codex external-import conversion report](assets/screenshots/8-interop-import-preview.png)
+![External-export loss and warning report](assets/screenshots/9-interop-export-preview.png)
 
 ## Usage
 
@@ -45,7 +46,7 @@ The overview and external-import preview were captured from 0.9.0 in a local Dee
 2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
 3. Search, filter, sort, or select conversations. Open a row's metadata editor to add tags and notes, or use the group menu for workspace-level actions.
 4. To migrate from Codex or Claude Code, choose the external source, click **Import from external tool**, and select a JSONL file. Review the conversion report, information losses, warnings, and ID conflicts before confirming only the non-conflicting sessions you want.
-5. To hand archived chats to Codex or Claude Code, select one or more sessions (or use all sessions when nothing is selected), click **Export to external tool**, then review the target and native-resume limitation before downloading JSONL.
+5. To hand archived chats to Codex or Claude Code, select one or more sessions (or use all sessions when nothing is selected), click **Export to external tool**, then review the target, session count, loss categories/counts, warnings, and native-resume limitation before downloading JSONL.
 6. Use **Export backup** for one conversation, the current selection, or all archived chats. To restore a backup, choose **Import backup**, review the preview, keep the non-conflicting sessions selected, and confirm.
 7. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope.
 
@@ -57,7 +58,7 @@ The overview and external-import preview were captured from 0.9.0 in a local Dee
 - **Storage insights**: a summary strip reports the archived count, total measured size, and how many sessions could not be measured; each row shows its own size. Measurement never follows symbolic links and skips sessions whose directories are unreadable.
 - **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
 - **Preview-first import and restore**: choose a ZIP backup, inspect every session before writing, preselect only non-conflicting IDs, and restore selected sessions as archived chats. Existing IDs are skipped and never overwritten.
-- **Codex / Claude Code interoperability**: inspect external JSONL read-only and show session, information-loss, conflict, warning, and fidelity counts before any write. Selected DSH archives can also be exported as readable target-specific JSONL handoffs.
+- **Codex / Claude Code interoperability**: inspect external JSONL read-only and show session, information-loss, conflict, warning, and fidelity counts before any write. Export also produces a message-body-free loss/warning report before selected DSH archives can be downloaded as readable target-specific JSONL handoffs.
 - **Flexible multi-select**: select individual chats, every visible result, or an entire project. The selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
@@ -92,7 +93,7 @@ Version 0.9.0 can convert local Codex or Claude Code JSONL into archived DSH ses
 
 Every import is preview-first. “High-fidelity conversion” means no known information loss was found; “Readable migration” means the conversation remains readable but some event, field, or content-block detail could not be mapped completely. Malformed JSON, unknown events, attachment references, and duplicate/existing sessions are surfaced as losses, warnings, or conflicts. Conflicts start deselected and are never overwritten. Confirmation reuses the 10-minute, single-use token and transactional rollback path.
 
-Attachments keep only safe relative references; **binary files are not copied or restored**. Exported external JSONL is a conversation projection for reading, migration, or handoff and does not promise native Codex or Claude Code `resume`. Export does not mutate DSH sessions or access the target tool's source directories, credentials, MCP keys, or local configuration.
+Attachments keep only safe relative references; **binary files are not copied or restored**. External export first returns sanitized session, loss-category/count, and warning data; the report contains no message bodies and is recomputed when the target changes. Downloaded JSONL is a conversation projection for reading, migration, or handoff and does not promise native Codex or Claude Code `resume`. Export does not mutate DSH sessions or access the target tool's source directories, credentials, MCP keys, or local configuration.
 
 ## FAQ
 
@@ -150,7 +151,7 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 ### 0.9.0
 
 - Added preview-first Codex and Claude Code JSONL import, reusing conflict-safe single-use tokens and transactional restore.
-- Added readable migration and handoff export for Codex / Claude Code, with explicit native-resume and attachment-binary limitations.
+- Added readable migration and handoff export for Codex / Claude Code, with a sanitized pre-download loss/warning report and explicit native-resume and attachment-binary limitations.
 - Added the `dsh-interop` v1 exchange model, SHA-256 integrity checks, conversion loss/warning/conflict reports, and matching fixtures, route tests, and browser tests.
 - Verified the new controls, conversion preview, and single-line page title in a real DeepSeek Harness `0.1.0-rc.8` host.
 
