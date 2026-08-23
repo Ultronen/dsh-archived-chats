@@ -133,11 +133,11 @@ test('preview projection bounds native correlation strings and cache accounts fo
     },
   ]);
 
-  assert.ok(messages[0].segments[0].attachment.attachmentId.length <= 256 * 1024 + 1);
-  assert.ok(messages[0].segments[0].attachment.name.length <= 513);
-  assert.ok(messages[1].segments[0].callId.length <= 256 * 1024 + 1);
+  assert.equal(messages[0].segments[0].attachment, null);
+  assert.ok(messages[0].segments[0].label === null);
+  assert.equal(messages[1].segments[0].callId, null);
   assert.ok(messages[1].segments[0].name.length <= 256 * 1024 + 1);
-  assert.ok(messages[2].segments[0].toolCallId.length <= 256 * 1024 + 1);
+  assert.equal(messages[2].segments[0].toolCallId, null);
 
   let inspections = 0;
   const cache = searchModule.createProjectedMessageCache(async () => {
@@ -159,6 +159,48 @@ test('preview projection bounds native correlation strings and cache accounts fo
   await cache.get('large');
   await cache.get('large');
   assert.equal(inspections, 2);
+});
+
+test('identity fields use code-point limits without truncation', () => {
+  const exactId = '😀'.repeat(1024);
+  const oversizedId = '😀'.repeat(1025);
+  const messages = projectArchivedMessages([
+    {
+      seq: 1,
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        message: {
+          role: 'assistant',
+          source: { kind: 'model' },
+          content: [
+            { type: 'tool-call', id: exactId, name: 'read', arguments: 'ok' },
+            { type: 'tool-call', id: oversizedId, name: 'read', arguments: 'ok' },
+          ],
+        },
+      },
+    },
+    {
+      seq: 2,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        message: {
+          role: 'user',
+          source: { kind: 'tool' },
+          content: [
+            { type: 'tool-result', toolCallId: exactId, content: [{ type: 'text', text: 'ok' }] },
+            { type: 'tool-result', toolCallId: oversizedId, content: [{ type: 'text', text: 'ok' }] },
+          ],
+        },
+      },
+    },
+  ]);
+
+  assert.equal(messages[0].segments[0].callId, exactId);
+  assert.equal(messages[0].segments[1].callId, null);
+  assert.equal(messages[1].segments[0].toolCallId, exactId);
+  assert.equal(messages[1].segments[1].toolCallId, null);
 });
 
 function userEvent(seq, text) {
