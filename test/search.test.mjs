@@ -135,6 +135,8 @@ test('preview projection bounds native correlation strings and cache accounts fo
 
   assert.equal(messages[0].segments[0].attachment, null);
   assert.ok(messages[0].segments[0].label === null);
+  assert.ok(messages[0].segments[0].text.length < 1_000);
+  assert.equal(messages[0].segments[0].text.includes(oversized), false);
   assert.equal(messages[1].segments[0].callId, null);
   assert.ok(messages[1].segments[0].name.length <= 256 * 1024 + 1);
   assert.equal(messages[2].segments[0].toolCallId, null);
