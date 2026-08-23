@@ -2,6 +2,10 @@
 node_modules/
 .worktrees/
 
+# 本地索引与宿主数据
+.codegraph/
+data/
+
 # npm 打包产物
 *.tgz
 

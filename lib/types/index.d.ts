@@ -1,11 +1,17 @@
 /**
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
- * (state, stats, export, import/inspect, import/restore, metadata, unarchive,
- * unarchive-all, delete, delete-all), streams JSON/Markdown backup ZIPs, and wires archive insights:
+ * (state, stats, preview, preview/image, search, export, import/inspect, import/restore,
+ * metadata, unarchive, unarchive-all, delete, delete-all), streams
+ * JSON/Markdown backup ZIPs, and wires archive insights:
  * per-session tags/notes joined into `/state`, storage statistics from
- * `/stats`, guarded metadata mutation through `/metadata`, and preview-first
- * archive restore through the import routes. Import restore is capability
- * detected and returns `restore-unsupported` when the host has no writer.
+ * `/stats`, guarded projected-message reads through `/preview` and `/search`.
+ * `/preview` returns bounded structured tool/image descriptors. The separately
+ * listed `/preview/image` route is guarded and read-only, authorizes each stored
+ * image against the archived session's projected attachment descriptors, and
+ * degrades only image loading when the optional attachment service is absent.
+ * Metadata mutation remains guarded through `/metadata`, and archive restore is
+ * preview-first through the import routes. Import restore is capability detected
+ * and returns `restore-unsupported` when the host has no writer.
  */
 export declare function apply(ctx: unknown): void;
 export declare const name: string;

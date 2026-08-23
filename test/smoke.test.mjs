@@ -114,12 +114,109 @@ async function waitFor(promise, timeout = 1000) {
 //#region host-half fixture
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-test-'));
 
+const archivedImageRef = {
+  attachmentId: 'attachment-session-a',
+  mediaType: 'image/png',
+  bytes: 4,
+  width: 2,
+  height: 2,
+  name: 'archive.png',
+};
+const archivedImageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
 const events = {
   'session-a': [
     { type: 'session/title', data: { title: '第一个归档' } },
     { type: 'session/title', data: { title: '改名后的归档' } },
+    {
+      seq: 10,
+      time: Date.parse('2026-08-19T10:00:00.000Z'),
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-search-a',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [
+          { type: 'text', text: '部署失败 EADDRINUSE，请帮我查端口' },
+          { type: 'image', attachment: archivedImageRef },
+        ],
+      },
+    },
+    {
+      seq: 11,
+      time: Date.parse('2026-08-19T10:00:01.000Z'),
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'assistant-search-a',
+          role: 'assistant',
+          source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+          content: [
+            { type: 'reasoning', text: '需要确认哪个进程占用了端口' },
+            { type: 'text', text: '请运行 lsof -i :3000 找到占用端口的进程。' },
+            { type: 'tool-call', id: 'call-search-a', name: 'read_file', arguments: '{"path":"server.js"}' },
+          ],
+        },
+      },
+    },
+    {
+      seq: 12,
+      time: Date.parse('2026-08-19T10:00:02.000Z'),
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'tool-search-a',
+          role: 'user',
+          source: { kind: 'tool', callId: 'call-search-a' },
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'call-search-a',
+            isError: false,
+            content: [{ type: 'text', text: 'server.js listens on port 3000' }],
+          }],
+        },
+      },
+    },
+    {
+      seq: 13,
+      time: Date.parse('2026-08-19T10:00:03.000Z'),
+      type: 'assistant/message',
+      surfaceOp: { op: 'replace', start: 11, end: 11 },
+      sourceEventSeqs: [11],
+      data: {
+        turn: 2,
+        step: 1,
+        message: {
+          id: 'assistant-search-replacement',
+          role: 'assistant',
+          source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+          content: [{ type: 'text', text: 'replacement-only-secret-needle' }],
+        },
+      },
+    },
   ],
-  'session-b': [{ type: 'session/title', data: { title: 'Beta chat' } }],
+  'session-b': [
+    { type: 'session/title', data: { title: 'Beta chat' } },
+    {
+      seq: 20,
+      time: Date.parse('2026-08-19T11:00:00.000Z'),
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-search-b',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'Prepare the quarterly budget report' }],
+      },
+    },
+  ],
   'session-c': [],
 };
 const headerRows = [
@@ -186,6 +283,16 @@ const ctx = {
   logger: { warn: (message) => warnings.push(String(message)) },
 };
 
+let attachmentReads = 0;
+services.attachments = {
+  readImage: async (ref, signal) => {
+    attachmentReads += 1;
+    assert(signal instanceof AbortSignal, 'image read receives an abort signal');
+    assert(ref.attachmentId === archivedImageRef.attachmentId, 'image read receives the projected reference');
+    return { ref: archivedImageRef, data: archivedImageBytes };
+  },
+};
+
 const { apply, name } = await import(join(here, '../lib/index.js'));
 //#endregion
 
@@ -195,8 +302,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 10, `ten archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 13, `thirteen archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
@@ -210,7 +317,200 @@ assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claud
   assert(restoreGet.status === 405, `import restore rejects non-POST methods (got ${restoreGet.status})`);
 }
 
-console.log('\n[1a] POST /export validation');
+console.log('\n[1a] POST /preview and /search');
+{
+  const jsonReq = (path, body, headers = { 'x-dsh-archived-chats': '1' }, method = 'POST') => call(
+    routes,
+    `/plugins/dsh-archived-chats/${path}`,
+    mockReq(method, { 'content-type': 'application/json', ...headers }, JSON.stringify(body)),
+  );
+
+  const previewGet = await jsonReq('preview', { sessionId: 'session-a' }, {}, 'GET');
+  assert(previewGet.status === 405, `preview rejects non-POST methods (got ${previewGet.status})`);
+  const previewNoGuard = await jsonReq('preview', { sessionId: 'session-a' }, {});
+  assert(previewNoGuard.status === 403, `preview rejects missing guard header (got ${previewNoGuard.status})`);
+  const imageGet = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  }, {}, 'GET');
+  assert(imageGet.status === 405, `preview image rejects non-POST methods (got ${imageGet.status})`);
+
+  const imageNoGuard = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  }, {});
+  assert(imageNoGuard.status === 403, `preview image rejects missing guard header (got ${imageNoGuard.status})`);
+
+  const oversizedImageRequest = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+    padding: 'x'.repeat(64 * 1024),
+  });
+  assert(oversizedImageRequest.status === 413, 'preview image rejects bodies over 64 KiB');
+
+  const malformedImageRequest = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview/image',
+    mockReq('POST', { 'content-type': 'application/json', 'x-dsh-archived-chats': '1' }, '{broken'),
+  );
+  assert(malformedImageRequest.status === 400, 'preview image rejects malformed JSON');
+
+  const crossSession = await jsonReq('preview/image', {
+    sessionId: 'session-b',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(crossSession.status === 404, 'preview image denies a reference from another archived session');
+
+  const activeImage = await jsonReq('preview/image', {
+    sessionId: 'session-live',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(activeImage.status === 404, 'preview image denies a non-archived session');
+
+  const image = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(image.status === 200, `preview image answers 200 (got ${image.status})`);
+  assert(image.headers['content-type'] === 'image/png', 'preview image uses the verified media type');
+  assert(image.headers['cache-control'] === 'no-store', 'preview image disables response caching');
+  assert(image.bytes().equals(archivedImageBytes), 'preview image returns the verified bytes');
+  assert(attachmentReads === 1, 'only the authorized request reaches the attachment service');
+
+  const savedAttachments = services.attachments;
+  delete services.attachments;
+  const unsupportedImage = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(unsupportedImage.status === 503, 'preview image reports an unavailable attachment service');
+  services.attachments = savedAttachments;
+
+  services.attachments = { readImage: async () => {
+    throw Object.assign(new Error('/private/path/must-not-leak'), { code: 'attachment-corrupt' });
+  } };
+  const corruptImage = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(corruptImage.status === 500 && corruptImage.json().error === 'preview-image-failed', 'preview image isolates a corrupt stored image');
+  assert(!corruptImage.body.includes('/private/path'), 'preview image never returns attachment diagnostics');
+  services.attachments = savedAttachments;
+
+  let markImageReadStarted;
+  const imageReadStarted = new Promise((resolve) => { markImageReadStarted = resolve; });
+  let imageAbortObserved = false;
+  services.attachments = { readImage: (_ref, signal) => new Promise((_resolve, reject) => {
+    markImageReadStarted();
+    signal.addEventListener('abort', () => {
+      imageAbortObserved = true;
+      reject(signal.reason);
+    }, { once: true });
+  }) };
+  const abortedReq = mockReq('POST', {
+    'content-type': 'application/json',
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ sessionId: 'session-a', attachmentId: archivedImageRef.attachmentId }));
+  const abortedRes = mockRes();
+  const abortedHandler = routes.get('/plugins/dsh-archived-chats/preview/image');
+  const abortedPending = abortedHandler(abortedReq, abortedRes);
+  await imageReadStarted;
+  abortedReq.emit('aborted');
+  await abortedPending;
+  assert(imageAbortObserved, 'preview image aborts the attachment read with its request');
+  abortedRes.destroy();
+  services.attachments = savedAttachments;
+
+  const archivedBeforeImageRace = [...workspaceState.archivedSessionIds];
+  let releaseImageRead;
+  let markRacingImageReadStarted;
+  const racingImageReadStarted = new Promise((resolve) => { markRacingImageReadStarted = resolve; });
+  services.attachments = { readImage: async () => {
+    markRacingImageReadStarted();
+    await new Promise((resolve) => { releaseImageRead = resolve; });
+    return { ref: archivedImageRef, data: archivedImageBytes };
+  } };
+  const racingImage = jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  await racingImageReadStarted;
+  const unarchivedDuringImageRead = await jsonReq('unarchive', { sessionId: 'session-a' });
+  releaseImageRead();
+  const imageAfterUnarchive = await racingImage;
+  assert(unarchivedDuringImageRead.status === 200 && imageAfterUnarchive.status === 404, 'preview image rechecks archive visibility after an overlapping unarchive');
+  workspaceState.archivedSessionIds = archivedBeforeImageRace;
+  services.attachments = savedAttachments;
+
+  // The racing unarchive invalidated both title and projection caches. Warm
+  // only the title cache so the controlled inspection below pauses inside the
+  // projected-message read rather than the initial list authorization.
+  await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+
+  const savedInspect = persistence.inspect;
+  const archivedBeforePreviewRace = [...workspaceState.archivedSessionIds];
+  let releasePreviewInspect;
+  let markPreviewInspectStarted;
+  const previewInspectStarted = new Promise((resolve) => { markPreviewInspectStarted = resolve; });
+  persistence.inspect = async (id) => {
+    if (id !== 'session-a') return savedInspect(id);
+    markPreviewInspectStarted();
+    await new Promise((resolve) => { releasePreviewInspect = resolve; });
+    return savedInspect(id);
+  };
+  const racingPreview = jsonReq('preview', { sessionId: 'session-a' });
+  await previewInspectStarted;
+  const unarchivedDuringPreview = await jsonReq('unarchive', { sessionId: 'session-a' });
+  releasePreviewInspect();
+  const previewAfterUnarchive = await racingPreview;
+  assert(unarchivedDuringPreview.status === 200 && previewAfterUnarchive.status === 404, 'preview rechecks archive visibility after an overlapping unarchive');
+  workspaceState.archivedSessionIds = archivedBeforePreviewRace;
+  persistence.inspect = savedInspect;
+
+  const searchNoGuard = await jsonReq('search', { query: 'EADDRINUSE' }, {});
+  assert(searchNoGuard.status === 403, `search rejects missing guard header (got ${searchNoGuard.status})`);
+
+  const preview = await jsonReq('preview', { sessionId: 'session-a', offset: 0, limit: 2 });
+  assert(preview.status === 200, `preview answers 200 (got ${preview.status})`);
+  if (preview.status === 200) {
+    const body = preview.json();
+    assert(body.session?.id === 'session-a' && body.session?.title === '改名后的归档', 'preview identifies the archived session');
+    assert(body.total === 3 && body.messages.length === 2 && body.nextOffset === 2, 'preview paginates projected messages');
+    assert(body.messages[0]?.role === 'user' && body.messages[0]?.seq === 10, 'preview keeps message role and timeline sequence');
+    assert(body.messages[1]?.segments?.some((segment) => segment.kind === 'tool-call' && segment.label === 'read_file'), 'preview keeps structured tool calls');
+  }
+
+  const previewTail = await jsonReq('preview', { sessionId: 'session-a', offset: 2, limit: 2 });
+  assert(previewTail.status === 200 && previewTail.json().messages[0]?.role === 'tool', 'preview loads the next timeline page');
+
+  const activeOnly = await jsonReq('preview', { sessionId: 'session-live' });
+  assert(activeOnly.status === 404, `preview refuses non-archived sessions (got ${activeOnly.status})`);
+
+  const search = await jsonReq('search', { query: 'eaddrinuse', limit: 20 });
+  assert(search.status === 200, `full-text search answers 200 (got ${search.status})`);
+  if (search.status === 200) {
+    const body = search.json();
+    assert(body.hits.length === 1 && body.hits[0].sessionId === 'session-a', 'full-text search finds archived message content case-insensitively');
+    assert(body.hits[0].matches[0]?.excerpt.includes('EADDRINUSE'), 'full-text hit includes a bounded readable excerpt');
+  }
+
+  const toolSearch = await jsonReq('search', { query: 'server.js port 3000', limit: 20 });
+  assert(toolSearch.status === 200 && toolSearch.json().hits[0]?.sessionId === 'session-a', 'full-text search includes tool output');
+
+  const replacementSearch = await jsonReq('search', { query: 'replacement-only-secret-needle', limit: 20 });
+  assert(replacementSearch.status === 200 && replacementSearch.json().hits.length === 0, 'full-text search ignores replacement copies');
+
+  const oversizedSearch = await jsonReq('search', { query: 'needle', padding: 'x'.repeat(64 * 1024) });
+  assert(oversizedSearch.status === 413, `full-text search rejects oversized JSON bodies (got ${oversizedSearch.status})`);
+  const malformedPreview = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview',
+    mockReq('POST', { 'content-type': 'application/json', 'x-dsh-archived-chats': '1' }, '{broken'),
+  );
+  assert(malformedPreview.status === 400, `preview rejects malformed JSON bodies (got ${malformedPreview.status})`);
+}
+
+console.log('\n[1b] POST /export validation');
 {
   const path = '/plugins/dsh-archived-chats/export';
   if (routes.has(path)) {
@@ -442,6 +742,15 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
   const statsAfterPark = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
   assert(statsAfterPark.json().summary.sessionCount === 2, 'stats exclude a parked pending-deletion session');
   assert(statsAfterPark.json().sessions['session-live'] === undefined, 'stats omit the parked session row');
+  const pendingImage = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview/image',
+    mockReq('POST', {
+      'content-type': 'application/json',
+      'x-dsh-archived-chats': '1',
+    }, JSON.stringify({ sessionId: 'session-live', attachmentId: archivedImageRef.attachmentId })),
+  );
+  assert(pendingImage.status === 404, 'preview image denies a pending-deletion session');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
@@ -1035,8 +1344,16 @@ class MockMutationObserver {
   disconnect() { this.disconnected = true; }
 }
 const storageMap = new Map();
+function MarkdownTextStub(props) { return { type: 'markdown-stub', props }; }
+function DisclosureRowStub(props) { return { type: 'disclosure-stub', props: { ...props, children: [props.title, props.children] } }; }
+function JsonBlockStub(props) { return { type: 'json-stub', props }; }
 const moduleTable = {
   'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+  '@deepseek-ai/dsh-client-ui-primitives': {
+    MarkdownText: MarkdownTextStub,
+    DisclosureRow: DisclosureRowStub,
+    JsonBlock: JsonBlockStub,
+  },
   react: {
     useState: (v) => [v, () => {}],
     useEffect: () => {},
@@ -1175,7 +1492,12 @@ console.log('\n[10b] client model — sorting and visible selection');
   const inspectRequests = [];
   globalThis.fetch = async (url, options) => {
     inspectRequests.push({ url, options });
-    return { ok: true, status: 200, json: async () => ({ ok: true, token: 'token-a', nonce: 'nonce-a', sessions: [] }) };
+    const body = String(url).endsWith('/preview')
+      ? { ok: true, session: { id: 'session-a', title: 'Alpha' }, messages: [], total: 0, nextOffset: null }
+      : String(url).endsWith('/search')
+        ? { ok: true, query: 'needle', hits: [{ sessionId: 'session-a', matches: [{ seq: 1, excerpt: 'needle' }] }], skipped: [] }
+        : { ok: true, token: 'token-a', nonce: 'nonce-a', sessions: [] };
+    return { ok: true, status: 200, json: async () => body };
   };
   const importPreview = await clientExports.__test.submitImportFile?.(new Blob(['zip'], { type: 'application/zip' }));
   assert(importPreview?.token === 'token-a', 'import helper returns inspect preview');
@@ -1183,6 +1505,24 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.method === 'POST', 'import helper uses POST');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
+
+  assert(typeof clientExports.__test.fetchArchivePreview === 'function', 'client exposes the archive preview request boundary');
+  const previewController = new AbortController();
+  const previewBody = await clientExports.__test.fetchArchivePreview?.('session-a', 50, 25, previewController.signal);
+  const previewRequest = inspectRequests.at(-1);
+  assert(previewBody?.session?.id === 'session-a', 'preview helper returns the projected page');
+  assert(previewRequest?.url === '/plugins/dsh-archived-chats/preview', 'preview helper targets the guarded preview route');
+  assert(previewRequest?.options.method === 'POST' && previewRequest?.options.headers['x-dsh-archived-chats'] === '1', 'preview helper uses a guarded POST');
+  assert(previewRequest?.options.signal === previewController.signal, 'preview helper forwards cancellation');
+  assert(previewRequest?.options.body === '{"sessionId":"session-a","offset":50,"limit":25}', 'preview helper sends the requested timeline window');
+
+  assert(typeof clientExports.__test.fetchArchiveSearch === 'function', 'client exposes the archive full-text request boundary');
+  const searchBody = await clientExports.__test.fetchArchiveSearch?.('needle', 20);
+  const searchRequest = inspectRequests.at(-1);
+  assert(searchBody?.hits?.[0]?.sessionId === 'session-a', 'search helper returns full-text hits');
+  assert(searchRequest?.url === '/plugins/dsh-archived-chats/search', 'search helper targets the guarded search route');
+  assert(searchRequest?.options.method === 'POST' && searchRequest?.options.headers['x-dsh-archived-chats'] === '1', 'search helper uses a guarded POST');
+  assert(searchRequest?.options.body === '{"query":"needle","limit":20}', 'search helper sends only the bounded query contract');
 
   assert(clientExports.__test.submitInteropFile === undefined, 'client test surface omits external import helpers');
   assert(clientExports.__test.submitInteropExportPreview === undefined && clientExports.__test.downloadInteropExport === undefined, 'client test surface omits external export helpers');
@@ -1252,7 +1592,10 @@ function collectElements(node, result = []) {
     return result;
   }
   if (typeof node !== 'object') return result;
-  if (typeof node.type === 'function') return collectElements(node.type(node.props ?? {}), result);
+  if (typeof node.type === 'function') {
+    result.push(node);
+    return collectElements(node.type(node.props ?? {}), result);
+  }
   result.push(node);
   collectElements(node.props?.children, result);
   return result;
@@ -1285,10 +1628,12 @@ function createHookHarness(component) {
   const states = [];
   const refs = [];
   const effects = [];
+  const memos = [];
   let pendingEffects = [];
   let stateIndex = 0;
   let refIndex = 0;
   let effectIndex = 0;
+  let memoIndex = 0;
   const sameDependencies = (left, right) => Array.isArray(left)
     && Array.isArray(right)
     && left.length === right.length
@@ -1310,14 +1655,23 @@ function createHookHarness(component) {
       const index = effectIndex++;
       if (!sameDependencies(effects[index]?.deps, deps)) pendingEffects.push({ index, effect, deps });
     },
-    useMemo: (fn) => fn(),
-    useCallback: (fn) => fn,
+    useMemo(fn, deps) {
+      const index = memoIndex++;
+      if (!sameDependencies(memos[index]?.deps, deps)) memos[index] = { deps, value: fn() };
+      return memos[index].value;
+    },
+    useCallback(fn, deps) {
+      const index = memoIndex++;
+      if (!sameDependencies(memos[index]?.deps, deps)) memos[index] = { deps, value: fn };
+      return memos[index].value;
+    },
   };
   return {
     render(props) {
       stateIndex = 0;
       refIndex = 0;
       effectIndex = 0;
+      memoIndex = 0;
       pendingEffects = [];
       Object.assign(moduleTable.react, hooks);
       return component(props);
@@ -1369,7 +1723,7 @@ console.log('\n[11a] client half — responsive host marker follows the loaded p
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11b] client half — selection mode hides list checkboxes by default');
+console.log('\n[11b] client half — selection mode and preview request lifecycle');
 {
   const savedHooks = { ...moduleTable.react };
   const savedFetch = globalThis.fetch;
@@ -1433,7 +1787,7 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择 Alpha'), 'selection mode exposes chat checkboxes');
   assert(finishSelection !== undefined, 'selection mode exposes a completion action');
 
-  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索已归档聊天');
+  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
   selectionSearch?.props.onChange({ target: { value: 'no visible results' } });
   const emptySelectionTree = harness.render({ t, refreshSidebar: () => {} });
   assert(collectElements(emptySelectionTree).some((element) => element.type === 'button' && elementText(element) === '完成'), 'selection mode can finish when filters have no visible results');
@@ -1487,6 +1841,72 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
 
   harness.unmount();
+
+  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  const renderLoadedArchiveSection = async (sectionHarness) => {
+    sectionHarness.render({ t, refreshSidebar: () => {} });
+    sectionHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
+    sectionHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
+    return loadedTree;
+  };
+
+  const closePending = [];
+  globalThis.fetch = (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
+    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
+    if (path.endsWith('/preview')) return new Promise((resolve) => { closePending.push({ resolve, options }); });
+    return Promise.resolve(responseFor({}));
+  };
+  const closeHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  let closeTree = await renderLoadedArchiveSection(closeHarness);
+  let closeElements = collectElements(closeTree);
+  const closeAlpha = closeElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  const closeOpenPromise = closeAlpha?.props.onClick();
+  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
+  const loadingPreview = findComponentElement(closeTree, 'PreviewDialog');
+  loadingPreview?.props.onCancel();
+  assert(closePending[0]?.options.signal?.aborted === true, 'closing a loading conversation preview aborts its request');
+  closePending[0]?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
+  await closeOpenPromise;
+  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
+  assert(findComponentElement(closeTree, 'PreviewDialog') === undefined, 'a completed request cannot reopen a closed conversation preview');
+  closeHarness.unmount();
+
+  const orderedPending = [];
+  globalThis.fetch = (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
+    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
+    if (path.endsWith('/preview')) {
+      const body = JSON.parse(options.body ?? '{}');
+      return new Promise((resolve) => { orderedPending.push({ sessionId: body.sessionId, resolve, options }); });
+    }
+    return Promise.resolve(responseFor({}));
+  };
+  const orderHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  let orderTree = await renderLoadedArchiveSection(orderHarness);
+  let orderElements = collectElements(orderTree);
+  const alphaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha')?.props.onClick();
+  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
+  orderElements = collectElements(orderTree);
+  const betaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Beta')?.props.onClick();
+  const alphaPending = orderedPending.find((entry) => entry.sessionId === 'session-a');
+  const betaPending = orderedPending.find((entry) => entry.sessionId === 'session-b');
+  betaPending?.resolve(responseFor({ ok: true, session: archivedRows[1], messages: [], total: 0, nextOffset: null }));
+  await betaOpenPromise;
+  alphaPending?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
+  await alphaOpenPromise;
+  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
+  const orderedPreview = findComponentElement(orderTree, 'PreviewDialog');
+  assert(alphaPending?.options.signal?.aborted === true, 'opening a newer conversation preview aborts the older request');
+  assert(orderedPreview?.props.preview?.session?.id === 'session-b', 'an older response cannot overwrite the newest conversation preview');
+  orderHarness.unmount();
+
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
@@ -1979,6 +2399,319 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注').every((el) => el.props?.disabled !== true), 'statistics failure keeps metadata editing usable');
 
   Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11d] client half — full-text results and archived conversation preview');
+{
+  const correlated = clientExports.__test.buildPreviewNodes?.([
+    { seq: 1, role: 'assistant', segments: [{ kind: 'tool-call', callId: 'call-a', name: 'read_file', argumentsText: '{}' }] },
+    { seq: 2, role: 'tool', segments: [{ kind: 'tool-result', toolCallId: 'call-a', text: 'ok', isError: false }] },
+    { seq: 3, role: 'tool', segments: [{ kind: 'tool-result', toolCallId: 'missing', text: 'orphan', isError: true }] },
+  ]);
+  assert(correlated?.length === 2, 'tool correlation folds one matching result without hiding an orphan');
+  assert(correlated?.[0]?.segments[0]?.result?.text === 'ok', 'tool correlation attaches the matching result');
+  assert(correlated?.[1]?.segments[0]?.text === 'orphan', 'tool correlation retains an unmatched result');
+
+  const resultBeforeCall = clientExports.__test.buildPreviewNodes?.([{
+    seq: 4,
+    role: 'assistant',
+    segments: [
+      { kind: 'tool-result', toolCallId: 'call-late', text: 'too early', isError: false },
+      { kind: 'tool-call', callId: 'call-late', name: 'read_file', argumentsText: '{}' },
+    ],
+  }]);
+  assert(resultBeforeCall?.[0]?.segments.filter((segment) => segment.text === 'too early').length === 1, 'same-message result before its call remains unmatched exactly once');
+  assert(resultBeforeCall?.[0]?.segments[1]?.result === undefined, 'same-message result before its call is never folded into that call');
+
+  const copyNode = clientExports.__test.buildPreviewNodes?.([{
+    seq: 7,
+    role: 'assistant',
+    segments: [
+      { kind: 'text', text: 'answer' },
+      { kind: 'tool-call', name: 'read_file', argumentsText: '{"path":"README.md"}', result: { text: 'contents' } },
+    ],
+  }])[0];
+  assert(clientExports.__test.previewCopyText?.(copyNode) === 'answer\n\nread_file\n\n{"path":"README.md"}\n\ncontents', 'preview copy text follows visible segment order');
+
+  const savedHooks = { ...moduleTable.react };
+  const savedIntersectionObserver = windowMock.IntersectionObserver;
+  const savedUrl = windowMock.URL;
+  const createdObjectUrls = [];
+  const revokedObjectUrls = [];
+  windowMock.URL = {
+    createObjectURL: (blob) => {
+      const url = `blob:archived-${createdObjectUrls.length + 1}`;
+      createdObjectUrls.push(url);
+      return url;
+    },
+    revokeObjectURL: (url) => { revokedObjectUrls.push(url); },
+  };
+  let intersectionObserver = null;
+  class MockIntersectionObserver {
+    constructor(callback, options) {
+      this.callback = callback;
+      this.options = options;
+      this.observed = [];
+      intersectionObserver = this;
+    }
+    observe(element) { this.observed.push(element); }
+    unobserve(element) { this.observed = this.observed.filter((candidate) => candidate !== element); }
+    disconnect() { this.disconnected = true; }
+  }
+  windowMock.IntersectionObserver = MockIntersectionObserver;
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  const archivedRows = [
+    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一', tags: [], note: '' },
+    { id: 'session-b', title: 'Beta', createdAt: 20, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二', tags: [], note: '' },
+  ];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    const path = String(url);
+    const payload = path.endsWith('/state')
+      ? { metadataStatus: 'ready', sessions: archivedRows }
+      : path.endsWith('/stats')
+        ? { summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }
+        : path.endsWith('/search')
+          ? {
+            ok: true,
+            query: 'needle',
+            hits: [{ sessionId: 'session-b', matches: [{ seq: 21, time: 21, role: 'assistant', excerpt: '…body needle from an archived answer…' }] }],
+            skipped: [],
+          }
+            : path.endsWith('/preview')
+            ? {
+              ok: true,
+              session: archivedRows[0],
+              offset: 0,
+              limit: 50,
+              total: 2,
+              nextOffset: null,
+              messages: [
+                { seq: 10, time: 10, role: 'user', source: 'user', segments: [{ kind: 'text', label: null, text: '查看归档内容', isError: false }] },
+                { seq: 11, time: 11, role: 'assistant', source: 'model', segments: [
+                  { kind: 'text', label: null, text: '这是助手回复', isError: false },
+                  { kind: 'reasoning', label: null, text: '这是推理过程', isError: false },
+                  { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', callId: 'call-123', name: 'read_file', argumentsText: '{"path":"README.md"}', isError: false },
+                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', toolCallId: 'call-123', isError: true },
+                  { kind: 'json', label: null, text: '{"answer":42}', isError: false },
+                  { kind: 'opaque', label: null, text: 'unrecognized payload', isError: false },
+                ] },
+                { seq: 12, time: 12, role: 'tool', source: 'tool', segments: [
+                  { kind: 'tool-result', label: 'missing', text: 'orphan result', toolCallId: 'missing', isError: true },
+                ] },
+              ],
+            }
+            : path.endsWith('/preview/image')
+              ? null
+            : {};
+    return path.endsWith('/preview/image')
+      ? { ok: true, status: 200, blob: async () => new Blob(['PNG'], { type: 'image/png' }) }
+      : { ok: true, status: 200, json: async () => payload };
+  };
+
+  // This fails if the client drops the guard, cancellation signal, or strict
+  // archive identity when requesting binary image bytes.
+  const controller = new AbortController();
+  const imageBlob = await clientExports.__test.fetchArchiveImage?.('session-a', 'attachment-session-a', controller.signal);
+  const imageRequest = requests.at(-1);
+  assert(imageBlob?.type === 'image/png', 'preview image helper returns a browser Blob');
+  assert(imageRequest?.url === '/plugins/dsh-archived-chats/preview/image', 'preview image helper targets the image route');
+  assert(imageRequest?.options.method === 'POST', 'preview image helper uses POST');
+  assert(imageRequest?.options.headers['x-dsh-archived-chats'] === '1', 'preview image helper sends the guard header');
+  assert(imageRequest?.options.signal === controller.signal, 'preview image helper forwards cancellation');
+  assert(imageRequest?.options.body === '{"sessionId":"session-a","attachmentId":"attachment-session-a"}', 'preview image helper sends only session and attachment identity');
+
+  const imageGroups = clientExports.__test.groupPreviewSegments?.([
+    { kind: 'text', text: 'before' },
+    { kind: 'image', attachment: archivedImageRef },
+    { kind: 'image', attachment: { ...archivedImageRef, attachmentId: 'attachment-session-b' } },
+    { kind: 'text', text: 'after' },
+  ]);
+  assert(imageGroups?.map((group) => group.kind).join(',') === 'segment,images,segment' && imageGroups[1].images.length === 2, 'consecutive preview images form one gallery without absorbing text');
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  let elements = collectElements(tree);
+
+  const previewTrigger = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  assert(previewTrigger !== undefined, 'each archived row exposes an accessible conversation preview action');
+
+  const searchInput = elements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
+  assert(searchInput !== undefined, 'search copy promises metadata and conversation-content search');
+  searchInput?.props.onChange({ target: { value: 'needle' } });
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 330));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  const rows = elements.filter((element) => element.props?.className === 'dac-row');
+  assert(rows.length === 1 && elementText(rows[0]).includes('Beta'), 'remote body hit joins the existing archive filters');
+  assert(elementText(rows[0]).includes('body needle from an archived answer'), 'body hit renders its readable excerpt in the row');
+  assert(requests.some((request) => request.url.endsWith('/search') && request.options.headers?.['x-dsh-archived-chats'] === '1'), 'debounced body search uses the guarded route');
+
+  // Clear the filter so Alpha is visible again, then open its projected log.
+  const filteredSearch = elements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
+  filteredSearch?.props.onChange({ target: { value: '' } });
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  const alphaPreview = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  await alphaPreview?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const previewElement = findComponentElement(tree, 'PreviewDialog');
+  assert(previewElement !== undefined, 'preview action opens the real conversation dialog component');
+  if (previewElement !== undefined) {
+    const previewHarness = createHookHarness(previewElement.type);
+    let previewTree = previewHarness.render(previewElement.props);
+    let previewElements = collectElements(previewTree);
+    const dialog = previewElements.find((element) => element.props?.role === 'dialog');
+    const rail = previewElements.find((element) => element.props?.className === 'dac-preview-rail');
+    const closeButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭预览');
+    let closeFocuses = 0;
+    const previewCloseControl = { focus: () => { closeFocuses += 1; documentMock.activeElement = previewCloseControl; } };
+    const previewLastControl = { focus: () => { documentMock.activeElement = previewLastControl; } };
+    if (dialog?.props.ref) dialog.props.ref.current = {
+      contains: (node) => node === previewCloseControl || node === previewLastControl,
+      querySelectorAll: () => [previewCloseControl, previewLastControl],
+    };
+    if (closeButton?.props.ref) closeButton.props.ref.current = previewCloseControl;
+    const feed = previewElements.find((element) => element.props?.className === 'dac-preview-feed');
+    if (feed?.props.ref) feed.props.ref.current = { id: 'preview-feed' };
+    const previewRows = previewElements.filter((element) => element.props?.['data-preview-key']);
+    const previewTargets = previewRows.map((row) => ({ dataset: { previewKey: row.props['data-preview-key'] } }));
+    previewRows.forEach((row, index) => row.props.ref?.(previewTargets[index]));
+    previewHarness.flushEffects();
+    const turnObserver = intersectionObserver;
+    assert(dialog?.props['aria-modal'] === 'true' && elementText(dialog).includes('Alpha'), 'conversation preview is an accessible labelled dialog');
+    documentMock.activeElement = previewLastControl;
+    let previewTrappedForward = false;
+    documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { previewTrappedForward = true; } });
+    assert(previewTrappedForward && documentMock.activeElement === previewCloseControl, 'conversation preview traps forward tab focus');
+    documentMock.activeElement = previewCloseControl;
+    let previewTrappedReverse = false;
+    documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: true, preventDefault: () => { previewTrappedReverse = true; } });
+    assert(previewTrappedReverse && documentMock.activeElement === previewLastControl, 'conversation preview traps reverse tab focus');
+    assert(collectElements(rail).filter((element) => element.type === 'button').length === 3, 'preview renders one timeline navigation control per visible message');
+    assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
+    const toolDisclosures = previewElements.filter((element) => element.type === DisclosureRowStub && element.props?.title === 'read_file');
+    const matchedToolElements = collectElements(toolDisclosures[0]);
+    const toolArguments = matchedToolElements.filter((element) => element.type === JsonBlockStub && element.props?.payload?.path === 'README.md');
+    const toolResults = matchedToolElements.filter((element) => element.props?.className === 'dac-preview-tool-result dac-error' && elementText(element) === '{"ok":true}');
+    assert(toolDisclosures.length === 1 && toolArguments.length === 1, 'preview renders structured tool-call content once');
+    assert(toolResults.length === 1, 'matched error result carries semantic styling on its result element');
+    assert(elementText(dialog).includes('orphan result'), 'preview retains the unmatched tool result');
+    const orphanTool = previewElements.find((element) => element.type?.name === 'PreviewToolResult' && element.props?.segment?.text === 'orphan result');
+    const orphanResults = collectElements(orphanTool).filter((element) => element.props?.className === 'dac-preview-tool-result dac-error');
+    assert(orphanResults.length === 1, 'unmatched error result carries semantic styling on its result element');
+    assert(headChildren.find((element) => element.id === 'dsh-archived-chats-css')?.textContent.includes('.dac-preview-tool-result.dac-error{color:var(--dsw-alias-state-error-primary)}'), 'result error styling uses the semantic error token');
+    assert(previewElements.some((element) => element.type === JsonBlockStub && element.props?.label === 'JSON'), 'preview gives JSON blocks a localized fallback label');
+    assert(elementText(dialog).includes('未知内容') && elementText(dialog).includes('unrecognized payload'), 'preview safely localizes unknown segment fallback content');
+    const userRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'user');
+    const assistantRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'assistant');
+    assert(userRow?.props.className.includes('dac-preview-user'), 'preview aligns the user row with the native bubble treatment');
+    assert(assistantRow?.props.className.includes('dac-preview-assistant'), 'preview aligns the assistant row without a generic card');
+    assert(collectElements(userRow).some((element) => element.props?.className === 'dac-preview-user-bubble'), 'user text is wrapped by the native-style bubble');
+    assert(collectElements(assistantRow).some((element) => element.type === MarkdownTextStub), 'assistant text uses the host Markdown primitive');
+    assert(previewElements.some((element) => element.type === DisclosureRowStub), 'reasoning uses the host disclosure primitive');
+    assert(!previewElements.some((element) => element.props?.className === 'dac-preview-message'), 'generic preview cards are removed');
+    assert(elementText(dialog).includes('只读预览'), 'preview displays the localized read-only label');
+
+    // This component-level harness keeps its hooks isolated while still
+    // exercising the rendered image, IntersectionObserver, and fetch boundary.
+    const PreviewImage = clientExports.__test.PreviewImage;
+    assert(typeof PreviewImage === 'function', 'client exposes the archived image lifecycle component for browser rendering');
+    if (typeof PreviewImage === 'function') {
+      const imageHarness = createHookHarness(PreviewImage);
+      const imageProps = { sessionId: 'session-a', attachment: archivedImageRef, t };
+      let imageTree = imageHarness.render(imageProps);
+      const imageRoot = { id: 'archived-image-root' };
+      imageTree.props.ref.current = imageRoot;
+      imageHarness.flushEffects();
+      const imageObserver = intersectionObserver;
+      assert(imageObserver?.observed.includes(imageRoot), 'archived image waits for its own intersection before loading');
+      imageObserver?.callback([{ isIntersecting: true, target: imageRoot }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      imageTree = imageHarness.render(imageProps);
+      const imageElements = collectElements(imageTree);
+      assert(createdObjectUrls.length === 1, 'visible archived image creates one object URL');
+      assert(imageElements.some((element) => element.type === 'img' && element.props?.src === createdObjectUrls[0]), 'archived image renders verified bytes');
+      assert(imageElements.some((element) => element.type === 'img' && element.props?.alt === 'archive.png · 2×2'), 'archived image alt text includes its safe name and verified dimensions');
+      imageHarness.unmount();
+      assert(imageObserver?.disconnected === true && requests.at(-1)?.options.signal?.aborted === true, 'closing an image disconnects observation and aborts pending work');
+      assert(revokedObjectUrls.includes(createdObjectUrls[0]), 'closing preview revokes archived image URLs');
+
+      // A failed attachment must stay local to the image rather than replacing
+      // the assistant transcript that surrounds it.
+      const failedImageHarness = createHookHarness(PreviewImage);
+      const imageFetch = globalThis.fetch;
+      globalThis.fetch = async (url, options = {}) => {
+        requests.push({ url: String(url), options });
+        return { ok: false, status: 404, json: async () => ({ error: 'preview-image-not-found' }) };
+      };
+      let failedImageTree = failedImageHarness.render(imageProps);
+      const failedImageRoot = { id: 'failed-archived-image-root' };
+      failedImageTree.props.ref.current = failedImageRoot;
+      failedImageHarness.flushEffects();
+      intersectionObserver?.callback([{ isIntersecting: true, target: failedImageRoot }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      failedImageTree = failedImageHarness.render(imageProps);
+      assert(failedImageTree.props?.className === 'dac-preview-image-placeholder' && elementText(failedImageTree) === '图片不可用 · archive.png · 2×2', 'failed archived image retains its localized safe descriptor');
+      assert(previewElements.some((element) => element.type === MarkdownTextStub && element.props?.text === '这是助手回复'), 'failed archived image leaves assistant transcript content rendered');
+      failedImageHarness.unmount();
+      globalThis.fetch = imageFetch;
+    }
+
+    const copied = [];
+    const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async (text) => { copied.push(text); } } } });
+    const visibleAssistant = clientExports.__test.buildPreviewNodes(previewElement.props.preview.messages)[1];
+    const assistantActions = previewElements.find((element) => element.type?.name === 'PreviewActions' && element.props?.node?.key === visibleAssistant.key);
+    const copyButton = collectElements(assistantActions).find((element) => element.type === 'button' && element.props?.['aria-label'] === '复制');
+    await copyButton?.props.onClick();
+    assert(copied[0] === clientExports.__test.previewCopyText(visibleAssistant), 'preview copy action writes the visible node text to the clipboard');
+    if (savedNavigator === undefined) delete globalThis.navigator;
+    else Object.defineProperty(globalThis, 'navigator', savedNavigator);
+
+    turnObserver?.callback([{ isIntersecting: true, intersectionRatio: 0.8, target: previewTargets[1] }]);
+    previewTree = previewHarness.render(previewElement.props);
+    previewElements = collectElements(previewTree);
+    const secondRailButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '转到第 2 条消息');
+    assert(secondRailButton?.props['aria-current'] === 'true', 'turn rail marks the currently visible node');
+
+    const closeFocusesBeforeRerender = closeFocuses;
+    const rerenderedSection = harness.render({ t, refreshSidebar: () => {} });
+    const rerenderedPreview = findComponentElement(rerenderedSection, 'PreviewDialog');
+    previewTree = previewHarness.render(rerenderedPreview?.props ?? previewElement.props);
+    previewElements = collectElements(previewTree);
+    previewHarness.flushEffects();
+    assert(closeFocuses === closeFocusesBeforeRerender, 'parent re-render does not refocus the open conversation preview');
+    previewHarness.unmount();
+    assert(turnObserver?.disconnected === true, 'turn rail disconnects its observer on unmount');
+  }
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
+  windowMock.IntersectionObserver = savedIntersectionObserver;
+  windowMock.URL = savedUrl;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11e] client half — preview primitive fallback');
+{
+  const missingPrimitives = clientExports.__test.resolvePreviewPrimitives(() => { throw new Error('missing'); });
+  assert(Object.values(missingPrimitives).every((primitive) => primitive === null), 'missing public preview primitives resolve to null entries');
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientExports.__test.PreviewMarkdown);
+  const fallback = harness.render({ text: '<b>literal</b>', t, primitives: missingPrimitives });
+  assert(fallback.type === 'p' && fallback.props.className === 'dac-preview-plain' && fallback.props.children === '<b>literal</b>', 'preview Markdown fallback renders literal text in a plain paragraph');
 }
 
 console.log('\n[12] client half — sidebar refresh inject face');
