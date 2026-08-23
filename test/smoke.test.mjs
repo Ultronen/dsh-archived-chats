@@ -114,6 +114,16 @@ async function waitFor(promise, timeout = 1000) {
 //#region host-half fixture
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-test-'));
 
+const archivedImageRef = {
+  attachmentId: 'attachment-session-a',
+  mediaType: 'image/png',
+  bytes: 4,
+  width: 2,
+  height: 2,
+  name: 'archive.png',
+};
+const archivedImageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
 const events = {
   'session-a': [
     { type: 'session/title', data: { title: '第一个归档' } },
@@ -127,7 +137,10 @@ const events = {
         id: 'user-search-a',
         role: 'user',
         source: { kind: 'user' },
-        content: [{ type: 'text', text: '部署失败 EADDRINUSE，请帮我查端口' }],
+        content: [
+          { type: 'text', text: '部署失败 EADDRINUSE，请帮我查端口' },
+          { type: 'image', attachment: archivedImageRef },
+        ],
       },
     },
     {
@@ -270,6 +283,16 @@ const ctx = {
   logger: { warn: (message) => warnings.push(String(message)) },
 };
 
+let attachmentReads = 0;
+services.attachments = {
+  readImage: async (ref, signal) => {
+    attachmentReads += 1;
+    assert(signal instanceof AbortSignal, 'image read receives an abort signal');
+    assert(ref.attachmentId === archivedImageRef.attachmentId, 'image read receives the projected reference');
+    return { ref: archivedImageRef, data: archivedImageBytes };
+  },
+};
+
 const { apply, name } = await import(join(here, '../lib/index.js'));
 //#endregion
 
@@ -279,8 +302,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 12, `twelve archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'preview', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 13, `thirteen archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
@@ -306,6 +329,97 @@ console.log('\n[1a] POST /preview and /search');
   assert(previewGet.status === 405, `preview rejects non-POST methods (got ${previewGet.status})`);
   const previewNoGuard = await jsonReq('preview', { sessionId: 'session-a' }, {});
   assert(previewNoGuard.status === 403, `preview rejects missing guard header (got ${previewNoGuard.status})`);
+  const imageGet = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  }, {}, 'GET');
+  assert(imageGet.status === 405, `preview image rejects non-POST methods (got ${imageGet.status})`);
+
+  const imageNoGuard = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  }, {});
+  assert(imageNoGuard.status === 403, `preview image rejects missing guard header (got ${imageNoGuard.status})`);
+
+  const oversizedImageRequest = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+    padding: 'x'.repeat(64 * 1024),
+  });
+  assert(oversizedImageRequest.status === 413, 'preview image rejects bodies over 64 KiB');
+
+  const malformedImageRequest = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview/image',
+    mockReq('POST', { 'content-type': 'application/json', 'x-dsh-archived-chats': '1' }, '{broken'),
+  );
+  assert(malformedImageRequest.status === 400, 'preview image rejects malformed JSON');
+
+  const crossSession = await jsonReq('preview/image', {
+    sessionId: 'session-b',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(crossSession.status === 404, 'preview image denies a reference from another archived session');
+
+  const activeImage = await jsonReq('preview/image', {
+    sessionId: 'session-live',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(activeImage.status === 404, 'preview image denies a non-archived session');
+
+  const image = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(image.status === 200, `preview image answers 200 (got ${image.status})`);
+  assert(image.headers['content-type'] === 'image/png', 'preview image uses the verified media type');
+  assert(image.headers['cache-control'] === 'no-store', 'preview image disables response caching');
+  assert(image.bytes().equals(archivedImageBytes), 'preview image returns the verified bytes');
+  assert(attachmentReads === 1, 'only the authorized request reaches the attachment service');
+
+  const savedAttachments = services.attachments;
+  delete services.attachments;
+  const unsupportedImage = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(unsupportedImage.status === 503, 'preview image reports an unavailable attachment service');
+  services.attachments = savedAttachments;
+
+  services.attachments = { readImage: async () => {
+    throw Object.assign(new Error('/private/path/must-not-leak'), { code: 'attachment-corrupt' });
+  } };
+  const corruptImage = await jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  assert(corruptImage.status === 500 && corruptImage.json().error === 'preview-image-failed', 'preview image isolates a corrupt stored image');
+  assert(!corruptImage.body.includes('/private/path'), 'preview image never returns attachment diagnostics');
+  services.attachments = savedAttachments;
+
+  let markImageReadStarted;
+  const imageReadStarted = new Promise((resolve) => { markImageReadStarted = resolve; });
+  let imageAbortObserved = false;
+  services.attachments = { readImage: (_ref, signal) => new Promise((_resolve, reject) => {
+    markImageReadStarted();
+    signal.addEventListener('abort', () => {
+      imageAbortObserved = true;
+      reject(signal.reason);
+    }, { once: true });
+  }) };
+  const abortedReq = mockReq('POST', {
+    'content-type': 'application/json',
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ sessionId: 'session-a', attachmentId: archivedImageRef.attachmentId }));
+  const abortedRes = mockRes();
+  const abortedHandler = routes.get('/plugins/dsh-archived-chats/preview/image');
+  const abortedPending = abortedHandler(abortedReq, abortedRes);
+  await imageReadStarted;
+  abortedReq.emit('aborted');
+  await abortedPending;
+  assert(imageAbortObserved, 'preview image aborts the attachment read with its request');
+  abortedRes.destroy();
+  services.attachments = savedAttachments;
   const searchNoGuard = await jsonReq('search', { query: 'EADDRINUSE' }, {});
   assert(searchNoGuard.status === 403, `search rejects missing guard header (got ${searchNoGuard.status})`);
 
@@ -581,6 +695,15 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
   const statsAfterPark = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
   assert(statsAfterPark.json().summary.sessionCount === 2, 'stats exclude a parked pending-deletion session');
   assert(statsAfterPark.json().sessions['session-live'] === undefined, 'stats omit the parked session row');
+  const pendingImage = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview/image',
+    mockReq('POST', {
+      'content-type': 'application/json',
+      'x-dsh-archived-chats': '1',
+    }, JSON.stringify({ sessionId: 'session-live', attachmentId: archivedImageRef.attachmentId })),
+  );
+  assert(pendingImage.status === 404, 'preview image denies a pending-deletion session');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
 }
 
