@@ -90,6 +90,77 @@ test('preview projection preserves tool correlation and verified image descripto
   assert.equal('searchable' in page.messages[0], false);
 });
 
+test('preview projection bounds native correlation strings and cache accounts for them', async () => {
+  const oversized = 'x'.repeat(300_000);
+  const messages = projectArchivedMessages([
+    {
+      seq: 1,
+      time: 1001,
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-large',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'image', attachment: { ...imageRef, attachmentId: oversized, name: oversized } }],
+      },
+    },
+    {
+      seq: 2,
+      time: 1002,
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        message: {
+          role: 'assistant',
+          source: { kind: 'model' },
+          content: [{ type: 'tool-call', id: oversized, name: oversized, arguments: 'ok' }],
+        },
+      },
+    },
+    {
+      seq: 3,
+      time: 1003,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        message: {
+          role: 'user',
+          source: { kind: 'tool' },
+          content: [{ type: 'tool-result', toolCallId: oversized, content: [{ type: 'text', text: 'ok' }] }],
+        },
+      },
+    },
+  ]);
+
+  assert.ok(messages[0].segments[0].attachment.attachmentId.length <= 256 * 1024 + 1);
+  assert.ok(messages[0].segments[0].attachment.name.length <= 513);
+  assert.ok(messages[1].segments[0].callId.length <= 256 * 1024 + 1);
+  assert.ok(messages[1].segments[0].name.length <= 256 * 1024 + 1);
+  assert.ok(messages[2].segments[0].toolCallId.length <= 256 * 1024 + 1);
+
+  let inspections = 0;
+  const cache = searchModule.createProjectedMessageCache(async () => {
+    inspections += 1;
+    return { events: [{
+      seq: 1,
+      time: 1001,
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        message: {
+          role: 'assistant',
+          source: { kind: 'model' },
+          content: [{ type: 'tool-call', id: oversized, name: 'tool', arguments: 'ok' }],
+        },
+      },
+    }] };
+  }, { maxCachedCodePoints: 10 });
+  await cache.get('large');
+  await cache.get('large');
+  assert.equal(inspections, 2);
+});
+
 function userEvent(seq, text) {
   return {
     seq,
