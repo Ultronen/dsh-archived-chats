@@ -52,7 +52,7 @@ The stats route measures session directories with concurrency four, skips symbol
 
 Preview and search accept only currently visible archived IDs; pending-deletion and unarchived sessions cannot be read. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments and sanitized image descriptors.
 
-The preview/image authorization sequence is fixed: first require POST and `x-dsh-archived-chats: 1`, then bounded-parse `sessionId` and `attachmentId`; next re-confirm that the session is still in the currently visible archive set, find an exact image-descriptor match in that session's canonical projection, and only then read bytes through the optional `attachments.readImage` service and return them with `no-store` and `nosniff`. Cross-session, non-archived, and unprojected references are rejected before the attachment service is reached, and error responses never echo filesystem paths. A host without attachment-read capability returns `preview-image-unsupported`; this degrades images only and does not block text, Markdown, reasoning, tool, JSON, or code preview.
+The preview/image authorization sequence is fixed: first require POST and `x-dsh-archived-chats: 1`, then bounded-parse `sessionId` and `attachmentId`; next confirm that the session is still in the currently visible archive set, find an exact image-descriptor match in that session's canonical projection, and only then read bytes through the optional `attachments.readImage` service. Both preview and preview/image recheck visible archive state after asynchronous reads and immediately before sending a response, preventing an overlapping unarchive or delete from exposing stale content. Image bytes use `no-store` and `nosniff`; cross-session, non-archived, and unprojected references are rejected, and error responses never echo filesystem paths. A host without attachment-read capability returns `preview-image-unsupported`; this degrades images only and does not block text, Markdown, reasoning, tool, JSON, or code preview.
 
 Cross-session persistence inspection is limited to four concurrent reads. A broken session is reported in `skipped` while other hits still succeed. Canonical projections use a 30-second TTL, a 64-session LRU, and a per-session cached-code-point cap; oversized sessions remain searchable but do not stay resident. Unarchive, delete, and restore invalidate affected cache entries.
 
@@ -122,7 +122,7 @@ The preview prefers Harness's publicly exported `MarkdownText`, `DisclosureRow`,
 
 The turn rail remains part of the preview: on desktop it stays to the left of the feed, jumps and follows feed scrolling, and exposes the active turn through `aria-current`; at 640px or narrower it moves above the feed and scrolls horizontally while user bubbles retain useful width. It is not replaced by a private host navigation component.
 
-The browser never mutates files directly. After an operation, the Host response becomes the new list baseline.
+The browser never mutates files directly. After an operation, the Host response becomes the new list baseline. Closing a preview or switching to another session aborts the pending request, and a request sequence ignores late responses so a closed dialog cannot reopen and an older session cannot replace the newest preview.
 
 ## Security and failure policy
 

@@ -420,6 +420,53 @@ console.log('\n[1a] POST /preview and /search');
   assert(imageAbortObserved, 'preview image aborts the attachment read with its request');
   abortedRes.destroy();
   services.attachments = savedAttachments;
+
+  const archivedBeforeImageRace = [...workspaceState.archivedSessionIds];
+  let releaseImageRead;
+  let markRacingImageReadStarted;
+  const racingImageReadStarted = new Promise((resolve) => { markRacingImageReadStarted = resolve; });
+  services.attachments = { readImage: async () => {
+    markRacingImageReadStarted();
+    await new Promise((resolve) => { releaseImageRead = resolve; });
+    return { ref: archivedImageRef, data: archivedImageBytes };
+  } };
+  const racingImage = jsonReq('preview/image', {
+    sessionId: 'session-a',
+    attachmentId: archivedImageRef.attachmentId,
+  });
+  await racingImageReadStarted;
+  const unarchivedDuringImageRead = await jsonReq('unarchive', { sessionId: 'session-a' });
+  releaseImageRead();
+  const imageAfterUnarchive = await racingImage;
+  assert(unarchivedDuringImageRead.status === 200 && imageAfterUnarchive.status === 404, 'preview image rechecks archive visibility after an overlapping unarchive');
+  workspaceState.archivedSessionIds = archivedBeforeImageRace;
+  services.attachments = savedAttachments;
+
+  // The racing unarchive invalidated both title and projection caches. Warm
+  // only the title cache so the controlled inspection below pauses inside the
+  // projected-message read rather than the initial list authorization.
+  await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+
+  const savedInspect = persistence.inspect;
+  const archivedBeforePreviewRace = [...workspaceState.archivedSessionIds];
+  let releasePreviewInspect;
+  let markPreviewInspectStarted;
+  const previewInspectStarted = new Promise((resolve) => { markPreviewInspectStarted = resolve; });
+  persistence.inspect = async (id) => {
+    if (id !== 'session-a') return savedInspect(id);
+    markPreviewInspectStarted();
+    await new Promise((resolve) => { releasePreviewInspect = resolve; });
+    return savedInspect(id);
+  };
+  const racingPreview = jsonReq('preview', { sessionId: 'session-a' });
+  await previewInspectStarted;
+  const unarchivedDuringPreview = await jsonReq('unarchive', { sessionId: 'session-a' });
+  releasePreviewInspect();
+  const previewAfterUnarchive = await racingPreview;
+  assert(unarchivedDuringPreview.status === 200 && previewAfterUnarchive.status === 404, 'preview rechecks archive visibility after an overlapping unarchive');
+  workspaceState.archivedSessionIds = archivedBeforePreviewRace;
+  persistence.inspect = savedInspect;
+
   const searchNoGuard = await jsonReq('search', { query: 'EADDRINUSE' }, {});
   assert(searchNoGuard.status === 403, `search rejects missing guard header (got ${searchNoGuard.status})`);
 
@@ -1460,11 +1507,13 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
 
   assert(typeof clientExports.__test.fetchArchivePreview === 'function', 'client exposes the archive preview request boundary');
-  const previewBody = await clientExports.__test.fetchArchivePreview?.('session-a', 50, 25);
+  const previewController = new AbortController();
+  const previewBody = await clientExports.__test.fetchArchivePreview?.('session-a', 50, 25, previewController.signal);
   const previewRequest = inspectRequests.at(-1);
   assert(previewBody?.session?.id === 'session-a', 'preview helper returns the projected page');
   assert(previewRequest?.url === '/plugins/dsh-archived-chats/preview', 'preview helper targets the guarded preview route');
   assert(previewRequest?.options.method === 'POST' && previewRequest?.options.headers['x-dsh-archived-chats'] === '1', 'preview helper uses a guarded POST');
+  assert(previewRequest?.options.signal === previewController.signal, 'preview helper forwards cancellation');
   assert(previewRequest?.options.body === '{"sessionId":"session-a","offset":50,"limit":25}', 'preview helper sends the requested timeline window');
 
   assert(typeof clientExports.__test.fetchArchiveSearch === 'function', 'client exposes the archive full-text request boundary');
@@ -1674,7 +1723,7 @@ console.log('\n[11a] client half — responsive host marker follows the loaded p
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11b] client half — selection mode hides list checkboxes by default');
+console.log('\n[11b] client half — selection mode and preview request lifecycle');
 {
   const savedHooks = { ...moduleTable.react };
   const savedFetch = globalThis.fetch;
@@ -1792,6 +1841,72 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
 
   harness.unmount();
+
+  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  const renderLoadedArchiveSection = async (sectionHarness) => {
+    sectionHarness.render({ t, refreshSidebar: () => {} });
+    sectionHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
+    sectionHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
+    return loadedTree;
+  };
+
+  const closePending = [];
+  globalThis.fetch = (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
+    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
+    if (path.endsWith('/preview')) return new Promise((resolve) => { closePending.push({ resolve, options }); });
+    return Promise.resolve(responseFor({}));
+  };
+  const closeHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  let closeTree = await renderLoadedArchiveSection(closeHarness);
+  let closeElements = collectElements(closeTree);
+  const closeAlpha = closeElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  const closeOpenPromise = closeAlpha?.props.onClick();
+  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
+  const loadingPreview = findComponentElement(closeTree, 'PreviewDialog');
+  loadingPreview?.props.onCancel();
+  assert(closePending[0]?.options.signal?.aborted === true, 'closing a loading conversation preview aborts its request');
+  closePending[0]?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
+  await closeOpenPromise;
+  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
+  assert(findComponentElement(closeTree, 'PreviewDialog') === undefined, 'a completed request cannot reopen a closed conversation preview');
+  closeHarness.unmount();
+
+  const orderedPending = [];
+  globalThis.fetch = (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
+    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
+    if (path.endsWith('/preview')) {
+      const body = JSON.parse(options.body ?? '{}');
+      return new Promise((resolve) => { orderedPending.push({ sessionId: body.sessionId, resolve, options }); });
+    }
+    return Promise.resolve(responseFor({}));
+  };
+  const orderHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  let orderTree = await renderLoadedArchiveSection(orderHarness);
+  let orderElements = collectElements(orderTree);
+  const alphaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha')?.props.onClick();
+  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
+  orderElements = collectElements(orderTree);
+  const betaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Beta')?.props.onClick();
+  const alphaPending = orderedPending.find((entry) => entry.sessionId === 'session-a');
+  const betaPending = orderedPending.find((entry) => entry.sessionId === 'session-b');
+  betaPending?.resolve(responseFor({ ok: true, session: archivedRows[1], messages: [], total: 0, nextOffset: null }));
+  await betaOpenPromise;
+  alphaPending?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
+  await alphaOpenPromise;
+  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
+  const orderedPreview = findComponentElement(orderTree, 'PreviewDialog');
+  assert(alphaPending?.options.signal?.aborted === true, 'opening a newer conversation preview aborts the older request');
+  assert(orderedPreview?.props.preview?.session?.id === 'session-b', 'an older response cannot overwrite the newest conversation preview');
+  orderHarness.unmount();
+
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
@@ -2461,7 +2576,13 @@ console.log('\n[11d] client half — full-text results and archived conversation
     const rail = previewElements.find((element) => element.props?.className === 'dac-preview-rail');
     const closeButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭预览');
     let closeFocuses = 0;
-    if (closeButton?.props.ref) closeButton.props.ref.current = { focus: () => { closeFocuses += 1; } };
+    const previewCloseControl = { focus: () => { closeFocuses += 1; documentMock.activeElement = previewCloseControl; } };
+    const previewLastControl = { focus: () => { documentMock.activeElement = previewLastControl; } };
+    if (dialog?.props.ref) dialog.props.ref.current = {
+      contains: (node) => node === previewCloseControl || node === previewLastControl,
+      querySelectorAll: () => [previewCloseControl, previewLastControl],
+    };
+    if (closeButton?.props.ref) closeButton.props.ref.current = previewCloseControl;
     const feed = previewElements.find((element) => element.props?.className === 'dac-preview-feed');
     if (feed?.props.ref) feed.props.ref.current = { id: 'preview-feed' };
     const previewRows = previewElements.filter((element) => element.props?.['data-preview-key']);
@@ -2470,6 +2591,14 @@ console.log('\n[11d] client half — full-text results and archived conversation
     previewHarness.flushEffects();
     const turnObserver = intersectionObserver;
     assert(dialog?.props['aria-modal'] === 'true' && elementText(dialog).includes('Alpha'), 'conversation preview is an accessible labelled dialog');
+    documentMock.activeElement = previewLastControl;
+    let previewTrappedForward = false;
+    documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { previewTrappedForward = true; } });
+    assert(previewTrappedForward && documentMock.activeElement === previewCloseControl, 'conversation preview traps forward tab focus');
+    documentMock.activeElement = previewCloseControl;
+    let previewTrappedReverse = false;
+    documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: true, preventDefault: () => { previewTrappedReverse = true; } });
+    assert(previewTrappedReverse && documentMock.activeElement === previewLastControl, 'conversation preview traps reverse tab focus');
     assert(collectElements(rail).filter((element) => element.type === 'button').length === 3, 'preview renders one timeline navigation control per visible message');
     assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
     const toolDisclosures = previewElements.filter((element) => element.type === DisclosureRowStub && element.props?.title === 'read_file');
@@ -2514,6 +2643,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
       const imageElements = collectElements(imageTree);
       assert(createdObjectUrls.length === 1, 'visible archived image creates one object URL');
       assert(imageElements.some((element) => element.type === 'img' && element.props?.src === createdObjectUrls[0]), 'archived image renders verified bytes');
+      assert(imageElements.some((element) => element.type === 'img' && element.props?.alt === 'archive.png · 2×2'), 'archived image alt text includes its safe name and verified dimensions');
       imageHarness.unmount();
       assert(imageObserver?.disconnected === true && requests.at(-1)?.options.signal?.aborted === true, 'closing an image disconnects observation and aborts pending work');
       assert(revokedObjectUrls.includes(createdObjectUrls[0]), 'closing preview revokes archived image URLs');
@@ -2533,7 +2663,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
       intersectionObserver?.callback([{ isIntersecting: true, target: failedImageRoot }]);
       await new Promise((resolve) => setTimeout(resolve, 0));
       failedImageTree = failedImageHarness.render(imageProps);
-      assert(failedImageTree.props?.className === 'dac-preview-image-placeholder' && elementText(failedImageTree) === '图片不可用', 'failed archived image renders only its localized placeholder');
+      assert(failedImageTree.props?.className === 'dac-preview-image-placeholder' && elementText(failedImageTree) === '图片不可用 · archive.png · 2×2', 'failed archived image retains its localized safe descriptor');
       assert(previewElements.some((element) => element.type === MarkdownTextStub && element.props?.text === '这是助手回复'), 'failed archived image leaves assistant transcript content rendered');
       failedImageHarness.unmount();
       globalThis.fetch = imageFetch;
@@ -2556,12 +2686,13 @@ console.log('\n[11d] client half — full-text results and archived conversation
     const secondRailButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '转到第 2 条消息');
     assert(secondRailButton?.props['aria-current'] === 'true', 'turn rail marks the currently visible node');
 
+    const closeFocusesBeforeRerender = closeFocuses;
     const rerenderedSection = harness.render({ t, refreshSidebar: () => {} });
     const rerenderedPreview = findComponentElement(rerenderedSection, 'PreviewDialog');
     previewTree = previewHarness.render(rerenderedPreview?.props ?? previewElement.props);
     previewElements = collectElements(previewTree);
     previewHarness.flushEffects();
-    assert(closeFocuses === 1, 'parent re-render does not refocus the open conversation preview');
+    assert(closeFocuses === closeFocusesBeforeRerender, 'parent re-render does not refocus the open conversation preview');
     previewHarness.unmount();
     assert(turnObserver?.disconnected === true, 'turn rail disconnects its observer on unmount');
   }
