@@ -1297,8 +1297,16 @@ class MockMutationObserver {
   disconnect() { this.disconnected = true; }
 }
 const storageMap = new Map();
+function MarkdownTextStub(props) { return { type: 'markdown-stub', props }; }
+function DisclosureRowStub(props) { return { type: 'disclosure-stub', props }; }
+function JsonBlockStub(props) { return { type: 'json-stub', props }; }
 const moduleTable = {
   'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+  '@deepseek-ai/dsh-client-ui-primitives': {
+    MarkdownText: MarkdownTextStub,
+    DisclosureRow: DisclosureRowStub,
+    JsonBlock: JsonBlockStub,
+  },
   react: {
     useState: (v) => [v, () => {}],
     useEffect: () => {},
@@ -1535,7 +1543,10 @@ function collectElements(node, result = []) {
     return result;
   }
   if (typeof node !== 'object') return result;
-  if (typeof node.type === 'function') return collectElements(node.type(node.props ?? {}), result);
+  if (typeof node.type === 'function') {
+    result.push(node);
+    return collectElements(node.type(node.props ?? {}), result);
+  }
   result.push(node);
   collectElements(node.props?.children, result);
   return result;
@@ -2298,7 +2309,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
             hits: [{ sessionId: 'session-b', matches: [{ seq: 21, time: 21, role: 'assistant', excerpt: '…body needle from an archived answer…' }] }],
             skipped: [],
           }
-          : path.endsWith('/preview')
+            : path.endsWith('/preview')
             ? {
               ok: true,
               session: archivedRows[0],
@@ -2308,7 +2319,11 @@ console.log('\n[11d] client half — full-text results and archived conversation
               nextOffset: null,
               messages: [
                 { seq: 10, time: 10, role: 'user', source: 'user', segments: [{ kind: 'text', label: null, text: '查看归档内容', isError: false }] },
-                { seq: 11, time: 11, role: 'assistant', source: 'model', segments: [{ kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', isError: false }] },
+                { seq: 11, time: 11, role: 'assistant', source: 'model', segments: [
+                  { kind: 'text', label: null, text: '这是助手回复', isError: false },
+                  { kind: 'reasoning', label: null, text: '这是推理过程', isError: false },
+                  { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', isError: false },
+                ] },
               ],
             }
             : {};
@@ -2367,6 +2382,15 @@ console.log('\n[11d] client half — full-text results and archived conversation
     assert(collectElements(rail).filter((element) => element.type === 'button').length === 2, 'preview renders one timeline navigation control per message');
     assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
     assert(elementText(dialog).includes('read_file') && elementText(dialog).includes('README.md'), 'preview renders structured tool-call content');
+    const userRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'user');
+    const assistantRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'assistant');
+    assert(userRow?.props.className.includes('dac-preview-user'), 'preview aligns the user row with the native bubble treatment');
+    assert(assistantRow?.props.className.includes('dac-preview-assistant'), 'preview aligns the assistant row without a generic card');
+    assert(collectElements(userRow).some((element) => element.props?.className === 'dac-preview-user-bubble'), 'user text is wrapped by the native-style bubble');
+    assert(collectElements(assistantRow).some((element) => element.type === MarkdownTextStub), 'assistant text uses the host Markdown primitive');
+    assert(previewElements.some((element) => element.type === DisclosureRowStub), 'reasoning uses the host disclosure primitive');
+    assert(!previewElements.some((element) => element.props?.className === 'dac-preview-message'), 'generic preview cards are removed');
+    assert(elementText(dialog).includes('只读预览'), 'preview displays the localized read-only label');
 
     const rerenderedSection = harness.render({ t, refreshSidebar: () => {} });
     const rerenderedPreview = findComponentElement(rerenderedSection, 'PreviewDialog');
@@ -2380,6 +2404,16 @@ console.log('\n[11d] client half — full-text results and archived conversation
   harness.unmount();
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11e] client half — preview primitive fallback');
+{
+  const missingPrimitives = clientExports.__test.resolvePreviewPrimitives(() => { throw new Error('missing'); });
+  assert(Object.values(missingPrimitives).every((primitive) => primitive === null), 'missing public preview primitives resolve to null entries');
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientExports.__test.PreviewMarkdown);
+  const fallback = harness.render({ text: '<b>literal</b>', t, primitives: missingPrimitives });
+  assert(fallback.type === 'p' && fallback.props.className === 'dac-preview-plain' && fallback.props.children === '<b>literal</b>', 'preview Markdown fallback renders literal text in a plain paragraph');
 }
 
 console.log('\n[12] client half — sidebar refresh inject face');
