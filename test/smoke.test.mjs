@@ -2297,6 +2297,17 @@ console.log('\n[11d] client half — full-text results and archived conversation
   assert(correlated?.[0]?.segments[0]?.result?.text === 'ok', 'tool correlation attaches the matching result');
   assert(correlated?.[1]?.segments[0]?.text === 'orphan', 'tool correlation retains an unmatched result');
 
+  const resultBeforeCall = clientExports.__test.buildPreviewNodes?.([{
+    seq: 4,
+    role: 'assistant',
+    segments: [
+      { kind: 'tool-result', toolCallId: 'call-late', text: 'too early', isError: false },
+      { kind: 'tool-call', callId: 'call-late', name: 'read_file', argumentsText: '{}' },
+    ],
+  }]);
+  assert(resultBeforeCall?.[0]?.segments.filter((segment) => segment.text === 'too early').length === 1, 'same-message result before its call remains unmatched exactly once');
+  assert(resultBeforeCall?.[0]?.segments[1]?.result === undefined, 'same-message result before its call is never folded into that call');
+
   const copyNode = clientExports.__test.buildPreviewNodes?.([{
     seq: 7,
     role: 'assistant',
@@ -2356,7 +2367,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
                   { kind: 'text', label: null, text: '这是助手回复', isError: false },
                   { kind: 'reasoning', label: null, text: '这是推理过程', isError: false },
                   { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', callId: 'call-123', name: 'read_file', argumentsText: '{"path":"README.md"}', isError: false },
-                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', toolCallId: 'call-123', isError: false },
+                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', toolCallId: 'call-123', isError: true },
                   { kind: 'json', label: null, text: '{"answer":42}', isError: false },
                   { kind: 'opaque', label: null, text: 'unrecognized payload', isError: false },
                 ] },
@@ -2428,10 +2439,14 @@ console.log('\n[11d] client half — full-text results and archived conversation
     const toolDisclosures = previewElements.filter((element) => element.type === DisclosureRowStub && element.props?.title === 'read_file');
     const matchedToolElements = collectElements(toolDisclosures[0]);
     const toolArguments = matchedToolElements.filter((element) => element.type === JsonBlockStub && element.props?.payload?.path === 'README.md');
-    const toolResults = matchedToolElements.filter((element) => element.props?.className === 'dac-preview-tool-result' && elementText(element) === '{"ok":true}');
+    const toolResults = matchedToolElements.filter((element) => element.props?.className === 'dac-preview-tool-result dac-error' && elementText(element) === '{"ok":true}');
     assert(toolDisclosures.length === 1 && toolArguments.length === 1, 'preview renders structured tool-call content once');
-    assert(toolResults.length === 1, 'preview renders the matched tool result once');
+    assert(toolResults.length === 1, 'matched error result carries semantic styling on its result element');
     assert(elementText(dialog).includes('orphan result'), 'preview retains the unmatched tool result');
+    const orphanTool = previewElements.find((element) => element.type?.name === 'PreviewToolResult' && element.props?.segment?.text === 'orphan result');
+    const orphanResults = collectElements(orphanTool).filter((element) => element.props?.className === 'dac-preview-tool-result dac-error');
+    assert(orphanResults.length === 1, 'unmatched error result carries semantic styling on its result element');
+    assert(headChildren.find((element) => element.id === 'dsh-archived-chats-css')?.textContent.includes('.dac-preview-tool-result.dac-error{color:var(--dsw-alias-state-error-primary)}'), 'result error styling uses the semantic error token');
     assert(previewElements.some((element) => element.type === JsonBlockStub && element.props?.label === 'JSON'), 'preview gives JSON blocks a localized fallback label');
     assert(elementText(dialog).includes('未知内容') && elementText(dialog).includes('unrecognized payload'), 'preview safely localizes unknown segment fallback content');
     const userRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'user');
