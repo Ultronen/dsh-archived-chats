@@ -52,7 +52,7 @@ All screenshots below were captured from 0.9.0 in a local DeepSeek Harness `0.1.
 
 - **Complete archived-session list**, grouped by workspace (project) with a per-group count. Every group can be collapsed or expanded, and the state is remembered per browser.
 - **Full-text conversation search**: one search field matches titles, workspaces, tags, notes, user messages, assistant answers, and tool results, with a readable hit excerpt on each matching row.
-- **Archived conversation preview and turn navigation**: read projected messages without unarchiving; reasoning, tool calls, and tool results use collapsible sections, while the turn rail jumps through the timeline.
+- **Native archived conversation preview and turn navigation**: follow the Harness conversation layout with user messages on the right and assistant messages on the left; present Markdown, reasoning, tool activity, JSON, code, and available stored images read-only, while retaining a responsive turn rail for quick jumps. If the host lacks attachment capability, only images degrade and the rest of the preview remains readable.
 - **Filter and sort** by type (all / regular / subagent), project, and tag; then order results by newest, oldest, or title.
 - **Tags and notes**: open an editor from any row to attach up to 8 tags (24 Unicode characters each) and a note (2,000 Unicode characters). Tag chips render per row, overflowing past three into a `+N` indicator, and the tag filter narrows the list case-insensitively.
 - **Storage insights**: a summary strip reports the archived count, total measured size, and how many sessions could not be measured; each row shows its own size. Measurement never follows symbolic links and skips sessions whose directories are unreadable.
@@ -135,7 +135,8 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 
 ### 0.10.0
 
-- Added archived conversation preview using Harness canonical message projection, paginated message loading, and turn navigation.
+- Added archived conversation preview that follows the Harness conversation layout, with user messages on the right, assistant messages on the left, paginated message loading, and a responsive turn rail.
+- Markdown, reasoning, tool activity, JSON, code, and available stored images are presented read-only; a missing host attachment capability affects images only, not the rest of the conversation.
 - Added full-text search over Unicode conversation text and tool output, merged with the existing title/tag/note filters and displayed as row excerpts.
 - Hardened preview and search with guarded local POST routes, bounded bodies and results, four-way inspection concurrency, partial-failure degradation, and a bounded TTL/LRU memory cache.
 

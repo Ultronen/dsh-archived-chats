@@ -22,6 +22,7 @@ Current routes:
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 POST /plugins/dsh-archived-chats/preview
+POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
 POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
@@ -33,7 +34,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-Every mutating route, plus the preview/search routes that return conversation content, requires the `x-dsh-archived-chats: 1` header. Export is read-only. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
+Every mutating route, plus the preview, preview/image, and search routes that return conversation content, requires the `x-dsh-archived-chats: 1` header. preview/image and export are read-only and do not modify plugin or Harness state. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
 
 ## State and local data
 
@@ -49,7 +50,9 @@ The stats route measures session directories with concurrency four, skips symbol
 
 ## Preview and full-text search
 
-Preview and search accept only currently visible archived IDs; pending-deletion and unarchived sessions cannot be read. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments.
+Preview and search accept only currently visible archived IDs; pending-deletion and unarchived sessions cannot be read. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments and sanitized image descriptors.
+
+The preview/image authorization sequence is fixed: first require POST and `x-dsh-archived-chats: 1`, then bounded-parse `sessionId` and `attachmentId`; next re-confirm that the session is still in the currently visible archive set, find an exact image-descriptor match in that session's canonical projection, and only then read bytes through the optional `attachments.readImage` service and return them with `no-store` and `nosniff`. Cross-session, non-archived, and unprojected references are rejected before the attachment service is reached, and error responses never echo filesystem paths. A host without attachment-read capability returns `preview-image-unsupported`; this degrades images only and does not block text, Markdown, reasoning, tool, JSON, or code preview.
 
 Cross-session persistence inspection is limited to four concurrent reads. A broken session is reported in `skipped` while other hits still succeed. Canonical projections use a 30-second TTL, a 64-session LRU, and a per-session cached-code-point cap; oversized sessions remain searchable but do not stay resident. Unarchive, delete, and restore invalidate affected cache entries.
 
@@ -114,6 +117,10 @@ client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, 
 - Selected-item export, unarchive, and delete.
 - Import preview, disabled conflicts, and restore results.
 - Responsive settings-page markers and sidebar refresh injection.
+
+The preview prefers Harness's publicly exported `MarkdownText`, `DisclosureRow`, and `JsonBlock`. When a public primitive is unavailable, only that content falls back to escaped plain text, native `details`/`summary`, or `pre`; the plugin never reaches into a private chat renderer. A tool result folds into an earlier call only when its `toolCallId` exactly matches the call's `callId`, consuming matches in chronological order. Unmatched results remain standalone, and errors use the semantic error token. Images are read from the protected route into Blob URLs, may load lazily before entering the viewport, and abort their read and call `URL.revokeObjectURL` when the preview closes or the image node unmounts.
+
+The turn rail remains part of the preview: on desktop it stays to the left of the feed, jumps and follows feed scrolling, and exposes the active turn through `aria-current`; at 640px or narrower it moves above the feed and scrolls horizontally while user bubbles retain useful width. It is not replaced by a private host navigation component.
 
 The browser never mutates files directly. After an operation, the Host response becomes the new list baseline.
 

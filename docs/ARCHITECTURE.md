@@ -22,6 +22,7 @@
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 POST /plugins/dsh-archived-chats/preview
+POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
 POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
@@ -33,7 +34,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-所有修改路由以及会返回对话内容的 preview/search 路由都要求 `x-dsh-archived-chats: 1` 请求头。导出是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
+所有修改路由以及会返回对话内容的 preview、preview/image、search 路由都要求 `x-dsh-archived-chats: 1` 请求头。preview/image 和 export 都是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
 
 ## 状态和本地数据
 
@@ -49,7 +50,9 @@ stats 路由以并发 4 测量会话目录，跳过符号链接，结果缓存 3
 
 ## 预览和全文搜索
 
-preview 和 search 只接受当前可见归档 ID，等待删除或已取消归档的会话不可读。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落。
+preview 和 search 只接受当前可见归档 ID，等待删除或已取消归档的会话不可读。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落和净化后的图片描述符。
+
+preview/image 的授权顺序固定为：先验证 POST 和 `x-dsh-archived-chats: 1`，再有界解析 `sessionId` 与 `attachmentId`；随后重新确认会话仍在当前可见归档集合中，从该会话的规范投影中查找完全匹配的图片描述符，最后才通过可选的 `attachments.readImage` 服务读取并以 `no-store`、`nosniff` 响应返回字节。跨会话、非归档或不在投影中的引用均在读取附件前拒绝，错误响应不回显文件路径。宿主没有附件读取能力时返回 `preview-image-unsupported`；这只降级图片，不阻塞文本、Markdown、思考、工具、JSON 或代码预览。
 
 跨会话搜索的持久层读取并发上限为 4；单个会话失败会记入 skipped，其他命中仍正常返回。规范投影使用 30 秒 TTL、64 会话 LRU 和单会话最大缓存字符数保护内存；超大会话仍可搜索，但不会常驻缓存。取消归档、删除和恢复会使相关缓存失效。
 
@@ -114,6 +117,10 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 - 选中项批量导出、取消归档和删除。
 - 导入预览、冲突禁用和恢复结果。
 - 响应式设置页标记和侧边栏刷新注入面。
+
+预览优先使用 Harness 公开导出的 `MarkdownText`、`DisclosureRow` 和 `JsonBlock`；某个公开原语不可用时，只把对应内容降级为转义的纯文本、原生 `details`/`summary` 或 `pre`，不调用私有聊天渲染器。工具结果仅在其 `toolCallId` 与更早工具调用的 `callId` 精确匹配时折叠进该调用，匹配按时间顺序消费；未匹配结果保留为独立条目，错误状态使用语义错误令牌。图片由受保护路由读取为 Blob URL，离开视口前可按需加载，预览关闭或图片节点卸载时会中止读取并调用 `URL.revokeObjectURL`。
+
+轮次轨道保留在预览内：桌面位于消息流左侧，跳转后随消息流滚动并用 `aria-current` 标出当前轮次；宽度不超过 640px 时轨道移到消息流上方并水平滚动，用户气泡仍保留可用宽度。轨道不会被替换为宿主私有导航组件。
 
 浏览器操作不会直接改变本地文件；操作完成后以 Host 返回的状态作为新的列表基线。
 
