@@ -10,7 +10,7 @@ The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
 - The browser client in lib/client.js registers the Archived Chats settings.section and renders state and actions.
-- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, and lib/stats.js so it can be tested independently.
+- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, and lib/stats.js so it can be tested independently.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
 
@@ -21,6 +21,8 @@ Current routes:
 ~~~text
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
+POST /plugins/dsh-archived-chats/preview
+POST /plugins/dsh-archived-chats/search
 POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
@@ -31,7 +33,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-Every mutating route requires the x-dsh-archived-chats: 1 header. Export is read-only. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
+Every mutating route, plus the preview/search routes that return conversation content, requires the `x-dsh-archived-chats: 1` header. Export is read-only. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
 
 ## State and local data
 
@@ -44,6 +46,12 @@ $DSH_HOME/plugin-data/archived-chats/metadata.json
 The metadata file is versioned. Writes are serialized and replace the file through a temporary-file rename. Unreadable or unsupported versions are never overwritten.
 
 The stats route measures session directories with concurrency four, skips symbolic links, and caches results for 30 seconds. A measurement failure marks only that row unavailable; list and mutation actions continue. Delete invalidates the affected cache row.
+
+## Preview and full-text search
+
+Preview and search accept only currently visible archived IDs; pending-deletion and unarchived sessions cannot be read. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments.
+
+Cross-session persistence inspection is limited to four concurrent reads. A broken session is reported in `skipped` while other hits still succeed. Canonical projections use a 30-second TTL, a 64-session LRU, and a per-session cached-code-point cap; oversized sessions remain searchable but do not stay resident. Unarchive, delete, and restore invalidate affected cache entries.
 
 ## Export flow
 
@@ -119,7 +127,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 ## Compatibility and testing
 
-The compatibility baseline is DeepSeek Harness 0.1.0-rc.7, with a real-host page pass on rc.8. When host slots, design tokens, or session internals change, run the smoke suite first and then repeat a real-host check.
+The automated compatibility baseline is DeepSeek Harness 0.1.0-rc.7; the v0.9.0 surfaces received a real-host page pass on rc.8. The v0.10.0 conversation search and preview still require a fresh real-host pass before publication. When host slots, design tokens, or session internals change, run the smoke suite first and then repeat a real-host check.
 
 Coverage includes:
 
@@ -128,6 +136,7 @@ Coverage includes:
 - restore.js transactional commit, rollback, and unsupported capabilities.
 - metadata.js versioning, concurrency, and atomic writes.
 - stats.js symlink handling, caching, and concurrency limits.
+- search.js message projection, Unicode search, pagination, partial failures, and TTL/LRU caching.
 - Host routes and browser settings smoke/responsive behavior.
 
 Run:

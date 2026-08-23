@@ -118,8 +118,92 @@ const events = {
   'session-a': [
     { type: 'session/title', data: { title: '第一个归档' } },
     { type: 'session/title', data: { title: '改名后的归档' } },
+    {
+      seq: 10,
+      time: Date.parse('2026-08-19T10:00:00.000Z'),
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-search-a',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: '部署失败 EADDRINUSE，请帮我查端口' }],
+      },
+    },
+    {
+      seq: 11,
+      time: Date.parse('2026-08-19T10:00:01.000Z'),
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'assistant-search-a',
+          role: 'assistant',
+          source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+          content: [
+            { type: 'reasoning', text: '需要确认哪个进程占用了端口' },
+            { type: 'text', text: '请运行 lsof -i :3000 找到占用端口的进程。' },
+            { type: 'tool-call', id: 'call-search-a', name: 'read_file', arguments: '{"path":"server.js"}' },
+          ],
+        },
+      },
+    },
+    {
+      seq: 12,
+      time: Date.parse('2026-08-19T10:00:02.000Z'),
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'tool-search-a',
+          role: 'user',
+          source: { kind: 'tool', callId: 'call-search-a' },
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'call-search-a',
+            isError: false,
+            content: [{ type: 'text', text: 'server.js listens on port 3000' }],
+          }],
+        },
+      },
+    },
+    {
+      seq: 13,
+      time: Date.parse('2026-08-19T10:00:03.000Z'),
+      type: 'assistant/message',
+      surfaceOp: { op: 'replace', start: 11, end: 11 },
+      sourceEventSeqs: [11],
+      data: {
+        turn: 2,
+        step: 1,
+        message: {
+          id: 'assistant-search-replacement',
+          role: 'assistant',
+          source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+          content: [{ type: 'text', text: 'replacement-only-secret-needle' }],
+        },
+      },
+    },
   ],
-  'session-b': [{ type: 'session/title', data: { title: 'Beta chat' } }],
+  'session-b': [
+    { type: 'session/title', data: { title: 'Beta chat' } },
+    {
+      seq: 20,
+      time: Date.parse('2026-08-19T11:00:00.000Z'),
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-search-b',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'Prepare the quarterly budget report' }],
+      },
+    },
+  ],
   'session-c': [],
 };
 const headerRows = [
@@ -195,8 +279,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 10, `ten archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 12, `twelve archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'preview', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
@@ -210,7 +294,62 @@ assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claud
   assert(restoreGet.status === 405, `import restore rejects non-POST methods (got ${restoreGet.status})`);
 }
 
-console.log('\n[1a] POST /export validation');
+console.log('\n[1a] POST /preview and /search');
+{
+  const jsonReq = (path, body, headers = { 'x-dsh-archived-chats': '1' }, method = 'POST') => call(
+    routes,
+    `/plugins/dsh-archived-chats/${path}`,
+    mockReq(method, { 'content-type': 'application/json', ...headers }, JSON.stringify(body)),
+  );
+
+  const previewGet = await jsonReq('preview', { sessionId: 'session-a' }, {}, 'GET');
+  assert(previewGet.status === 405, `preview rejects non-POST methods (got ${previewGet.status})`);
+  const previewNoGuard = await jsonReq('preview', { sessionId: 'session-a' }, {});
+  assert(previewNoGuard.status === 403, `preview rejects missing guard header (got ${previewNoGuard.status})`);
+  const searchNoGuard = await jsonReq('search', { query: 'EADDRINUSE' }, {});
+  assert(searchNoGuard.status === 403, `search rejects missing guard header (got ${searchNoGuard.status})`);
+
+  const preview = await jsonReq('preview', { sessionId: 'session-a', offset: 0, limit: 2 });
+  assert(preview.status === 200, `preview answers 200 (got ${preview.status})`);
+  if (preview.status === 200) {
+    const body = preview.json();
+    assert(body.session?.id === 'session-a' && body.session?.title === '改名后的归档', 'preview identifies the archived session');
+    assert(body.total === 3 && body.messages.length === 2 && body.nextOffset === 2, 'preview paginates projected messages');
+    assert(body.messages[0]?.role === 'user' && body.messages[0]?.seq === 10, 'preview keeps message role and timeline sequence');
+    assert(body.messages[1]?.segments?.some((segment) => segment.kind === 'tool-call' && segment.label === 'read_file'), 'preview keeps structured tool calls');
+  }
+
+  const previewTail = await jsonReq('preview', { sessionId: 'session-a', offset: 2, limit: 2 });
+  assert(previewTail.status === 200 && previewTail.json().messages[0]?.role === 'tool', 'preview loads the next timeline page');
+
+  const activeOnly = await jsonReq('preview', { sessionId: 'session-live' });
+  assert(activeOnly.status === 404, `preview refuses non-archived sessions (got ${activeOnly.status})`);
+
+  const search = await jsonReq('search', { query: 'eaddrinuse', limit: 20 });
+  assert(search.status === 200, `full-text search answers 200 (got ${search.status})`);
+  if (search.status === 200) {
+    const body = search.json();
+    assert(body.hits.length === 1 && body.hits[0].sessionId === 'session-a', 'full-text search finds archived message content case-insensitively');
+    assert(body.hits[0].matches[0]?.excerpt.includes('EADDRINUSE'), 'full-text hit includes a bounded readable excerpt');
+  }
+
+  const toolSearch = await jsonReq('search', { query: 'server.js port 3000', limit: 20 });
+  assert(toolSearch.status === 200 && toolSearch.json().hits[0]?.sessionId === 'session-a', 'full-text search includes tool output');
+
+  const replacementSearch = await jsonReq('search', { query: 'replacement-only-secret-needle', limit: 20 });
+  assert(replacementSearch.status === 200 && replacementSearch.json().hits.length === 0, 'full-text search ignores replacement copies');
+
+  const oversizedSearch = await jsonReq('search', { query: 'needle', padding: 'x'.repeat(64 * 1024) });
+  assert(oversizedSearch.status === 413, `full-text search rejects oversized JSON bodies (got ${oversizedSearch.status})`);
+  const malformedPreview = await call(
+    routes,
+    '/plugins/dsh-archived-chats/preview',
+    mockReq('POST', { 'content-type': 'application/json', 'x-dsh-archived-chats': '1' }, '{broken'),
+  );
+  assert(malformedPreview.status === 400, `preview rejects malformed JSON bodies (got ${malformedPreview.status})`);
+}
+
+console.log('\n[1b] POST /export validation');
 {
   const path = '/plugins/dsh-archived-chats/export';
   if (routes.has(path)) {
@@ -1175,7 +1314,12 @@ console.log('\n[10b] client model — sorting and visible selection');
   const inspectRequests = [];
   globalThis.fetch = async (url, options) => {
     inspectRequests.push({ url, options });
-    return { ok: true, status: 200, json: async () => ({ ok: true, token: 'token-a', nonce: 'nonce-a', sessions: [] }) };
+    const body = String(url).endsWith('/preview')
+      ? { ok: true, session: { id: 'session-a', title: 'Alpha' }, messages: [], total: 0, nextOffset: null }
+      : String(url).endsWith('/search')
+        ? { ok: true, query: 'needle', hits: [{ sessionId: 'session-a', matches: [{ seq: 1, excerpt: 'needle' }] }], skipped: [] }
+        : { ok: true, token: 'token-a', nonce: 'nonce-a', sessions: [] };
+    return { ok: true, status: 200, json: async () => body };
   };
   const importPreview = await clientExports.__test.submitImportFile?.(new Blob(['zip'], { type: 'application/zip' }));
   assert(importPreview?.token === 'token-a', 'import helper returns inspect preview');
@@ -1183,6 +1327,22 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(inspectRequests[0]?.options.method === 'POST', 'import helper uses POST');
   assert(inspectRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import helper sends the guard header');
   assert(inspectRequests[0]?.options.body instanceof FormData && inspectRequests[0]?.options.body.get('file') !== null, 'import helper sends a multipart file field');
+
+  assert(typeof clientExports.__test.fetchArchivePreview === 'function', 'client exposes the archive preview request boundary');
+  const previewBody = await clientExports.__test.fetchArchivePreview?.('session-a', 50, 25);
+  const previewRequest = inspectRequests.at(-1);
+  assert(previewBody?.session?.id === 'session-a', 'preview helper returns the projected page');
+  assert(previewRequest?.url === '/plugins/dsh-archived-chats/preview', 'preview helper targets the guarded preview route');
+  assert(previewRequest?.options.method === 'POST' && previewRequest?.options.headers['x-dsh-archived-chats'] === '1', 'preview helper uses a guarded POST');
+  assert(previewRequest?.options.body === '{"sessionId":"session-a","offset":50,"limit":25}', 'preview helper sends the requested timeline window');
+
+  assert(typeof clientExports.__test.fetchArchiveSearch === 'function', 'client exposes the archive full-text request boundary');
+  const searchBody = await clientExports.__test.fetchArchiveSearch?.('needle', 20);
+  const searchRequest = inspectRequests.at(-1);
+  assert(searchBody?.hits?.[0]?.sessionId === 'session-a', 'search helper returns full-text hits');
+  assert(searchRequest?.url === '/plugins/dsh-archived-chats/search', 'search helper targets the guarded search route');
+  assert(searchRequest?.options.method === 'POST' && searchRequest?.options.headers['x-dsh-archived-chats'] === '1', 'search helper uses a guarded POST');
+  assert(searchRequest?.options.body === '{"query":"needle","limit":20}', 'search helper sends only the bounded query contract');
 
   assert(clientExports.__test.submitInteropFile === undefined, 'client test surface omits external import helpers');
   assert(clientExports.__test.submitInteropExportPreview === undefined && clientExports.__test.downloadInteropExport === undefined, 'client test surface omits external export helpers');
@@ -1285,10 +1445,12 @@ function createHookHarness(component) {
   const states = [];
   const refs = [];
   const effects = [];
+  const memos = [];
   let pendingEffects = [];
   let stateIndex = 0;
   let refIndex = 0;
   let effectIndex = 0;
+  let memoIndex = 0;
   const sameDependencies = (left, right) => Array.isArray(left)
     && Array.isArray(right)
     && left.length === right.length
@@ -1310,14 +1472,23 @@ function createHookHarness(component) {
       const index = effectIndex++;
       if (!sameDependencies(effects[index]?.deps, deps)) pendingEffects.push({ index, effect, deps });
     },
-    useMemo: (fn) => fn(),
-    useCallback: (fn) => fn,
+    useMemo(fn, deps) {
+      const index = memoIndex++;
+      if (!sameDependencies(memos[index]?.deps, deps)) memos[index] = { deps, value: fn() };
+      return memos[index].value;
+    },
+    useCallback(fn, deps) {
+      const index = memoIndex++;
+      if (!sameDependencies(memos[index]?.deps, deps)) memos[index] = { deps, value: fn };
+      return memos[index].value;
+    },
   };
   return {
     render(props) {
       stateIndex = 0;
       refIndex = 0;
       effectIndex = 0;
+      memoIndex = 0;
       pendingEffects = [];
       Object.assign(moduleTable.react, hooks);
       return component(props);
@@ -1433,7 +1604,7 @@ console.log('\n[11b] client half — selection mode hides list checkboxes by def
   assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择 Alpha'), 'selection mode exposes chat checkboxes');
   assert(finishSelection !== undefined, 'selection mode exposes a completion action');
 
-  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索已归档聊天');
+  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
   selectionSearch?.props.onChange({ target: { value: 'no visible results' } });
   const emptySelectionTree = harness.render({ t, refreshSidebar: () => {} });
   assert(collectElements(emptySelectionTree).some((element) => element.type === 'button' && elementText(element) === '完成'), 'selection mode can finish when filters have no visible results');
@@ -1978,6 +2149,113 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elements.filter((el) => el.type === 'button' && elementText(el) === '取消归档').length === 3, 'statistics failure keeps unarchive actions');
   assert(elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注').every((el) => el.props?.disabled !== true), 'statistics failure keeps metadata editing usable');
 
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11d] client half — full-text results and archived conversation preview');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  const archivedRows = [
+    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一', tags: [], note: '' },
+    { id: 'session-b', title: 'Beta', createdAt: 20, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二', tags: [], note: '' },
+  ];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    const path = String(url);
+    const payload = path.endsWith('/state')
+      ? { metadataStatus: 'ready', sessions: archivedRows }
+      : path.endsWith('/stats')
+        ? { summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }
+        : path.endsWith('/search')
+          ? {
+            ok: true,
+            query: 'needle',
+            hits: [{ sessionId: 'session-b', matches: [{ seq: 21, time: 21, role: 'assistant', excerpt: '…body needle from an archived answer…' }] }],
+            skipped: [],
+          }
+          : path.endsWith('/preview')
+            ? {
+              ok: true,
+              session: archivedRows[0],
+              offset: 0,
+              limit: 50,
+              total: 2,
+              nextOffset: null,
+              messages: [
+                { seq: 10, time: 10, role: 'user', source: 'user', segments: [{ kind: 'text', label: null, text: '查看归档内容', isError: false }] },
+                { seq: 11, time: 11, role: 'assistant', source: 'model', segments: [{ kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', isError: false }] },
+              ],
+            }
+            : {};
+    return { ok: true, status: 200, json: async () => payload };
+  };
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  let elements = collectElements(tree);
+
+  const previewTrigger = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  assert(previewTrigger !== undefined, 'each archived row exposes an accessible conversation preview action');
+
+  const searchInput = elements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
+  assert(searchInput !== undefined, 'search copy promises metadata and conversation-content search');
+  searchInput?.props.onChange({ target: { value: 'needle' } });
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 330));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  const rows = elements.filter((element) => element.props?.className === 'dac-row');
+  assert(rows.length === 1 && elementText(rows[0]).includes('Beta'), 'remote body hit joins the existing archive filters');
+  assert(elementText(rows[0]).includes('body needle from an archived answer'), 'body hit renders its readable excerpt in the row');
+  assert(requests.some((request) => request.url.endsWith('/search') && request.options.headers?.['x-dsh-archived-chats'] === '1'), 'debounced body search uses the guarded route');
+
+  // Clear the filter so Alpha is visible again, then open its projected log.
+  const filteredSearch = elements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
+  filteredSearch?.props.onChange({ target: { value: '' } });
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  const alphaPreview = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
+  await alphaPreview?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const previewElement = findComponentElement(tree, 'PreviewDialog');
+  assert(previewElement !== undefined, 'preview action opens the real conversation dialog component');
+  if (previewElement !== undefined) {
+    const previewHarness = createHookHarness(previewElement.type);
+    let previewTree = previewHarness.render(previewElement.props);
+    let previewElements = collectElements(previewTree);
+    const dialog = previewElements.find((element) => element.props?.role === 'dialog');
+    const rail = previewElements.find((element) => element.props?.className === 'dac-preview-rail');
+    const closeButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭预览');
+    let closeFocuses = 0;
+    if (closeButton?.props.ref) closeButton.props.ref.current = { focus: () => { closeFocuses += 1; } };
+    previewHarness.flushEffects();
+    assert(dialog?.props['aria-modal'] === 'true' && elementText(dialog).includes('Alpha'), 'conversation preview is an accessible labelled dialog');
+    assert(collectElements(rail).filter((element) => element.type === 'button').length === 2, 'preview renders one timeline navigation control per message');
+    assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
+    assert(elementText(dialog).includes('read_file') && elementText(dialog).includes('README.md'), 'preview renders structured tool-call content');
+
+    const rerenderedSection = harness.render({ t, refreshSidebar: () => {} });
+    const rerenderedPreview = findComponentElement(rerenderedSection, 'PreviewDialog');
+    previewTree = previewHarness.render(rerenderedPreview?.props ?? previewElement.props);
+    previewElements = collectElements(previewTree);
+    previewHarness.flushEffects();
+    assert(closeFocuses === 1, 'parent re-render does not refocus the open conversation preview');
+    previewHarness.unmount();
+  }
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
 

@@ -10,7 +10,7 @@
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
 - 浏览器客户端位于 lib/client.js，通过 settings.section 注册「已归档的聊天」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js 和 lib/stats.js 中，便于独立测试。
+- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js 和 lib/stats.js 中，便于独立测试。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
 
@@ -21,6 +21,8 @@
 ~~~text
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
+POST /plugins/dsh-archived-chats/preview
+POST /plugins/dsh-archived-chats/search
 POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
@@ -31,7 +33,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-所有修改路由都要求 x-dsh-archived-chats: 1 请求头。导出是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
+所有修改路由以及会返回对话内容的 preview/search 路由都要求 `x-dsh-archived-chats: 1` 请求头。导出是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
 
 ## 状态和本地数据
 
@@ -44,6 +46,12 @@ $DSH_HOME/plugin-data/archived-chats/metadata.json
 元数据文件带版本号，写入通过队列串行化，并用临时文件重命名替换。无法解析或不支持的版本不会被覆盖。
 
 stats 路由以并发 4 测量会话目录，跳过符号链接，结果缓存 30 秒。测量失败只标记当前行不可用，不阻塞列表和其他操作；删除会使对应缓存失效。
+
+## 预览和全文搜索
+
+preview 和 search 只接受当前可见归档 ID，等待删除或已取消归档的会话不可读。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落。
+
+跨会话搜索的持久层读取并发上限为 4；单个会话失败会记入 skipped，其他命中仍正常返回。规范投影使用 30 秒 TTL、64 会话 LRU 和单会话最大缓存字符数保护内存；超大会话仍可搜索，但不会常驻缓存。取消归档、删除和恢复会使相关缓存失效。
 
 ## 导出流程
 
@@ -119,7 +127,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 
 ## 兼容性和测试
 
-兼容性基线是 DeepSeek Harness 0.1.0-rc.7，并在 rc.8 宿主上做过真实页面复核。宿主插槽、设计令牌或会话内部接口变化时，应先运行冒烟测试，再做真实宿主检查。
+自动化兼容性基线是 DeepSeek Harness 0.1.0-rc.7；v0.9.0 界面已在 rc.8 宿主上复核。v0.10.0 的正文搜索与对话预览在发布前仍需真实宿主检查。宿主插槽、设计令牌或会话内部接口变化时，应先运行冒烟测试，再做真实宿主检查。
 
 测试覆盖：
 
@@ -128,6 +136,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 - restore.js 的事务提交、回滚和能力缺失。
 - metadata.js 的版本、并发和原子写入。
 - stats.js 的符号链接、缓存和并发限制。
+- search.js 的消息投影、Unicode 搜索、分页、部分失败与 TTL/LRU 缓存。
 - Host 路由和浏览器设置页的冒烟及响应式行为。
 
 运行：
