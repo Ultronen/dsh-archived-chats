@@ -2323,6 +2323,9 @@ console.log('\n[11d] client half — full-text results and archived conversation
                   { kind: 'text', label: null, text: '这是助手回复', isError: false },
                   { kind: 'reasoning', label: null, text: '这是推理过程', isError: false },
                   { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', isError: false },
+                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', isError: false },
+                  { kind: 'json', label: null, text: '{"answer":42}', isError: false },
+                  { kind: 'opaque', label: null, text: 'unrecognized payload', isError: false },
                 ] },
               ],
             }
@@ -2382,6 +2385,10 @@ console.log('\n[11d] client half — full-text results and archived conversation
     assert(collectElements(rail).filter((element) => element.type === 'button').length === 2, 'preview renders one timeline navigation control per message');
     assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
     assert(elementText(dialog).includes('read_file') && elementText(dialog).includes('README.md'), 'preview renders structured tool-call content');
+    assert(elementText(dialog).includes('工具调用: read_file'), 'preview localizes the tool-call summary prefix');
+    assert(elementText(dialog).includes('工具结果: call-123'), 'preview localizes the tool-result summary prefix');
+    assert(previewElements.some((element) => element.type === JsonBlockStub && element.props?.label === 'JSON'), 'preview gives JSON blocks a localized fallback label');
+    assert(elementText(dialog).includes('未知内容') && elementText(dialog).includes('unrecognized payload'), 'preview safely localizes unknown segment fallback content');
     const userRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'user');
     const assistantRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'assistant');
     assert(userRow?.props.className.includes('dac-preview-user'), 'preview aligns the user row with the native bubble treatment');
