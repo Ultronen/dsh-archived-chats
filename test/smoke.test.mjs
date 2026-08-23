@@ -1298,7 +1298,7 @@ class MockMutationObserver {
 }
 const storageMap = new Map();
 function MarkdownTextStub(props) { return { type: 'markdown-stub', props }; }
-function DisclosureRowStub(props) { return { type: 'disclosure-stub', props }; }
+function DisclosureRowStub(props) { return { type: 'disclosure-stub', props: { ...props, children: [props.title, props.children] } }; }
 function JsonBlockStub(props) { return { type: 'json-stub', props }; }
 const moduleTable = {
   'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
@@ -2288,7 +2288,40 @@ console.log('\n[11c] client half — archive insights UI');
 
 console.log('\n[11d] client half — full-text results and archived conversation preview');
 {
+  const correlated = clientExports.__test.buildPreviewNodes?.([
+    { seq: 1, role: 'assistant', segments: [{ kind: 'tool-call', callId: 'call-a', name: 'read_file', argumentsText: '{}' }] },
+    { seq: 2, role: 'tool', segments: [{ kind: 'tool-result', toolCallId: 'call-a', text: 'ok', isError: false }] },
+    { seq: 3, role: 'tool', segments: [{ kind: 'tool-result', toolCallId: 'missing', text: 'orphan', isError: true }] },
+  ]);
+  assert(correlated?.length === 2, 'tool correlation folds one matching result without hiding an orphan');
+  assert(correlated?.[0]?.segments[0]?.result?.text === 'ok', 'tool correlation attaches the matching result');
+  assert(correlated?.[1]?.segments[0]?.text === 'orphan', 'tool correlation retains an unmatched result');
+
+  const copyNode = clientExports.__test.buildPreviewNodes?.([{
+    seq: 7,
+    role: 'assistant',
+    segments: [
+      { kind: 'text', text: 'answer' },
+      { kind: 'tool-call', name: 'read_file', argumentsText: '{"path":"README.md"}', result: { text: 'contents' } },
+    ],
+  }])[0];
+  assert(clientExports.__test.previewCopyText?.(copyNode) === 'answer\n\nread_file\n\n{"path":"README.md"}\n\ncontents', 'preview copy text follows visible segment order');
+
   const savedHooks = { ...moduleTable.react };
+  const savedIntersectionObserver = windowMock.IntersectionObserver;
+  let intersectionObserver = null;
+  class MockIntersectionObserver {
+    constructor(callback, options) {
+      this.callback = callback;
+      this.options = options;
+      this.observed = [];
+      intersectionObserver = this;
+    }
+    observe(element) { this.observed.push(element); }
+    unobserve(element) { this.observed = this.observed.filter((candidate) => candidate !== element); }
+    disconnect() { this.disconnected = true; }
+  }
+  windowMock.IntersectionObserver = MockIntersectionObserver;
   const savedFetch = globalThis.fetch;
   const requests = [];
   const archivedRows = [
@@ -2322,10 +2355,13 @@ console.log('\n[11d] client half — full-text results and archived conversation
                 { seq: 11, time: 11, role: 'assistant', source: 'model', segments: [
                   { kind: 'text', label: null, text: '这是助手回复', isError: false },
                   { kind: 'reasoning', label: null, text: '这是推理过程', isError: false },
-                  { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', isError: false },
-                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', isError: false },
+                  { kind: 'tool-call', label: 'read_file', text: '{"path":"README.md"}', callId: 'call-123', name: 'read_file', argumentsText: '{"path":"README.md"}', isError: false },
+                  { kind: 'tool-result', label: 'call-123', text: '{"ok":true}', toolCallId: 'call-123', isError: false },
                   { kind: 'json', label: null, text: '{"answer":42}', isError: false },
                   { kind: 'opaque', label: null, text: 'unrecognized payload', isError: false },
+                ] },
+                { seq: 12, time: 12, role: 'tool', source: 'tool', segments: [
+                  { kind: 'tool-result', label: 'missing', text: 'orphan result', toolCallId: 'missing', isError: true },
                 ] },
               ],
             }
@@ -2380,13 +2416,22 @@ console.log('\n[11d] client half — full-text results and archived conversation
     const closeButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭预览');
     let closeFocuses = 0;
     if (closeButton?.props.ref) closeButton.props.ref.current = { focus: () => { closeFocuses += 1; } };
+    const feed = previewElements.find((element) => element.props?.className === 'dac-preview-feed');
+    if (feed?.props.ref) feed.props.ref.current = { id: 'preview-feed' };
+    const previewRows = previewElements.filter((element) => element.props?.['data-preview-key']);
+    const previewTargets = previewRows.map((row) => ({ dataset: { previewKey: row.props['data-preview-key'] } }));
+    previewRows.forEach((row, index) => row.props.ref?.(previewTargets[index]));
     previewHarness.flushEffects();
     assert(dialog?.props['aria-modal'] === 'true' && elementText(dialog).includes('Alpha'), 'conversation preview is an accessible labelled dialog');
-    assert(collectElements(rail).filter((element) => element.type === 'button').length === 2, 'preview renders one timeline navigation control per message');
+    assert(collectElements(rail).filter((element) => element.type === 'button').length === 3, 'preview renders one timeline navigation control per visible message');
     assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
-    assert(elementText(dialog).includes('read_file') && elementText(dialog).includes('README.md'), 'preview renders structured tool-call content');
-    assert(elementText(dialog).includes('工具调用: read_file'), 'preview localizes the tool-call summary prefix');
-    assert(elementText(dialog).includes('工具结果: call-123'), 'preview localizes the tool-result summary prefix');
+    const toolDisclosures = previewElements.filter((element) => element.type === DisclosureRowStub && element.props?.title === 'read_file');
+    const matchedToolElements = collectElements(toolDisclosures[0]);
+    const toolArguments = matchedToolElements.filter((element) => element.type === JsonBlockStub && element.props?.payload?.path === 'README.md');
+    const toolResults = matchedToolElements.filter((element) => element.props?.className === 'dac-preview-tool-result' && elementText(element) === '{"ok":true}');
+    assert(toolDisclosures.length === 1 && toolArguments.length === 1, 'preview renders structured tool-call content once');
+    assert(toolResults.length === 1, 'preview renders the matched tool result once');
+    assert(elementText(dialog).includes('orphan result'), 'preview retains the unmatched tool result');
     assert(previewElements.some((element) => element.type === JsonBlockStub && element.props?.label === 'JSON'), 'preview gives JSON blocks a localized fallback label');
     assert(elementText(dialog).includes('未知内容') && elementText(dialog).includes('unrecognized payload'), 'preview safely localizes unknown segment fallback content');
     const userRow = previewElements.find((element) => element.props?.['data-preview-role'] === 'user');
@@ -2399,6 +2444,23 @@ console.log('\n[11d] client half — full-text results and archived conversation
     assert(!previewElements.some((element) => element.props?.className === 'dac-preview-message'), 'generic preview cards are removed');
     assert(elementText(dialog).includes('只读预览'), 'preview displays the localized read-only label');
 
+    const copied = [];
+    const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async (text) => { copied.push(text); } } } });
+    const visibleAssistant = clientExports.__test.buildPreviewNodes(previewElement.props.preview.messages)[1];
+    const assistantActions = previewElements.find((element) => element.type?.name === 'PreviewActions' && element.props?.node?.key === visibleAssistant.key);
+    const copyButton = collectElements(assistantActions).find((element) => element.type === 'button' && element.props?.['aria-label'] === '复制');
+    await copyButton?.props.onClick();
+    assert(copied[0] === clientExports.__test.previewCopyText(visibleAssistant), 'preview copy action writes the visible node text to the clipboard');
+    if (savedNavigator === undefined) delete globalThis.navigator;
+    else Object.defineProperty(globalThis, 'navigator', savedNavigator);
+
+    intersectionObserver?.callback([{ isIntersecting: true, intersectionRatio: 0.8, target: previewTargets[1] }]);
+    previewTree = previewHarness.render(previewElement.props);
+    previewElements = collectElements(previewTree);
+    const secondRailButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '转到第 2 条消息');
+    assert(secondRailButton?.props['aria-current'] === 'true', 'turn rail marks the currently visible node');
+
     const rerenderedSection = harness.render({ t, refreshSidebar: () => {} });
     const rerenderedPreview = findComponentElement(rerenderedSection, 'PreviewDialog');
     previewTree = previewHarness.render(rerenderedPreview?.props ?? previewElement.props);
@@ -2406,10 +2468,12 @@ console.log('\n[11d] client half — full-text results and archived conversation
     previewHarness.flushEffects();
     assert(closeFocuses === 1, 'parent re-render does not refocus the open conversation preview');
     previewHarness.unmount();
+    assert(intersectionObserver?.disconnected === true, 'turn rail disconnects its observer on unmount');
   }
 
   harness.unmount();
   globalThis.fetch = savedFetch;
+  windowMock.IntersectionObserver = savedIntersectionObserver;
   Object.assign(moduleTable.react, savedHooks);
 }
 
