@@ -2320,6 +2320,17 @@ console.log('\n[11d] client half — full-text results and archived conversation
 
   const savedHooks = { ...moduleTable.react };
   const savedIntersectionObserver = windowMock.IntersectionObserver;
+  const savedUrl = windowMock.URL;
+  const createdObjectUrls = [];
+  const revokedObjectUrls = [];
+  windowMock.URL = {
+    createObjectURL: (blob) => {
+      const url = `blob:archived-${createdObjectUrls.length + 1}`;
+      createdObjectUrls.push(url);
+      return url;
+    },
+    revokeObjectURL: (url) => { revokedObjectUrls.push(url); },
+  };
   let intersectionObserver = null;
   class MockIntersectionObserver {
     constructor(callback, options) {
@@ -2376,9 +2387,33 @@ console.log('\n[11d] client half — full-text results and archived conversation
                 ] },
               ],
             }
+            : path.endsWith('/preview/image')
+              ? null
             : {};
-    return { ok: true, status: 200, json: async () => payload };
+    return path.endsWith('/preview/image')
+      ? { ok: true, status: 200, blob: async () => new Blob(['PNG'], { type: 'image/png' }) }
+      : { ok: true, status: 200, json: async () => payload };
   };
+
+  // This fails if the client drops the guard, cancellation signal, or strict
+  // archive identity when requesting binary image bytes.
+  const controller = new AbortController();
+  const imageBlob = await clientExports.__test.fetchArchiveImage?.('session-a', 'attachment-session-a', controller.signal);
+  const imageRequest = requests.at(-1);
+  assert(imageBlob?.type === 'image/png', 'preview image helper returns a browser Blob');
+  assert(imageRequest?.url === '/plugins/dsh-archived-chats/preview/image', 'preview image helper targets the image route');
+  assert(imageRequest?.options.method === 'POST', 'preview image helper uses POST');
+  assert(imageRequest?.options.headers['x-dsh-archived-chats'] === '1', 'preview image helper sends the guard header');
+  assert(imageRequest?.options.signal === controller.signal, 'preview image helper forwards cancellation');
+  assert(imageRequest?.options.body === '{"sessionId":"session-a","attachmentId":"attachment-session-a"}', 'preview image helper sends only session and attachment identity');
+
+  const imageGroups = clientExports.__test.groupPreviewSegments?.([
+    { kind: 'text', text: 'before' },
+    { kind: 'image', attachment: archivedImageRef },
+    { kind: 'image', attachment: { ...archivedImageRef, attachmentId: 'attachment-session-b' } },
+    { kind: 'text', text: 'after' },
+  ]);
+  assert(imageGroups?.map((group) => group.kind).join(',') === 'segment,images,segment' && imageGroups[1].images.length === 2, 'consecutive preview images form one gallery without absorbing text');
 
   const t = clientCtx.locale.bind('settings.archived-chats');
   const harness = createHookHarness(clientCalls.slotRegister[0].component);
@@ -2433,6 +2468,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
     const previewTargets = previewRows.map((row) => ({ dataset: { previewKey: row.props['data-preview-key'] } }));
     previewRows.forEach((row, index) => row.props.ref?.(previewTargets[index]));
     previewHarness.flushEffects();
+    const turnObserver = intersectionObserver;
     assert(dialog?.props['aria-modal'] === 'true' && elementText(dialog).includes('Alpha'), 'conversation preview is an accessible labelled dialog');
     assert(collectElements(rail).filter((element) => element.type === 'button').length === 3, 'preview renders one timeline navigation control per visible message');
     assert(elementText(dialog).includes('查看归档内容'), 'preview renders projected user text');
@@ -2459,6 +2495,50 @@ console.log('\n[11d] client half — full-text results and archived conversation
     assert(!previewElements.some((element) => element.props?.className === 'dac-preview-message'), 'generic preview cards are removed');
     assert(elementText(dialog).includes('只读预览'), 'preview displays the localized read-only label');
 
+    // This component-level harness keeps its hooks isolated while still
+    // exercising the rendered image, IntersectionObserver, and fetch boundary.
+    const PreviewImage = clientExports.__test.PreviewImage;
+    assert(typeof PreviewImage === 'function', 'client exposes the archived image lifecycle component for browser rendering');
+    if (typeof PreviewImage === 'function') {
+      const imageHarness = createHookHarness(PreviewImage);
+      const imageProps = { sessionId: 'session-a', attachment: archivedImageRef, t };
+      let imageTree = imageHarness.render(imageProps);
+      const imageRoot = { id: 'archived-image-root' };
+      imageTree.props.ref.current = imageRoot;
+      imageHarness.flushEffects();
+      const imageObserver = intersectionObserver;
+      assert(imageObserver?.observed.includes(imageRoot), 'archived image waits for its own intersection before loading');
+      imageObserver?.callback([{ isIntersecting: true, target: imageRoot }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      imageTree = imageHarness.render(imageProps);
+      const imageElements = collectElements(imageTree);
+      assert(createdObjectUrls.length === 1, 'visible archived image creates one object URL');
+      assert(imageElements.some((element) => element.type === 'img' && element.props?.src === createdObjectUrls[0]), 'archived image renders verified bytes');
+      imageHarness.unmount();
+      assert(imageObserver?.disconnected === true && requests.at(-1)?.options.signal?.aborted === true, 'closing an image disconnects observation and aborts pending work');
+      assert(revokedObjectUrls.includes(createdObjectUrls[0]), 'closing preview revokes archived image URLs');
+
+      // A failed attachment must stay local to the image rather than replacing
+      // the assistant transcript that surrounds it.
+      const failedImageHarness = createHookHarness(PreviewImage);
+      const imageFetch = globalThis.fetch;
+      globalThis.fetch = async (url, options = {}) => {
+        requests.push({ url: String(url), options });
+        return { ok: false, status: 404, json: async () => ({ error: 'preview-image-not-found' }) };
+      };
+      let failedImageTree = failedImageHarness.render(imageProps);
+      const failedImageRoot = { id: 'failed-archived-image-root' };
+      failedImageTree.props.ref.current = failedImageRoot;
+      failedImageHarness.flushEffects();
+      intersectionObserver?.callback([{ isIntersecting: true, target: failedImageRoot }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      failedImageTree = failedImageHarness.render(imageProps);
+      assert(failedImageTree.props?.className === 'dac-preview-image-placeholder' && elementText(failedImageTree) === '图片不可用', 'failed archived image renders only its localized placeholder');
+      assert(previewElements.some((element) => element.type === MarkdownTextStub && element.props?.text === '这是助手回复'), 'failed archived image leaves assistant transcript content rendered');
+      failedImageHarness.unmount();
+      globalThis.fetch = imageFetch;
+    }
+
     const copied = [];
     const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async (text) => { copied.push(text); } } } });
@@ -2470,7 +2550,7 @@ console.log('\n[11d] client half — full-text results and archived conversation
     if (savedNavigator === undefined) delete globalThis.navigator;
     else Object.defineProperty(globalThis, 'navigator', savedNavigator);
 
-    intersectionObserver?.callback([{ isIntersecting: true, intersectionRatio: 0.8, target: previewTargets[1] }]);
+    turnObserver?.callback([{ isIntersecting: true, intersectionRatio: 0.8, target: previewTargets[1] }]);
     previewTree = previewHarness.render(previewElement.props);
     previewElements = collectElements(previewTree);
     const secondRailButton = previewElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '转到第 2 条消息');
@@ -2483,12 +2563,13 @@ console.log('\n[11d] client half — full-text results and archived conversation
     previewHarness.flushEffects();
     assert(closeFocuses === 1, 'parent re-render does not refocus the open conversation preview');
     previewHarness.unmount();
-    assert(intersectionObserver?.disconnected === true, 'turn rail disconnects its observer on unmount');
+    assert(turnObserver?.disconnected === true, 'turn rail disconnects its observer on unmount');
   }
 
   harness.unmount();
   globalThis.fetch = savedFetch;
   windowMock.IntersectionObserver = savedIntersectionObserver;
+  windowMock.URL = savedUrl;
   Object.assign(moduleTable.react, savedHooks);
 }
 
