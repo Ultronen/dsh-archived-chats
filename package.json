@@ -50,6 +50,8 @@
     "lib/search.js",
     "lib/stats.js",
     "lib/types",
+    "docs/ARCHITECTURE.md",
+    "docs/ARCHITECTURE.en.md",
     "assets/screenshots",
     "cordis.patch.yml"
   ],
