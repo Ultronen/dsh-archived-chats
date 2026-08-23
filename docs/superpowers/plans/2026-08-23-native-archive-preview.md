@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-23-native-archive-preview-design.md`
 
+**Status:** Implemented and release-verified. The automated suite, package
+contents, and whitespace checks pass, and the final preview was exercised and
+captured in DeepSeek Harness `0.1.1-rc.2`. The unchecked steps below are kept
+as the original execution runbook rather than a live progress tracker.
+
 ## Global Constraints
 
 - Keep package version `0.10.0`; this work completes the unreleased feature rather than opening another release.

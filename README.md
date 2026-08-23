@@ -26,7 +26,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 兼容性
 
-0.10.0 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件。v0.9.0 的归档列表、元数据、批量操作和备份预览已在 Harness `0.1.0-rc.8` 真实宿主中复核；v0.10.0 新增的正文搜索与对话预览必须在发布前再完成一次真实宿主检查。
+0.10.0 版本以 DeepSeek Harness `0.1.0-rc.7` 作为自动化兼容性基线。插件注册的是顶层 `settings.section`，因此 rc.7 针对 `settings.plugin.item` 的 keyed-slot 变更不影响本插件。v0.9.0 的归档列表、元数据、批量操作和备份预览已在 Harness `0.1.0-rc.8` 真实宿主中复核；v0.10.0 新增的正文搜索、原生风格对话预览和已存储图片读取已在 Harness `0.1.1-rc.2` 真实宿主中复核。
 
 ## 预览
 

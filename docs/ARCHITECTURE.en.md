@@ -134,7 +134,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 ## Compatibility and testing
 
-The automated compatibility baseline is DeepSeek Harness 0.1.0-rc.7; the v0.9.0 surfaces received a real-host page pass on rc.8. The v0.10.0 conversation search and preview still require a fresh real-host pass before publication. When host slots, design tokens, or session internals change, run the smoke suite first and then repeat a real-host check.
+The automated compatibility baseline is DeepSeek Harness 0.1.0-rc.7; the v0.9.0 surfaces received a real-host page pass on rc.8. The v0.10.0 conversation search, native-style preview, and stored-image reads received a real-host pass on 0.1.1-rc.2. When host slots, design tokens, or session internals change, run the smoke suite first and then repeat a real-host check.
 
 Coverage includes:
 

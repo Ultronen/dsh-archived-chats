@@ -26,7 +26,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 0.10.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. The v0.9.0 archive list, metadata, bulk actions, and backup preview were checked in a real Harness `0.1.0-rc.8` host; v0.10.0 conversation search and preview still require a fresh real-host pass before publication.
+Version 0.10.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. The v0.9.0 archive list, metadata, bulk actions, and backup preview were checked in a real Harness `0.1.0-rc.8` host; v0.10.0 conversation search, native-style preview, and stored-image reads were checked in a real Harness `0.1.1-rc.2` host.
 
 ## Preview
 

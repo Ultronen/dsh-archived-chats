@@ -2,13 +2,12 @@
 
 ## Status
 
-Approved product direction. This specification defines the read-only preview
-redesign for `dsh-archived-chats` 0.10.0. It replaces the current generic card
-timeline with a Harness-native conversation presentation while preserving the
-left-side turn rail requested for archive navigation.
-
-Implementation has not started. A separate implementation plan will follow
-after this specification is reviewed.
+Implemented release contract for `dsh-archived-chats` 0.10.0. The read-only
+preview replaces the generic card timeline with a Harness-native conversation
+presentation while preserving the left-side turn rail requested for archive
+navigation. The automated suite and package verification pass, and the final
+preview was exercised and captured in a real DeepSeek Harness `0.1.1-rc.2`
+host before release.
 
 ## Context
 
@@ -330,7 +329,6 @@ The redesign is ready when:
 
 ## Rollout
 
-This remains part of the unreleased 0.10.0 feature branch. The branch must not
-merge or publish until the real-host visual pass is complete. Documentation and
-screenshots should be updated only after that pass reflects the final native
-preview rather than the superseded generic-card design.
+This is the accepted release contract for 0.10.0. The real-host visual pass,
+final documentation, and native-preview screenshot are complete; integration,
+tagging, and publication follow the repository release workflow.
