@@ -10,6 +10,86 @@ const {
   searchProjectedMessages,
 } = searchModule;
 
+const imageRef = Object.freeze({
+  attachmentId: 'attachment-a',
+  mediaType: 'image/png',
+  bytes: 4,
+  width: 2,
+  height: 2,
+  name: 'diagram.png',
+});
+
+test('preview projection preserves tool correlation and verified image descriptors', () => {
+  const messages = projectArchivedMessages([
+    {
+      seq: 1,
+      time: 1001,
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: {
+        id: 'user-1',
+        role: 'user',
+        source: { kind: 'user' },
+        content: [
+          { type: 'text', text: 'inspect this' },
+          { type: 'image', attachment: imageRef },
+        ],
+      },
+    },
+    {
+      seq: 2,
+      time: 1002,
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'assistant-1',
+          role: 'assistant',
+          source: { kind: 'model' },
+          content: [{ type: 'tool-call', id: 'call-1', name: 'read_file', arguments: '{"path":"README.md"}' }],
+        },
+      },
+    },
+    {
+      seq: 3,
+      time: 1003,
+      type: 'tool/result',
+      surfaceOp: 'append',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'tool-1',
+          role: 'user',
+          source: { kind: 'tool', callId: 'call-1' },
+          content: [{ type: 'tool-result', toolCallId: 'call-1', isError: false, content: [{ type: 'text', text: 'done' }] }],
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(messages[0].segments[1].attachment, imageRef);
+  assert.deepEqual(messages[1].segments[0], {
+    kind: 'tool-call',
+    label: 'read_file',
+    text: '{"path":"README.md"}',
+    isError: false,
+    callId: 'call-1',
+    name: 'read_file',
+    argumentsText: '{"path":"README.md"}',
+  });
+  assert.equal(messages[2].segments[0].toolCallId, 'call-1');
+  assert.equal(searchModule.findProjectedImage(messages, 'attachment-a')?.mediaType, 'image/png');
+  assert.equal(searchModule.findProjectedImage(messages, 'missing'), null);
+
+  const page = paginateProjectedMessages(messages, { offset: 0, limit: 3 });
+  assert.equal(page.messages[0].segments[1].attachment.attachmentId, 'attachment-a');
+  assert.equal('normalized' in page.messages[0], false);
+  assert.equal('searchable' in page.messages[0], false);
+});
+
 function userEvent(seq, text) {
   return {
     seq,
