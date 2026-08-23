@@ -30,10 +30,11 @@ Version 0.10.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility
 
 ## Preview
 
-All screenshots below were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile.
+Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile; the archived conversation preview was captured from 0.10.0 in DeepSeek Harness `0.1.1-rc.2`.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
+![Read-only archived conversation preview](assets/screenshots/8-conversation-preview.png)
 ![Delete confirmation](assets/screenshots/3-delete-confirm.png)
 ![Group actions](assets/screenshots/4-group-menu.png)
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
