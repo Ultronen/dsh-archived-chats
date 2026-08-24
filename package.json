@@ -49,6 +49,7 @@
     "lib/import.js",
     "lib/metadata.js",
     "lib/restore.js",
+    "lib/recycle.js",
     "lib/search.js",
     "lib/stats.js",
     "lib/types",
