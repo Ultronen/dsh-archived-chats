@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题与交流 / Questions and support
+    url: https://github.com/Ultronen/dsh-archived-chats/discussions
+    about: 请在 Discussions 中咨询安装、使用和开放式想法。Ask usage and support questions in Discussions.
+  - name: 私密安全漏洞报告 / Private security report
+    url: https://github.com/Ultronen/dsh-archived-chats/security/advisories/new
+    about: 不要公开漏洞或敏感数据。Report vulnerabilities and sensitive details privately.
