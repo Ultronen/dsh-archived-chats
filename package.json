@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.10.0",
-  "description": "DeepSeek Harness 本地归档会话中心：正文搜索、对话预览、标签、批量操作与备份恢复。Local archived-chat search, preview, metadata, bulk actions, and backup restore for DeepSeek Harness.",
+  "version": "0.11.0",
+  "description": "DeepSeek Harness 本地归档会话中心：全文搜索、回收站、撤销、自动保护快照与备份恢复。Local archived-chat search, recycle bin, undo, automatic protection snapshots, and backup restore for DeepSeek Harness.",
   "license": "MIT",
   "author": "Ultronen",
   "repository": {
@@ -18,6 +18,9 @@
     "dsh-plugin",
     "archive",
     "backup",
+    "recycle-bin",
+    "undo",
+    "snapshot",
     "full-text-search",
     "local-first",
     "conversation-search",

@@ -10,7 +10,7 @@ The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
 - The browser client in lib/client.js registers the Archived Chats settings.section and renders state and actions.
-- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, and lib/stats.js so it can be tested independently.
+- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, and lib/stats.js. lib/trash.js owns the versioned recycle catalog, lib/snapshot.js owns verified protection snapshots, and lib/recycle.js composes move, restore, purge, empty, startup recovery, and legacy migration.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
 
@@ -28,13 +28,17 @@ POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
 POST /plugins/dsh-archived-chats/metadata
+GET  /plugins/dsh-archived-chats/trash
+POST /plugins/dsh-archived-chats/trash/restore
+POST /plugins/dsh-archived-chats/trash/purge
+POST /plugins/dsh-archived-chats/trash/empty
 POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-Every mutating route, plus the preview, preview/image, and search routes that return conversation content, requires the `x-dsh-archived-chats: 1` header. preview/image and export are read-only and do not modify plugin or Harness state. Unarchive writes through the workspace registry state path and broadcasts archived-sessions-changed to connected clients.
+Every mutating route, plus the preview, preview/image, and search routes that return conversation content, requires the `x-dsh-archived-chats: 1` header. GET trash, preview/image, and export are read-only. `delete` / `delete-all` return `trashed` and `failed`; `trash/restore` returns `restored`; `trash/purge` / `trash/empty` return `purged`, preserving first-request order.
 
 ## State and local data
 
@@ -42,15 +46,17 @@ The state route joins archived sessions, workspace, tags, notes, and metadataUpd
 
 ~~~text
 $DSH_HOME/plugin-data/archived-chats/metadata.json
+$DSH_HOME/plugin-data/archived-chats/trash.json
+$DSH_HOME/plugin-data/archived-chats/snapshots/
 ~~~
 
-The metadata file is versioned. Writes are serialized and replace the file through a temporary-file rename. Unreadable or unsupported versions are never overwritten.
+Metadata and recycle catalogs are versioned. Writes serialize and atomically replace their documents through temporary files. An unreadable or unsupported `trash.json` is preserved byte-for-byte, hides no archived sessions, and disables recycle mutations.
 
 The stats route measures session directories with concurrency four, skips symbolic links, and caches results for 30 seconds. A measurement failure marks only that row unavailable; list and mutation actions continue. Delete invalidates the affected cache row.
 
 ## Preview and full-text search
 
-Preview and search accept only currently visible archived IDs; pending-deletion and unarchived sessions cannot be read. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments and sanitized image descriptors.
+Preview accepts visible archived IDs by default and only recycle-catalog IDs with explicit `scope: "trash"`; search remains archive-only. lib/search.js uses Harness append-origin message projection, so replacement copies are never indexed twice. User, assistant, reasoning, tool-call, and tool-result text is searchable, while preview returns bounded pages of structured segments and sanitized image descriptors.
 
 The preview/image authorization sequence is fixed: first require POST and `x-dsh-archived-chats: 1`, then bounded-parse `sessionId` and `attachmentId`; next confirm that the session is still in the currently visible archive set, find an exact image-descriptor match in that session's canonical projection, and only then read bytes through the optional `attachments.readImage` service. Both preview and preview/image recheck visible archive state after asynchronous reads and immediately before sending a response, preventing an overlapping unarchive or delete from exposing stale content. Image bytes use `no-store` and `nosniff`; cross-session, non-archived, and unprojected references are rejected, and error responses never echo filesystem paths. A host without attachment-read capability returns `preview-image-unsupported`; this degrades images only and does not block text, Markdown, reasoning, tool, JSON, or code preview.
 
@@ -83,29 +89,17 @@ import/inspect accepts only version-one ZIPs produced by this plugin. Host valid
 
 The confirmation token expires quickly and can be used once. Hosts without the supported writer capability return restore-unsupported without writing.
 
-## Deletion lifecycle
+## Recycle and protection-snapshot lifecycle
 
-A cold delete confirms the physical location, removes the session log, workspace record, and registry indexes, then cleans metadata and stats caches.
+`trash.json` permits only `trashed`, `purge-pending`, and `degraded`. Legal transitions are `missing -> trashed`, `trashed/degraded -> purge-pending`, and removal of an existing state after a committed transaction. A `purge-pending` record cannot restore.
 
-For a live session, the plugin first attempts the official lifecycle order:
+Protection manifests use `dsh-archived-chats/snapshot` v1 and session payloads use `dsh-archived-chats/snapshot-session` v1. There is at most one active snapshot per session; replacement publishes the new snapshot before removing the old one. Exact limits are a 4 MiB manifest, 512 MiB session JSON, 10,000 attachments, 32 MiB per attachment, and 8 GiB total. Attachments are processed sequentially, and paths use generated UUIDs and digests rather than user data.
 
-~~~text
-cancel(disposed)
-  -> whenIdle
-  -> flush
-  -> agent.scope.dispose()
-  -> detach agents and sessions
-  -> retire persistence writer
-  -> remove session files
-~~~
+Move ordering is: validate archive ownership → dispose or park a live session → capture and verify snapshot → recheck ownership → atomically commit `trashed` → invalidate caches. Ordinary move never removes the persistence artifact.
 
-These are internal host surfaces and every call is feature-detected. If a required surface is missing, the plugin does not guess at internal objects. It records the ID in:
+Restore first rejects an existing-ID conflict. With an intact original it only restores archive visibility and removes the recycle record/snapshot, without rewriting persistence. With a missing original it completes all validation and attachment-identity republishing before writing only through public `create` / `append` / `saveImage` capabilities. A failure rolls back the new artifact and retains trash.
 
-~~~text
-$DSH_HOME/plugin-data/archived-chats/pending-deletions.json
-~~~
-
-The parked session remains archived and hidden, and the next boot sweeps the queue. In-place deletes use the same queue as a crash bracket: record before disposal, clear after files are confirmed gone.
+Permanent purge persists `purge-pending` before physical writes, then removes the original, snapshot, and recycle record in that order. Startup recovery retries only `purge-pending`, never plain `trashed`. Legacy `pending-deletions.json` is strict read-only migration input: each still-archived ID becomes recoverable trash and is never boot-deleted merely because of the old marker.
 
 ## Browser client
 
@@ -114,7 +108,8 @@ client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, 
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
-- Selected-item export, unarchive, and delete.
+- Selected-item export, unarchive, and move to Recycle Bin.
+- Archived/Recycle Bin tabs with independent recycle selection, status, restore, permanent purge, and empty actions.
 - Import preview, disabled conflicts, and restore results.
 - Responsive settings-page markers and sidebar refresh injection.
 
@@ -128,13 +123,14 @@ The browser never mutates files directly. After an operation, the Host response 
 
 - All state-changing routes require POST and the guard header.
 - Import limits ZIP size, entries, paths, versions, and JSON structure, rejecting traversal, duplicates, and prototype-pollution keys.
-- Delete reports success only when the physical location is confirmed; otherwise the session and authoritative metadata remain.
-- Metadata or stats outages do not disable listing, unarchive, or delete.
+- Ordinary delete never invokes physical purge; only a committed recycle record can enter purge.
+- Snapshot and recycle documents use `0600`, directories use `0700`, and publication is temporary write, sync, atomic rename.
+- Purge removes snapshot attachment copies but does not promise immediate cleanup of identical bytes still retained by Harness's global attachment store.
 - Unknown host capabilities must degrade or return a clear error; they must not be inferred.
 
 ## Compatibility and testing
 
-The automated compatibility baseline is DeepSeek Harness 0.1.0-rc.7; the v0.9.0 surfaces received a real-host page pass on rc.8. The v0.10.0 conversation search, native-style preview, and stored-image reads received a real-host pass on 0.1.1-rc.2. When host slots, design tokens, or session internals change, run the smoke suite first and then repeat a real-host check.
+The complete 0.11.0 target is DeepSeek Harness 0.1.1-rc.2; older hosts degrade through explicit capability errors. When host slots, design tokens, attachments, or session internals change, run the smoke suite first and then repeat a real-host check. Before downgrading to 0.10, restore needed sessions and back up plugin data because 0.10 does not understand recycle records or snapshots.
 
 Coverage includes:
 
@@ -144,6 +140,7 @@ Coverage includes:
 - metadata.js versioning, concurrency, and atomic writes.
 - stats.js symlink handling, caching, and concurrency limits.
 - search.js message projection, Unicode search, pagination, partial failures, and TTL/LRU caching.
+- trash.js, snapshot.js, and recycle.js format validation, concurrency, recovery, rollback, crash intent, and legacy migration.
 - Host routes and browser settings smoke/responsive behavior.
 
 Run:

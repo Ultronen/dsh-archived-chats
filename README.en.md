@@ -4,7 +4,7 @@
 
 > 🔎 **Archived no longer means lost.** Search conversation content, read complete messages and tool calls, then back up, restore, or delete safely.
 
-> ⚡ **Deletion takes effect immediately — no restart.** Even sessions still resident in the background are torn down safely along the official lifecycle and wiped from disk when you click delete.
+> ♻️ **Ordinary deletion is now undoable.** The plugin first creates a local protection snapshot containing the session and attachments, then moves it to the Recycle Bin. Physical removal happens only after an explicit **Delete permanently** action in the Recycle Bin.
 
 A local conversation archive center for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): recover, search, read, back up, restore, or delete archived sessions.
 
@@ -26,7 +26,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 0.10.0 uses DeepSeek Harness `0.1.0-rc.7` as its automated compatibility baseline. The plugin registers a top-level `settings.section`, so the rc.7 keyed-slot change for `settings.plugin.item` does not apply to it. The v0.9.0 archive list, metadata, bulk actions, and backup preview were checked in a real Harness `0.1.0-rc.8` host; v0.10.0 conversation search, native-style preview, and stored-image reads were checked in a real Harness `0.1.1-rc.2` host.
+The full 0.11.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can still expose the archive list, but a missing persistence, attachment, or live-session lifecycle capability produces an explicit capability error instead of guessed internal writes or an incomplete snapshot. The v0.9.0 UI was checked on Harness `0.1.0-rc.8`; v0.10.0 search, preview, and stored-image reads were checked on `0.1.1-rc.2`.
 
 ## Preview
 
@@ -35,7 +35,6 @@ Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
 ![Read-only archived conversation preview](assets/screenshots/8-conversation-preview.png)
-![Delete confirmation](assets/screenshots/3-delete-confirm.png)
 ![Group actions](assets/screenshots/4-group-menu.png)
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)
@@ -47,7 +46,7 @@ Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc
 2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
 3. Search titles, tags, notes, conversation text, or tool output. Open the row preview to read an archived conversation without unarchiving it. Click **Select multiple** only when you need bulk actions.
 4. Click **Import backup** to choose a ZIP produced by this plugin and confirm non-conflicting sessions after the preview. Click **Export backup** to export the current selection, or every archived chat when nothing is selected. Individual rows also have an export action.
-5. Choose **Unarchive** to return a conversation to the sidebar. Choose **Delete** only when you want permanent removal; the confirmation dialog identifies the affected scope. **Delete All** lives under the top **More** menu.
+5. Choose **Unarchive** to return a conversation to the sidebar. **Move to Recycle Bin** creates a protection snapshot and offers immediate **Undo**; the session can also be restored later from the **Recycle Bin** tab. Only **Delete permanently / Empty Recycle Bin** removes originals and snapshots irreversibly.
 
 ## Features
 
@@ -60,11 +59,19 @@ Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc
 - **JSON + Markdown backups**: export one row, the current selection, or every archived chat as a ZIP. Each package has a versioned manifest, a lossless machine-readable session record, and a human-readable transcript for every included session.
 - **Preview-first import and restore**: choose a ZIP backup, inspect every session before writing, preselect only non-conflicting IDs, and restore selected sessions as archived chats. Existing IDs are skipped and never overwritten.
 - **Compact top-level actions**: common **Import backup** / **Export backup** actions are direct, while the low-frequency destructive action lives under **More**. The page stays focused on DSH archive management without a persistent source selector or redundant menus.
-- **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or permanently delete the chosen chats in one action, while selections hidden by another filter remain intact.
+- **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or move the chosen chats to the Recycle Bin, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
-- **Delete** one chat, a project group, or everything (**Delete All**), each behind a confirmation dialog. Deletion is thorough: the session log is removed from disk, the session is detached from its workspace record, and the registry's in-memory header index is purged, so the sidebar drops the rows live.
-- Sessions still resident in the background are **deleted in place too**: the plugin disposes the session through the official lifecycle teardown order (cancel → quiesce → flush → fiber teardown → registry detach), the persistence layer releases the write path, and the physical delete completes within the same request — no restart. If the running DSH build does not expose the required internal seams, the plugin falls back to "park permanently + delete on the next start", with parked sessions staying hidden meanwhile.
+- **Archived / Recycle Bin tabs**: recycled rows stay grouped by their original workspace and show trash time, snapshot size, attachment count, and `trashed` / `degraded` / `purge-pending` state. Recycle selection is independent from archive selection.
+- **Automatic protection snapshots**: moving a session captures all conversation events plus verified stored-image bytes before the recycle record commits. One current protection snapshot is kept per session; 0.11 does not provide historical retention or conversation-tree restoration.
+- **Two-level restore**: when the original session is intact, restore only removes the recycle marker and does not rewrite persistence. If the original is missing, the plugin falls back to the validated session-and-attachment snapshot through public writer capabilities, never overwriting an existing ID.
+- **Explicit permanent purge**: only the Recycle Bin exposes permanent delete and empty. The plugin records durable `purge-pending` crash intent before deleting the original and snapshot; interrupted purges retry at startup.
 - Works in light and dark schemes; localized in English and 中文.
+
+## Recycle Bin, privacy, and attachment limits
+
+The recycle catalog (`trash.json`) and protection snapshots live under `$DSH_HOME/plugin-data/archived-chats/` and stay on this machine. Attachment bytes are read one at a time, digest-verified, and atomically published; neither conversations nor attachments are uploaded. Recycle previews use a separate authorized scope.
+
+Permanent purge removes the snapshot's attachment copies, but Harness's global attachment store may retain identical bytes because another session still references them or because the host applies its own garbage-collection policy. This plugin does not claim immediate global attachment GC.
 
 ## Tags, notes, and statistics
 
@@ -112,15 +119,15 @@ Attachment references are preserved in `session.json`, but attachment bytes and 
 </details>
 
 <details>
-<summary><b>Does deleting a live session require a restart?</b></summary>
+<summary><b>Can I restore immediately after moving a session to the Recycle Bin?</b></summary>
 
-On hosts that expose the required lifecycle hooks, deletion tears down the live session and removes its files in the same request. Older or incompatible hosts use the safe fallback queue and finish the physical delete on the next start.
+Yes. The success notice includes **Undo**, and the Recycle Bin keeps a Restore action. A live session is safely disposed or parked before the recycle record commits. If the host lacks the required capability, the move fails explicitly and leaves the archived session intact.
 
 </details>
 
 ## Implementation overview
 
-The plugin has two halves: the Host service reads and mutates local archive data, while the browser settings page provides search, filtering, backup, and restore actions. Mutations go through guarded local routes; imports are previewed before writing, and live deletion uses the safest lifecycle path available on the host before falling back to next-boot cleanup.
+The plugin has two halves: the Host service manages archives, snapshots, the recycle catalog, and restore/purge transactions, while the browser page provides search, preview, backup, restore, and explicit confirmations. Mutations go through guarded local routes. Ordinary removal commits only a recycle record; physical removal is reachable only through the Recycle Bin's crash-safe purge flow.
 
 User-facing storage, backup limits, deletion outcomes, and compatibility notes stay in this README. Maintainer details such as route contracts, data flow, restore transactions, live-deletion lifecycle, and failure fallbacks are documented in [ARCHITECTURE.md](docs/ARCHITECTURE.en.md).
 
@@ -133,6 +140,14 @@ npm test
 The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, metadata and statistics, full-text search, conversation preview, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 0.11.0
+
+- Added persistent **Archived / Recycle Bin** tabs, independent recycle selection, trash-scoped preview, restore, permanent purge, and empty actions.
+- Ordinary deletion now captures a complete local protection snapshot and moves the session to recoverable trash, with immediate **Undo**.
+- Restore prefers the intact original and falls back to a validated session-plus-attachment snapshot without overwriting an existing ID.
+- Added durable `purge-pending` recovery, snapshot recovery/degraded states, and safe migration of legacy `pending-deletions.json` IDs into recoverable trash without silent boot deletion.
+- **Downgrade warning:** 0.10 does not understand 0.11 recycle records or snapshots. Before downgrading, restore needed sessions in 0.11 and back up `$DSH_HOME/plugin-data/archived-chats/`.
 
 ### 0.10.0
 
@@ -201,7 +216,7 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 dsh plugin --profile web remove dsh-archived-chats
 ```
 
-The only leftovers are the small `pending-deletions.json` and `metadata.json` files under `$DSH_HOME/plugin-data/archived-chats/`; uninstalling does not process the delete queue or remove your tags/notes.
+Uninstalling does not remove `metadata.json`, `trash.json`, protection snapshots, or a legacy `pending-deletions.json` under `$DSH_HOME/plugin-data/archived-chats/`, and it never triggers permanent purge. Restore or back up anything you need before manually handling that directory.
 
 ## License
 

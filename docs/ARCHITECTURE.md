@@ -10,7 +10,7 @@
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
 - 浏览器客户端位于 lib/client.js，通过 settings.section 注册「已归档的聊天」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js 和 lib/stats.js 中，便于独立测试。
+- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js 和 lib/stats.js 中。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证保护快照，lib/recycle.js 组合移入、恢复、永久删除、清空、启动恢复与旧数据迁移。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
 
@@ -28,13 +28,17 @@ POST /plugins/dsh-archived-chats/export
 POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
 POST /plugins/dsh-archived-chats/metadata
+GET  /plugins/dsh-archived-chats/trash
+POST /plugins/dsh-archived-chats/trash/restore
+POST /plugins/dsh-archived-chats/trash/purge
+POST /plugins/dsh-archived-chats/trash/empty
 POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-所有修改路由以及会返回对话内容的 preview、preview/image、search 路由都要求 `x-dsh-archived-chats: 1` 请求头。preview/image 和 export 都是只读操作，不修改插件或 Harness 状态。取消归档通过 workspace registry 自身的状态写入路径完成，并向已连接客户端发送 archived-sessions-changed 更新。
+所有修改路由以及会返回对话内容的 preview、preview/image、search 路由都要求 `x-dsh-archived-chats: 1` 请求头。GET trash、preview/image 和 export 是只读操作。`delete` / `delete-all` 只返回 `trashed` 和 `failed`；`trash/restore` 返回 `restored`，`trash/purge` / `trash/empty` 返回 `purged`，并保留请求的首次出现顺序。
 
 ## 状态和本地数据
 
@@ -42,15 +46,17 @@ state 路由把归档会话、工作区、标签、备注和 metadataUpdatedAt �
 
 ~~~text
 $DSH_HOME/plugin-data/archived-chats/metadata.json
+$DSH_HOME/plugin-data/archived-chats/trash.json
+$DSH_HOME/plugin-data/archived-chats/snapshots/
 ~~~
 
-元数据文件带版本号，写入通过队列串行化，并用临时文件重命名替换。无法解析或不支持的版本不会被覆盖。
+元数据和回收目录均带版本号，写入通过队列串行化并用临时文件原子替换。无法解析或不支持的 `trash.json` 保留原始字节、不隐藏任何归档会话，并禁用回收修改。
 
 stats 路由以并发 4 测量会话目录，跳过符号链接，结果缓存 30 秒。测量失败只标记当前行不可用，不阻塞列表和其他操作；删除会使对应缓存失效。
 
 ## 预览和全文搜索
 
-preview 和 search 只接受当前可见归档 ID，等待删除或已取消归档的会话不可读。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落和净化后的图片描述符。
+preview 默认只接受当前可见归档 ID；显式 `scope: "trash"` 时仅接受回收目录中的 ID。search 只搜索可见归档。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落和净化后的图片描述符。
 
 preview/image 的授权顺序固定为：先验证 POST 和 `x-dsh-archived-chats: 1`，再有界解析 `sessionId` 与 `attachmentId`；随后确认会话仍在当前可见归档集合中，从该会话的规范投影中查找完全匹配的图片描述符，最后才通过可选的 `attachments.readImage` 服务读取。preview 和 preview/image 都会在异步读取完成后、响应发送前再次检查可见归档状态，避免并发取消归档或删除泄露旧内容。图片字节以 `no-store`、`nosniff` 返回；跨会话、非归档或不在投影中的引用均会被拒绝，错误响应不回显文件路径。宿主没有附件读取能力时返回 `preview-image-unsupported`；这只降级图片，不阻塞文本、Markdown、思考、工具、JSON 或代码预览。
 
@@ -83,29 +89,17 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 会有界读取�
 
 确认令牌短期有效且只能使用一次。宿主不支持写入能力时返回 restore-unsupported，不执行任何写入。
 
-## 删除生命周期
+## 回收与保护快照生命周期
 
-删除普通冷会话时，插件确认物理位置后移除会话日志、工作区记录和注册表索引，并清理元数据和统计缓存。
+`trash.json` 的合法状态只有 `trashed`、`purge-pending`、`degraded`。合法转换为 `missing -> trashed`、`trashed/degraded -> purge-pending`，以及任一现有状态在事务成功后移除。`purge-pending` 不得恢复。
 
-删除仍在后台运行的会话时，优先尝试官方生命周期顺序：
+保护快照格式是 `dsh-archived-chats/snapshot` v1，会话载荷是 `dsh-archived-chats/snapshot-session` v1。每个会话最多一个活跃快照；替换时先发布新快照，再删除旧快照。精确上限为：manifest 4 MiB、session JSON 512 MiB、10,000 个附件、单附件 32 MiB、总计 8 GiB。附件按顺序逐个读写，文件名使用 UUID 和摘要，而不是用户数据。
 
-~~~text
-cancel(disposed)
-  -> whenIdle
-  -> flush
-  -> agent.scope.dispose()
-  -> detach agents and sessions
-  -> retire persistence writer
-  -> remove session files
-~~~
+移入顺序为：校验归档所有权 → 处置/停放运行中会话 → 捕获并验证快照 → 再次校验所有权 → 原子写入 `trashed` 记录 → 使缓存失效。普通移入不删除持久层文件。
 
-这些是内部宿主接口，全部通过能力探测调用。宿主缺少任一必要接口时，插件不会强行操作内部对象，而是把 ID 写入：
+恢复先检查同 ID 冲突。原会话完好时只恢复归档可见性、移除回收记录和快照，不重写持久层；原件丢失时先完成所有校验和附件身份重发，然后仅通过公开 `create` / `append` / `saveImage` 能力写入。失败会回滚新建件并保留回收记录。
 
-~~~text
-$DSH_HOME/plugin-data/archived-chats/pending-deletions.json
-~~~
-
-待删会话保持归档并从列表隐藏，下次启动清扫队列。原地删除同样使用队列作为崩溃保护：删除前登记，文件确认移除后清除。
+永久删除在任何物理写入前持久化 `purge-pending`，再删除原会话、快照和回收记录。启动恢复仅重试 `purge-pending`，从不删除普通 `trashed`。旧 `pending-deletions.json` 是严格、只读的迁移输入：每个仍归档的 ID 都转成可恢复回收记录，绝不因旧标记在启动时直接删除。
 
 ## 浏览器客户端
 
@@ -114,7 +108,8 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 - 归档列表和工作区分组。
 - 搜索、类型/项目/标签筛选和排序。
 - 标签备注编辑器。
-- 选中项批量导出、取消归档和删除。
+- 选中项批量导出、取消归档和移入回收站。
+- 归档/回收站双标签，回收站独立选择、状态、恢复、永久删除和清空。
 - 导入预览、冲突禁用和恢复结果。
 - 响应式设置页标记和侧边栏刷新注入面。
 
@@ -128,13 +123,14 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 
 - 所有状态变更路由都要求 POST 和 guard header。
 - 导入限制 ZIP 大小、条目数量、路径格式、版本和 JSON 结构，拒绝遍历、重复和原型污染字段。
-- 删除只在物理位置可确认时报告成功；无法确认时保留会话和权威元数据。
-- 元数据或统计服务不可用时，列表、取消归档和删除仍保持可用。
+- 普通删除从不调用物理清除；仅已提交回收记录可进入 purge。
+- 快照和回收文件使用 `0600`，目录使用 `0700`，发布为临时写入、sync、原子 rename。
+- 物理 purge 删除快照副本，但不承诺立即清理 Harness 全局附件库中仍被其他会话引用的字节。
 - 未知宿主能力必须降级或返回明确错误，不得猜测内部对象结构。
 
 ## 兼容性和测试
 
-自动化兼容性基线是 DeepSeek Harness 0.1.0-rc.7；v0.9.0 界面已在 rc.8 宿主上复核。v0.10.0 的正文搜索、原生风格对话预览与已存储图片读取已在 0.1.1-rc.2 真实宿主上复核。宿主插槽、设计令牌或会话内部接口变化时，应先运行冒烟测试，再做真实宿主检查。
+0.11.0 的完整能力目标是 DeepSeek Harness 0.1.1-rc.2；较旧宿主通过明确能力错误降级。宿主插槽、设计令牌、附件或会话内部接口变化时，应先运行冒烟测试，再做真实宿主检查。降级到 0.10 前必须先在 0.11 恢复所需会话并备份插件数据，因为 0.10 不识别回收目录和快照。
 
 测试覆盖：
 
@@ -144,6 +140,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 - metadata.js 的版本、并发和原子写入。
 - stats.js 的符号链接、缓存和并发限制。
 - search.js 的消息投影、Unicode 搜索、分页、部分失败与 TTL/LRU 缓存。
+- trash.js、snapshot.js 和 recycle.js 的格式验证、并发、恢复、回滚、崩溃意图和旧标记迁移。
 - Host 路由和浏览器设置页的冒烟及响应式行为。
 
 运行：
