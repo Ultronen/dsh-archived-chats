@@ -1,0 +1,45 @@
+name: 功能建议 / Feature request
+description: 建议一个面向已归档聊天管理的改进
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: 开放式讨论和使用建议也可以先发到 Discussions。请聚焦用户问题，不要提交敏感数据。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / Problem to solve
+      description: 说明当前工作流中的具体困难，以及哪些用户会受益。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案 / Proposed solution
+      description: 描述期望的交互和结果，不要求提供实现代码。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案 / Alternatives considered
+  - type: dropdown
+    id: data-impact
+    attributes:
+      label: 是否影响本地数据 / Local data impact
+      options:
+        - 不影响或不确定
+        - 读取归档会话或附件
+        - 修改元数据、归档状态或回收站
+        - 导入、恢复或永久删除数据
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认 / Submission checks
+      options:
+        - label: 我已搜索现有 Issue 和 Discussion。
+          required: true
+        - label: 我没有提交真实聊天内容、附件、凭据或其他个人数据。
+          required: true
