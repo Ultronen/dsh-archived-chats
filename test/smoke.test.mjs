@@ -924,7 +924,10 @@ console.log('\n[9] boot migration — deferred deletions become recoverable tras
   };
   const persistence2 = {
     list: async () => [{ id: 'session-live', createdAt: 1 }],
-    inspect: async () => ({ meta: { id: 'session-live', createdAt: 1 }, events: [] }),
+    inspect: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return { meta: { id: 'session-live', createdAt: 1 }, events: [] };
+    },
     listSnapshots: async () => [{ header: { id: 'session-live', createdAt: 1 }, revision: 'rev-session-live' }],
     locate: (h) => ({ kind: 'jsonl', path: join(tmp, String(h.id), 'session.jsonl.zstd') }),
   };
@@ -944,7 +947,7 @@ console.log('\n[9] boot migration — deferred deletions become recoverable tras
   assert(readPendingStore().includes('session-live'), 'pending store holds the parked id before boot');
   services2.webServer = { register: (r) => { routes2.set(r.path, r.handler); return () => routes2.delete(r.path); } };
   listeners2.find(([event]) => event === 'internal/service')?.[1]('webServer');
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await waitUntil(() => readPendingStore().length === 0, 3000);
   assert(existsSync(join(tmp, 'session-live')), 'migration preserves the session directory');
   assert(state2.archivedSessionIds.includes('session-live'), 'migration keeps archive membership');
   assert(readPendingStore().length === 0, 'pending store drains after trash commit');
