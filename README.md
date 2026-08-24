@@ -30,11 +30,12 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 预览
 
-截图 1–7 来自 `0.9.0` 在本地 DeepSeek Harness `0.1.0-rc.8` Web profile 中的实际操作；归档对话预览来自 `0.10.0` 在 DeepSeek Harness `0.1.1-rc.2` 中的实际操作。
+截图 1–7 来自 `0.9.0` 在本地 DeepSeek Harness `0.1.0-rc.8` Web profile 中的实际操作；归档对话预览来自 `0.10.0`，回收站来自 `0.11.0`，两者都在 DeepSeek Harness `0.1.1-rc.2` 隔离真实宿主中捕获。
 
 ![已归档的聊天总览](assets/screenshots/1-archived-chats.png)
 ![搜索与筛选](assets/screenshots/2-search.png)
 ![归档对话只读预览](assets/screenshots/8-conversation-preview.png)
+![回收站与自动保护快照](assets/screenshots/9-recycle-bin.png)
 ![分组操作](assets/screenshots/4-group-menu.png)
 ![标签与备注编辑](assets/screenshots/5-metadata-editor.png)
 ![批量操作](assets/screenshots/6-bulk-actions.png)

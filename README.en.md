@@ -30,11 +30,12 @@ The full 0.11.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can
 
 ## Preview
 
-Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile; the archived conversation preview was captured from 0.10.0 in DeepSeek Harness `0.1.1-rc.2`.
+Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile. The archived preview is from 0.10.0 and the Recycle Bin is from 0.11.0, both captured in an isolated real DeepSeek Harness `0.1.1-rc.2` host.
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
 ![Read-only archived conversation preview](assets/screenshots/8-conversation-preview.png)
+![Recycle Bin with automatic protection snapshot](assets/screenshots/9-recycle-bin.png)
 ![Group actions](assets/screenshots/4-group-menu.png)
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)

@@ -1872,6 +1872,16 @@ console.log('\n[11c] client half — bulk selection workflow');
   const dialogBody = elements.find((el) => el.props?.id === 'dac-confirm-body');
   assert(alertDialog?.props['aria-labelledby'] === 'dac-confirm-title' && dialogTitle !== undefined, 'confirmation dialog has an accessible title');
   assert(alertDialog?.props['aria-describedby'] === 'dac-confirm-body' && dialogBody !== undefined, 'confirmation dialog has an accessible description');
+  let boundaryEscapePrevented = false;
+  let boundaryEscapeStopped = false;
+  let boundaryEscapeStoppedImmediately = false;
+  alertDialog?.props.onKeyDown?.({
+    key: 'Escape',
+    preventDefault: () => { boundaryEscapePrevented = true; },
+    stopPropagation: () => { boundaryEscapeStopped = true; },
+    nativeEvent: { stopImmediatePropagation: () => { boundaryEscapeStoppedImmediately = true; } },
+  });
+  assert(boundaryEscapePrevented && boundaryEscapeStopped && boundaryEscapeStoppedImmediately, 'confirmation dialog contains Escape at the alertdialog boundary');
 
   let cancelFocuses = 0;
   let destructiveFocuses = 0;
@@ -1897,6 +1907,16 @@ console.log('\n[11c] client half — bulk selection workflow');
   let trappedForward = false;
   documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { trappedForward = true; } });
   assert(trappedForward && documentMock.activeElement === cancelControl, 'confirmation dialog traps forward tab focus');
+  let confirmEscapePrevented = false;
+  let confirmEscapeStopped = false;
+  let confirmEscapeStoppedImmediately = false;
+  documentListeners.get('keydown')?.({
+    key: 'Escape',
+    preventDefault: () => { confirmEscapePrevented = true; },
+    stopPropagation: () => { confirmEscapeStopped = true; },
+    stopImmediatePropagation: () => { confirmEscapeStoppedImmediately = true; },
+  });
+  assert(confirmEscapePrevented && confirmEscapeStopped && confirmEscapeStoppedImmediately, 'confirmation dialog isolates Escape from same-target host settings listeners');
   cleanupModal?.();
   assert(restoredFocuses === 0 && fallbackFocuses === 1, 'dialog falls back to page heading when its trigger was removed');
   documentMock.contains = () => true;
