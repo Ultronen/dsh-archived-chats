@@ -43,6 +43,7 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
+    "lib/trash.js",
     "lib/export.js",
     "lib/import.js",
     "lib/metadata.js",
