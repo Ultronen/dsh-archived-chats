@@ -264,6 +264,7 @@ const registry = {
 };
 const persistence = {
   list: async () => headerRows,
+  listSnapshots: async () => headerRows.map((header) => ({ header, revision: `rev-${header.id}` })),
   inspect: async (id) => {
     if (!(id in events)) throw new Error(`unknown session ${id}`);
     return { meta: headerRows.find((h) => h.id === id), events: events[id] };
@@ -302,8 +303,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 13, `thirteen archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 17, `seventeen archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
@@ -725,22 +726,26 @@ console.log('\n[4] unarchive');
   assert(missing.status === 400, `missing sessionId rejected (got ${missing.status})`);
 }
 
-console.log('\n[5] delete — live session parked for next-boot deletion');
+console.log('\n[5] delete — live session moves to recoverable trash');
 {
+  const liveHeader = { id: 'session-live', createdAt: 1, cwd: '/ws/one' };
+  headerRows.push(liveHeader);
+  events['session-live'] = [];
+  registry.headers.set('session-live', liveHeader);
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-live"}'));
-  assert(res.status === 200, `live session deletion accepted (got ${res.status})`);
+  assert(res.status === 200, `live session deletion accepted (got ${res.status}: ${res.body})`);
   const body = res.json();
-  assert(body.pending.includes('session-live'), 'live session reported as pending');
-  assert(body.deleted.length === 0 && body.failed.length === 0, 'no deleted/failed entries for a parked session');
+  assert(body.trashed.includes('session-live'), 'live session reported as trashed');
+  assert(body.failed.length === 0, 'no failures for a parked snapshot-capable session');
   assert(existsSync(join(tmp, 'session-live')), 'live session files untouched');
   assert(workspaceState.archivedSessionIds.includes('session-live'), 'parked session stays archived (invisible)');
-  assert(readPendingStore().includes('session-live'), 'parked id recorded in the pending-deletion store');
-  assert(readMetadataStore().sessions['session-live'] !== undefined, 'parked delete keeps metadata until physical deletion');
+  assert(!readPendingStore().includes('session-live'), 'new recycle flow does not add a legacy pending marker');
+  assert(readMetadataStore().sessions['session-live'] !== undefined, 'trash keeps metadata');
   const stateAfterPark = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
   assert(!stateAfterPark.json().sessions.some((s) => s.id === 'session-live'), 'parked session excluded from /state listing');
   const statsAfterPark = await call(routes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
-  assert(statsAfterPark.json().summary.sessionCount === 2, 'stats exclude a parked pending-deletion session');
+  assert(statsAfterPark.json().summary.sessionCount === 2, 'stats exclude a trashed session');
   assert(statsAfterPark.json().sessions['session-live'] === undefined, 'stats omit the parked session row');
   const pendingImage = await call(
     routes,
@@ -750,8 +755,20 @@ console.log('\n[5] delete — live session parked for next-boot deletion');
       'x-dsh-archived-chats': '1',
     }, JSON.stringify({ sessionId: 'session-live', attachmentId: archivedImageRef.attachmentId })),
   );
-  assert(pendingImage.status === 404, 'preview image denies a pending-deletion session');
+  assert(pendingImage.status === 404, 'ordinary preview image denies a trashed session');
+  const trashPreview = await call(routes, '/plugins/dsh-archived-chats/preview', mockReq(
+    'POST', { 'content-type': 'application/json', 'x-dsh-archived-chats': '1' },
+    JSON.stringify({ sessionId: 'session-live', scope: 'trash' }),
+  ));
+  assert(trashPreview.status === 200 && trashPreview.json().session.id === 'session-live', 'trash-scoped preview authorizes the recycle record');
+  const restored = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-live"]}',
+  ));
+  assert(restored.status === 200 && restored.json().restored.includes('session-live'), 'trashed live session can be restored');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
+  headerRows.splice(headerRows.indexOf(liveHeader), 1);
+  delete events['session-live'];
+  registry.headers.delete('session-live');
 }
 
 console.log('\n[5b] delete — live session disposed in place (no restart needed)');
@@ -787,19 +804,24 @@ console.log('\n[5b] delete — live session disposed in place (no restart needed
     detachEntered: (entry) => { calls.agentDetach += 1; agentsStore.delete(entry.id); },
   };
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, `{"sessionId":"${id}"}`));
-  assert(res.status === 200, `in-place deletion answers 200 (got ${res.status})`);
+  assert(res.status === 200, `in-place trash move answers 200 (got ${res.status}: ${res.body})`);
   const body = res.json();
-  assert(body.deleted.includes(id), 'live session reported as deleted, not pending');
-  assert(body.pending.length === 0 && body.failed.length === 0, 'no pending/failed entries');
+  assert(body.trashed.includes(id), 'live session reported as trashed');
+  assert(body.failed.length === 0, 'no failed entries');
   assert(calls.cancel?.kind === 'disposed', 'agent cancelled with the disposed cause');
   assert(calls.idle === 1, 'quiescence awaited before flush');
   assert(calls.flush === 1, 'durability flushed before detach');
   assert(calls.scope === 1, 'agent fiber disposed (factory disposer order)');
   assert(calls.agentDetach === 1 && calls.sessionDetach === 1, 'both store entries detached');
-  assert(!existsSync(join(tmp, id)), 'session directory removed in the same request');
-  assert(!workspaceState.archivedSessionIds.includes(id), 'deleted session left the archive set');
+  assert(existsSync(join(tmp, id)), 'trash move preserves the session directory');
+  assert(workspaceState.archivedSessionIds.includes(id), 'trashed session stays archived');
   assert(!readPendingStore().includes(id), 'pending-store crash bracket cleared after completion');
-  assert(readPendingStore().includes('session-live'), 'unrelated parked id untouched by the bracket cleanup');
+  const purged = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [id] }),
+  ));
+  assert(purged.status === 200 && purged.json().purged.includes(id), 'explicit recycle purge succeeds');
+  assert(!existsSync(join(tmp, id)), 'permanent purge removes the session directory');
+  assert(!workspaceState.archivedSessionIds.includes(id), 'permanent purge removes archive membership');
   services.sessions = liveSessions;
   delete services.agents;
 }
@@ -807,7 +829,14 @@ console.log('\n[5b] delete — live session disposed in place (no restart needed
 console.log('\n[6] delete — full path');
 {
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-b"}'));
-  assert(res.status === 200, `delete answers 200 (got ${res.status})`);
+  assert(res.status === 200 && res.json().trashed.includes('session-b'), `trash move answers 200 (got ${res.status})`);
+  assert(workspaceState.archivedSessionIds.includes('session-b'), 'trash move keeps archive membership');
+  assert(existsSync(join(tmp, 'session-b')), 'trash move keeps session directory');
+  assert(readMetadataStore().sessions['session-b'] !== undefined, 'trash move keeps metadata');
+  const purge = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-b"]}',
+  ));
+  assert(purge.status === 200 && purge.json().purged.includes('session-b'), 'permanent purge answers 200');
   assert(!workspaceState.archivedSessionIds.includes('session-b'), 'deleted session left the archive set');
   assert(detached.includes('session-b'), 'deleted session detached from its workspace record');
   assert(!existsSync(join(tmp, 'session-b')), 'session directory removed from disk');
@@ -873,16 +902,15 @@ console.log('\n[8] delete-all — partial failure keeps going');
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete-all', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-c","session-live","session-b"]}'));
   const body = res.json();
-  assert(res.status === 200, `batch with mixed results answers 200 (got ${res.status})`);
-  assert(body.pending.includes('session-live'), 'live session reported as pending');
-  assert(body.failed.length === 0, 'no failures in the mixed batch');
-  assert(!existsSync(join(tmp, 'session-c')), 'session-c directory removed');
-  assert(body.deleted.includes('session-c'), 'cold delete remains successful when metadata cleanup is unavailable');
-  assert(readFileSync(metadataFile, 'utf8') === corruptMetadata, 'failed metadata cleanup leaves corrupt metadata bytes untouched');
+  assert(res.status === 409, `batch with unavailable metadata answers 409 (got ${res.status})`);
+  assert(body.trashed.length === 0 && body.failed.length === 3, 'unavailable metadata prevents incomplete trash snapshots');
+  assert(existsSync(join(tmp, 'session-c')), 'failed trash move keeps session-c directory');
+  assert(readFileSync(metadataFile, 'utf8') === corruptMetadata, 'failed trash move leaves corrupt metadata bytes untouched');
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
+  writeFileSync(metadataFile, JSON.stringify({ version: 1, sessions: {} }), 'utf8');
 }
 
-console.log('\n[9] boot sweep — deferred deletions complete on the next boot');
+console.log('\n[9] boot migration — deferred deletions become recoverable trash');
 {
   const state2 = { initialized: true, workspaceIds: [], archivedSessionIds: ['session-live'] };
   const registry2 = {
@@ -896,7 +924,8 @@ console.log('\n[9] boot sweep — deferred deletions complete on the next boot')
   };
   const persistence2 = {
     list: async () => [{ id: 'session-live', createdAt: 1 }],
-    inspect: async () => ({ events: [] }),
+    inspect: async () => ({ meta: { id: 'session-live', createdAt: 1 }, events: [] }),
+    listSnapshots: async () => [{ header: { id: 'session-live', createdAt: 1 }, revision: 'rev-session-live' }],
     locate: (h) => ({ kind: 'jsonl', path: join(tmp, String(h.id), 'session.jsonl.zstd') }),
   };
   const services2 = { webServer: undefined, workspaceRegistry: registry2, sessionPersistence: persistence2, sessions: { get: () => undefined } };
@@ -909,34 +938,50 @@ console.log('\n[9] boot sweep — deferred deletions complete on the next boot')
     logger: { warn: () => {}, info: () => {} },
   };
   const { apply: applyBoot } = await import(join(here, '../lib/index.js'));
+  const pendingPath = join(testHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
+  writeFileSync(pendingPath, JSON.stringify({ ids: ['session-live'] }), 'utf8');
   applyBoot(ctx2);
   assert(readPendingStore().includes('session-live'), 'pending store holds the parked id before boot');
   services2.webServer = { register: (r) => { routes2.set(r.path, r.handler); return () => routes2.delete(r.path); } };
   listeners2.find(([event]) => event === 'internal/service')?.[1]('webServer');
   await new Promise((resolve) => setTimeout(resolve, 200));
-  assert(!existsSync(join(tmp, 'session-live')), 'parked session directory removed at boot');
-  assert(!state2.archivedSessionIds.includes('session-live'), 'parked session left the archive set');
-  assert(readPendingStore().length === 0, 'pending store drained after the sweep');
+  assert(existsSync(join(tmp, 'session-live')), 'migration preserves the session directory');
+  assert(state2.archivedSessionIds.includes('session-live'), 'migration keeps archive membership');
+  assert(readPendingStore().length === 0, 'pending store drains after trash commit');
+  const trash = await call(routes2, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  assert(trash.json().sessions.some((session) => session.sessionId === 'session-live'), 'migrated session appears in recycle bin');
+  const restored = await call(routes2, '/plugins/dsh-archived-chats/trash/restore', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-live"]}',
+  ));
+  assert(restored.status === 200, 'migrated fixture can be restored for later tests');
 }
 
-console.log('\n[10] unarchive of a parked session drops its pending-deletion mark');
+console.log('\n[10] restore of a trashed session returns it to archived management');
 {
+  const header = { id: 'session-live', createdAt: 1, cwd: '/ws/one' };
+  headerRows.push(header);
+  events['session-live'] = [];
   workspaceState.archivedSessionIds.push('session-live');
   const res = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-live"}'));
-  assert(res.status === 200, 'parked delete accepted');
-  assert(readPendingStore().includes('session-live'), 'session-live parked again');
+  assert(res.status === 200 && res.json().trashed.includes('session-live'), 'trash move accepted');
   const un = await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionId":"session-live"}'));
-  assert(un.status === 200, 'unarchive answers 200');
-  assert(!readPendingStore().includes('session-live'), 'unarchive removed the pending-deletion mark');
-  assert(!workspaceState.archivedSessionIds.includes('session-live'), 'session-live unarchived');
+  assert(un.status === 409, 'ordinary unarchive rejects a trashed session');
+  const restored = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"sessionIds":["session-live"]}'));
+  assert(restored.status === 200 && restored.json().restored.includes('session-live'), 'trash restore succeeds');
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== 'session-live');
+  headerRows.splice(headerRows.indexOf(header), 1);
+  delete events['session-live'];
 }
 
-console.log('\n[10b] concurrent pending add/remove operations retain unrelated ids');
+console.log('\n[10b] concurrent trash move/restore operations retain unrelated ids');
 {
   const ids = ['session-live-race-a', 'session-live-race-b', 'session-live-race-c'];
   for (const id of ids) {
     mkdirSync(join(tmp, id), { recursive: true });
     writeFileSync(join(tmp, id, 'session.jsonl.zstd'), 'fake');
+    const header = { id, createdAt: 1, cwd: '/ws/one' };
+    headerRows.push(header);
+    events[id] = [];
   }
   workspaceState.archivedSessionIds.push(ids[0], ids[1]);
   const originalSessions = services.sessions;
@@ -944,245 +989,30 @@ console.log('\n[10b] concurrent pending add/remove operations retain unrelated i
   const responses = await Promise.all(ids.slice(0, 2).map((id) => call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
     'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
   ))));
-  assert(responses.every((response) => response.json().pending.length === 1), 'each live delete is parked');
-  assert(ids.slice(0, 2).every((id) => readPendingStore().includes(id)), 'concurrent pending writes retain the union of parked ids');
+  assert(responses.every((response) => response.json().trashed.length === 1), 'each live delete moves to trash');
+  const firstTrash = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  assert(ids.slice(0, 2).every((id) => firstTrash.json().sessions.some((row) => row.sessionId === id)), 'concurrent trash writes retain both ids');
   workspaceState.archivedSessionIds.push(ids[2]);
   const [unarchiveResponse, deleteResponse] = await Promise.all([
-    call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq(
-      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[0] }),
+    call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq(
+      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [ids[0]] }),
     )),
     call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
       'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: ids[2] }),
     )),
   ]);
   services.sessions = originalSessions;
-  const pendingAfterRace = readPendingStore();
-  assert(unarchiveResponse.status === 200 && deleteResponse.json().pending.includes(ids[2]), 'concurrent unarchive and live delete both complete');
-  assert(!pendingAfterRace.includes(ids[0]), 'concurrent unarchive removes only its pending id');
-  assert(pendingAfterRace.includes(ids[1]) && pendingAfterRace.includes(ids[2]), 'concurrent pending add/remove retains old and newly parked ids');
-}
-
-console.log('\n[10c] failed boot sweep retains the pending marker and archive indexes');
-{
-  const originalHome = process.env.DSH_HOME;
-  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-failure-'));
-  process.env.DSH_HOME = isolatedHome;
-  const id = 'session-live-sweep-failure';
-  const directory = join(isolatedHome, 'sessions', id);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
-  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [id] };
-  const header = { id, createdAt: 1 };
-  const registryForPark = {
-    state,
-    get archivedSessionIds() { return state.archivedSessionIds; },
-    list: () => [],
-    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
-    headers: new Map([[id, header]]),
-    sessionPaths: new Map([[id, directory]]),
-    invalidSessionPaths: new Map(),
-  };
-  const persistenceForPark = {
-    list: async () => [header],
-    inspect: async () => ({ meta: header, events: [] }),
-    locate: () => ({ kind: 'jsonl', path: join(directory, 'session.jsonl.zstd') }),
-  };
-  const parkRoutes = new Map();
-  const parkServices = {
-    webServer: { register: (route) => { parkRoutes.set(route.path, route.handler); return () => {}; } },
-    workspaceRegistry: registryForPark,
-    sessionPersistence: persistenceForPark,
-    sessions: { get: (sessionId) => sessionId === id ? { id, header } : undefined },
-  };
-  apply({
-    get: (key) => parkServices[key],
-    on: () => {},
-    effect: (fn) => { fn(); },
-    logger: { warn: () => {}, info: () => {} },
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  const parked = await call(parkRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
-    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
-  ));
-  assert(parked.json().pending.includes(id), 'fixture parks a live session through the real delete route');
-
-  const sweepWarnings = [];
-  const sweepInfo = [];
-  const registryForSweep = {
-    ...registryForPark,
-    headers: new Map(),
-    sessionPaths: new Map(),
-    invalidSessionPaths: new Map(),
-  };
-  const sweepServices = {
-    webServer: { register: () => () => {} },
-    workspaceRegistry: registryForSweep,
-    sessionPersistence: {
-      list: async () => [],
-      inspect: async () => { throw new Error('session unavailable'); },
-      locate: async () => undefined,
-    },
-    sessions: { get: () => undefined },
-  };
-  apply({
-    get: (key) => sweepServices[key],
-    on: () => {},
-    effect: (fn) => { fn(); },
-    logger: {
-      warn: (message) => sweepWarnings.push(String(message)),
-      info: (message) => sweepInfo.push(String(message)),
-    },
-  });
-  const sweepFailed = await waitUntil(() => sweepWarnings.some((message) => message.includes(`pending deletion ${id} failed again`)));
-  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
-  const pendingAfterFailure = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
-  assert(sweepFailed, 'boot sweep reports the unresolved physical location');
-  assert(pendingAfterFailure.includes(id), 'failed boot sweep retains the pending marker');
-  assert(state.archivedSessionIds.includes(id), 'failed boot sweep keeps the session archived');
-  assert(existsSync(directory), 'failed boot sweep leaves the physical session directory');
-  assert(!sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)), 'failed boot sweep never reports a successful deletion');
-  process.env.DSH_HOME = originalHome;
-  rmSync(isolatedHome, { recursive: true, force: true });
-}
-
-console.log('\n[10d] boot sweep cannot overwrite a pending id added after its snapshot');
-{
-  const originalHome = process.env.DSH_HOME;
-  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-race-'));
-  process.env.DSH_HOME = isolatedHome;
-  const sweptId = 'session-sweep-snapshot';
-  const addedId = 'session-added-during-sweep';
-  const sweptDirectory = join(isolatedHome, 'sessions', sweptId);
-  const addedDirectory = join(isolatedHome, 'sessions', addedId);
-  for (const directory of [sweptDirectory, addedDirectory]) {
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
-  }
-  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
-  mkdirSync(dirname(pendingPath), { recursive: true });
-  writeFileSync(pendingPath, JSON.stringify({ ids: [sweptId] }), 'utf8');
-  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [sweptId, addedId] };
-  const sweptHeader = { id: sweptId, createdAt: 1 };
-  const registryForRace = {
-    state,
-    get archivedSessionIds() { return state.archivedSessionIds; },
-    list: () => [],
-    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
-    headers: new Map([[sweptId, sweptHeader]]),
-    sessionPaths: new Map([[sweptId, sweptDirectory]]),
-    invalidSessionPaths: new Map(),
-  };
-  let releaseList;
-  let markListEntered;
-  const listEntered = new Promise((resolve) => { markListEntered = resolve; });
-  const listReleased = new Promise((resolve) => { releaseList = resolve; });
-  const raceRoutes = new Map();
-  const sweepInfo = [];
-  const raceServices = {
-    webServer: { register: (route) => { raceRoutes.set(route.path, route.handler); return () => {}; } },
-    workspaceRegistry: registryForRace,
-    sessionPersistence: {
-      list: async () => {
-        markListEntered();
-        await listReleased;
-        return [sweptHeader];
-      },
-      inspect: async () => ({ meta: sweptHeader, events: [] }),
-      locate: (header) => ({ kind: 'jsonl', path: join(isolatedHome, 'sessions', String(header.id), 'session.jsonl.zstd') }),
-    },
-    sessions: { get: (id) => id === addedId ? { id, header: { id } } : undefined },
-  };
-  apply({
-    get: (key) => raceServices[key],
-    on: () => {},
-    effect: (fn) => { fn(); },
-    logger: { warn: () => {}, info: (message) => sweepInfo.push(String(message)) },
-  });
-  await waitFor(listEntered);
-  const added = await call(raceRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
-    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: addedId }),
-  ));
-  assert(added.json().pending.includes(addedId), 'live delete adds a pending id while the sweep is paused');
-  // The boot sweep must finish all post-rm cleanup before this fixture is torn down.
-  // Its info log is the observable completion boundary, not directory removal alone.
-  releaseList();
-  const sweepFinished = await waitUntil(() => sweepInfo.some((message) => message.includes(`swept pending deletion ${sweptId}`)));
-  const swept = !existsSync(sweptDirectory);
-  const pendingAfterSweep = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
-  assert(sweepFinished && swept && !state.archivedSessionIds.includes(sweptId), 'snapshot entry completes deletion after the sweep resumes');
-  assert(pendingAfterSweep.includes(addedId), 'sweep cleanup retains the id added after its snapshot');
-  assert(!pendingAfterSweep.includes(sweptId), 'sweep cleanup removes only the completed snapshot id');
-  assert(existsSync(addedDirectory), 'newly parked session remains available for the next boot');
-  process.env.DSH_HOME = originalHome;
-  rmSync(isolatedHome, { recursive: true, force: true });
-}
-
-console.log('\n[10e] unarchive wins when it cancels the same id during a paused sweep');
-{
-  const originalHome = process.env.DSH_HOME;
-  const isolatedHome = mkdtempSync(join(tmpdir(), 'dsh-archive-sweep-cancel-'));
-  process.env.DSH_HOME = isolatedHome;
-  const id = 'session-cancelled-during-sweep';
-  const directory = join(isolatedHome, 'sessions', id);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'session.jsonl.zstd'), 'fake');
-  const pendingPath = join(isolatedHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
-  mkdirSync(dirname(pendingPath), { recursive: true });
-  writeFileSync(pendingPath, JSON.stringify({ ids: [id] }), 'utf8');
-  const state = { initialized: true, workspaceIds: [], archivedSessionIds: [id] };
-  const header = { id, createdAt: 1 };
-  const registry = {
-    state,
-    get archivedSessionIds() { return state.archivedSessionIds; },
-    list: () => [],
-    async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
-    headers: new Map([[id, header]]),
-    sessionPaths: new Map([[id, directory]]),
-    invalidSessionPaths: new Map(),
-  };
-  let releaseList;
-  let markListEntered;
-  const listEntered = new Promise((resolve) => { markListEntered = resolve; });
-  const listReleased = new Promise((resolve) => { releaseList = resolve; });
-  const routesForCancel = new Map();
-  const sweepInfo = [];
-  const servicesForCancel = {
-    webServer: { register: (route) => { routesForCancel.set(route.path, route.handler); return () => {}; } },
-    workspaceRegistry: registry,
-    sessionPersistence: {
-      list: async () => {
-        markListEntered();
-        await listReleased;
-        return [header];
-      },
-      inspect: async () => ({ meta: header, events: [] }),
-      locate: () => ({ kind: 'jsonl', path: join(directory, 'session.jsonl.zstd') }),
-    },
-    sessions: { get: () => undefined },
-  };
-  try {
-    apply({
-      get: (key) => servicesForCancel[key],
-      on: () => {},
-      effect: (fn) => { fn(); },
-      logger: { warn: () => {}, info: (message) => sweepInfo.push(String(message)) },
-    });
-    await waitFor(listEntered);
-    const unarchived = await call(routesForCancel, '/plugins/dsh-archived-chats/unarchive', mockReq(
-      'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
-    ));
-    assert(unarchived.status === 200, 'same-id unarchive succeeds while the boot sweep is paused');
-    releaseList();
-    const sweepSettled = await waitUntil(() => sweepInfo.some((message) => message.includes(`cancelled pending deletion ${id}`))
-      || sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)));
-    const pendingAfterCancel = JSON.parse(readFileSync(pendingPath, 'utf8')).ids;
-    assert(sweepSettled && !sweepInfo.some((message) => message.includes(`swept pending deletion ${id}`)), 'cancelled sweep never reports a successful deletion');
-    assert(!state.archivedSessionIds.includes(id), 'same-id unarchive removes the session from the archive set');
-    assert(!pendingAfterCancel.includes(id), 'same-id unarchive removes the pending marker');
-    assert(existsSync(directory), 'same-id unarchive preserves the physical session directory');
-  } finally {
-    process.env.DSH_HOME = originalHome;
-    rmSync(isolatedHome, { recursive: true, force: true });
+  const trashAfterRace = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  const trashIds = trashAfterRace.json().sessions.map((row) => row.sessionId);
+  assert(unarchiveResponse.status === 200 && deleteResponse.json().trashed.includes(ids[2]), 'concurrent restore and trash move both complete');
+  assert(!trashIds.includes(ids[0]), 'concurrent restore removes only its trash id');
+  assert(trashIds.includes(ids[1]) && trashIds.includes(ids[2]), 'concurrent trash mutations retain old and newly moved ids');
+  await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [ids[1], ids[2]] })));
+  for (const id of ids) {
+    workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id);
+    const headerIndex = headerRows.findIndex((header) => header.id === id);
+    if (headerIndex >= 0) headerRows.splice(headerIndex, 1);
+    delete events[id];
   }
 }
 
@@ -1234,8 +1064,10 @@ console.log('\n[10f] unarchive cannot interleave while a live session is being d
   assert(!unarchiveSettled, 'unarchive waits for live disposal instead of detaching the active session mid-delete');
   releaseIdle();
   const [deleteResponse, unarchiveResponse] = await Promise.all([deletePromise, unarchivePromise]);
-  assert(deleteResponse.status === 200 && unarchiveResponse.status === 200, 'serialized live delete and unarchive both answer successfully');
-  assert(!existsSync(join(tmp, id)) && !sessionsStore.has(id) && !agentsStore.has(id), 'live delete owns the serialized commit after disposal begins');
+  assert(deleteResponse.status === 200 && unarchiveResponse.status === 409, 'serialized trash move wins and queued unarchive is rejected');
+  assert(existsSync(join(tmp, id)) && !sessionsStore.has(id) && !agentsStore.has(id), 'trash move owns the serialized commit without physical deletion');
+  const restore = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [id] })));
+  assert(restore.status === 200, 'race fixture trash record can be restored');
   services.sessions = originalSessions;
   delete services.agents;
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id);
