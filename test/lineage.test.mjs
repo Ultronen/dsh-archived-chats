@@ -80,3 +80,16 @@ test('lineage rejects more than five thousand real headers without a partial gra
     (error) => error instanceof LineageError && error.code === 'lineage-limit-exceeded' && error.status === 413,
   );
 });
+
+test('lineage projects a valid five-thousand-node chain without recursion overflow', () => {
+  const headers = Array.from({ length: 5000 }, (_, index) => ({
+    id: `s-${index}`,
+    createdAt: index,
+    ...(index === 0 ? {} : { parentSession: `s-${index - 1}`, seedLength: index }),
+  }));
+  const graph = projectLineage({ headers, archivedIds: [], trashRecords: new Map(), workspaces: [], titles: new Map() });
+  assert.equal(graph.nodeCount, 5000);
+  let node = graph.roots[0];
+  for (let index = 1; index < 5000; index += 1) node = node.children[0];
+  assert.equal(node.id, 's-4999');
+});

@@ -41,6 +41,26 @@ function fixture(options = {}) {
   const purged = [];
   const lifecycleCalls = [];
   let invalidations = 0;
+  let tail = Promise.resolve();
+  const lifecycle = {
+    run(operation) {
+      const result = tail.then(operation);
+      tail = result.catch(() => undefined);
+      lifecycleCalls.push('run');
+      return result;
+    },
+  };
+  const purgeOperation = async (ids, settings) => {
+    const record = records.get(ids[0]);
+    const expected = settings?.expected;
+    if (expected && (record?.state !== expected.state || record?.trashedAt !== expected.trashedAt || record?.snapshotId !== expected.snapshotId)) {
+      return { purged: [], failed: [{ id: ids[0], reason: 'retention-candidate-stale' }] };
+    }
+    if (options.purgeError) return { purged: [], failed: [{ id: ids[0], reason: options.purgeError }] };
+    purged.push(...ids);
+    records.delete(ids[0]);
+    return { purged: [...ids], failed: [] };
+  };
   const service = createRetentionService({
     insightsService: {
       inspect: async () => ({
@@ -69,16 +89,9 @@ function fixture(options = {}) {
       },
     },
     recycleService: {
-      purge: async (ids) => {
-        if (options.purgeError) return { purged: [], failed: [{ id: ids[0], reason: options.purgeError }] };
-        purged.push(...ids);
-        records.delete(ids[0]);
-        return { purged: [...ids], failed: [] };
-      },
+      purge: (ids, settings) => lifecycle.run(() => purgeOperation(ids, settings)),
     },
-    lifecycle: {
-      async run(operation) { lifecycleCalls.push('run'); return operation(); },
-    },
+    lifecycle,
     now: () => new Date(nowMs),
     randomBytes: (size) => Buffer.alloc(size, ++randomCall),
   });
@@ -155,6 +168,27 @@ test('retention apply refuses a snapshot that became active after preview', asyn
   assert.deepEqual(result.applied, []);
   assert.deepEqual(result.failed, [{ key: 'snapshot:s1', reason: 'retention-candidate-stale' }]);
   assert.deepEqual(current.removed, []);
+});
+
+test('retention apply refuses a recycle record whose state changed after preview', async () => {
+  const current = fixture();
+  const preview = await current.service.preview();
+  current.records.set('t1', { ...current.records.get('t1'), state: 'degraded' });
+  const result = await current.service.apply({ token: preview.token, nonce: preview.nonce, keys: ['trash:t1'] });
+  assert.deepEqual(result.applied, []);
+  assert.deepEqual(result.failed, [{ key: 'trash:t1', reason: 'retention-candidate-stale' }]);
+  assert.deepEqual(current.purged, []);
+});
+
+test('retention recycle apply does not nest the shared lifecycle queue', async () => {
+  const current = fixture({ serializedPurge: true });
+  const preview = await current.service.preview();
+  const result = await Promise.race([
+    current.service.apply({ token: preview.token, nonce: preview.nonce, keys: ['trash:t1'] }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('deadlocked')), 100)),
+  ]);
+  assert.deepEqual(result.failed, []);
+  assert.deepEqual(current.purged, ['t1']);
 });
 
 test('retention apply reports partial failures and continues independent candidates', async () => {

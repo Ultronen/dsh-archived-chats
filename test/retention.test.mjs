@@ -140,6 +140,10 @@ test('retention planner applies count, age, quota, and recycle age in stable ord
   assert.equal(plan.candidates.some((item) => item.key === 'snapshot:s-active'), false);
   assert.equal(plan.candidates.some((item) => item.key === 'snapshot:broken'), false);
   assert.equal(plan.candidates.some((item) => item.key === 'trash:pending-chat'), false);
+  assert.deepEqual(plan.candidates.at(-1), {
+    key: 'trash:old-chat', action: 'purge-trash', reason: 'recycle-age', sessionId: 'old-chat',
+    state: 'trashed', trashedAt: '2026-08-01T00:00:00.000Z', snapshotId: null, bytes: 40,
+  });
 });
 
 test('disabled age and quota rules produce no candidates beyond history count', () => {

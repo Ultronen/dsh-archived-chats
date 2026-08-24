@@ -36,7 +36,7 @@ export interface RecycleSummary {
   purgePendingCount: number;
 }
 
-+export interface RetentionPolicy {
+export interface RetentionPolicy {
   historicalSnapshotsPerSession: number;
   historicalSnapshotMaxAgeDays: number | null;
   snapshotQuotaBytes: number | null;
@@ -106,7 +106,9 @@ export type RetentionCandidate =
     action: 'purge-trash';
     reason: 'recycle-age';
     sessionId: string;
+    state: 'trashed' | 'degraded';
     trashedAt: string;
+    snapshotId: string | null;
     bytes: number;
   };
 

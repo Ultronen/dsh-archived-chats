@@ -1478,6 +1478,12 @@ console.log('\n[10b] client model — sorting and visible selection');
     id: 'root', title: 'Root', children: [{ id: 'child', title: 'Child', children: [{ id: 'grandchild', title: 'Needle', children: [] }] }],
   }], 'needle');
   assert(lineageVisible?.[0]?.children?.[0]?.children?.[0]?.id === 'grandchild', 'lineage search preserves ancestors of a matching descendant');
+  let deepLineage = { id: 'deep-4999', title: 'Needle', children: [] };
+  for (let index = 4998; index >= 0; index -= 1) deepLineage = { id: `deep-${index}`, title: '', children: [deepLineage] };
+  const deepVisible = clientExports.__test.filterLineageForest?.([deepLineage], 'needle');
+  let deepCursor = deepVisible?.[0];
+  for (let index = 1; index < 5000; index += 1) deepCursor = deepCursor.children[0];
+  assert(deepCursor?.id === 'deep-4999', 'lineage client filtering handles the advertised maximum depth');
 
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
