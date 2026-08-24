@@ -1439,6 +1439,46 @@ console.log('\n[10b] client model — sorting and visible selection');
   try { await clientExports.__test.purgeTrash?.([]); } catch (error) { emptyPurgeError = error; }
   assert(/sessionIds is required/u.test(String(emptyPurgeError?.message)), 'purge rejects an empty selection before fetch');
 
+  globalThis.fetch = async (url, options = {}) => {
+    inspectRequests.push({ url, options });
+    const path = String(url);
+    const body = path.endsWith('/insights')
+      ? { summary: { sessionBytes: 10, snapshotBytes: 20, totalMeasuredBytes: 30, duplicateSnapshotBytes: 0, sessionUnavailableCount: 0, degradedSnapshotCount: 0 }, sessions: [], snapshots: [], policy: { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null }, candidateSummary: { snapshotCount: 0, recycleCount: 0, projectedSnapshotBytes: 20 } }
+      : path.endsWith('/retention/preview')
+        ? { token: 'retention-token', nonce: 'retention-nonce', candidates: [] }
+        : path.endsWith('/lineage')
+          ? { roots: [{ id: 'root', title: 'Root', children: [] }], diagnostics: [], nodeCount: 1 }
+          : { ok: true, policy: { historicalSnapshotsPerSession: 1 } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const insightsController = new AbortController();
+  const insightsBody = await clientExports.__test.fetchInsights?.(insightsController.signal);
+  let featureRequest = inspectRequests.at(-1);
+  assert(insightsBody?.summary?.totalMeasuredBytes === 30, 'insights helper returns storage totals');
+  assert(featureRequest?.url === '/plugins/dsh-archived-chats/insights' && featureRequest?.options.cache === 'no-store' && featureRequest?.options.signal === insightsController.signal, 'insights helper uses cancellable uncached GET');
+  await clientExports.__test.saveRetentionPolicy?.({ historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null });
+  featureRequest = inspectRequests.at(-1);
+  assert(featureRequest?.url === '/plugins/dsh-archived-chats/retention/policy' && featureRequest?.options.headers['x-dsh-archived-chats'] === '1', 'retention save uses guarded policy route');
+  const retentionPreview = await clientExports.__test.previewRetention?.();
+  assert(retentionPreview?.token === 'retention-token', 'retention helper returns preview authority');
+  await clientExports.__test.applyRetention?.('retention-token', 'retention-nonce', ['snapshot:s1', 'snapshot:s1']);
+  featureRequest = inspectRequests.at(-1);
+  assert(featureRequest?.options.body === '{"token":"retention-token","nonce":"retention-nonce","keys":["snapshot:s1"]}', 'retention apply preserves unique ordered candidate keys');
+  const lineageController = new AbortController();
+  const lineageBody = await clientExports.__test.fetchLineage?.(lineageController.signal);
+  featureRequest = inspectRequests.at(-1);
+  assert(lineageBody?.roots?.[0]?.id === 'root' && featureRequest?.url.endsWith('/lineage') && featureRequest?.options.signal === lineageController.signal, 'lineage helper returns cancellable uncached forest');
+
+  const defaults = clientExports.__test.defaultRetentionSelection?.([
+    { key: 'snapshot:s1', action: 'delete-snapshot' },
+    { key: 'trash:t1', action: 'purge-trash' },
+  ]);
+  assert([...defaults].join(',') === 'snapshot:s1', 'retention preview never preselects permanent recycle purges');
+  const lineageVisible = clientExports.__test.filterLineageForest?.([{
+    id: 'root', title: 'Root', children: [{ id: 'child', title: 'Child', children: [{ id: 'grandchild', title: 'Needle', children: [] }] }],
+  }], 'needle');
+  assert(lineageVisible?.[0]?.children?.[0]?.children?.[0]?.id === 'grandchild', 'lineage search preserves ancestors of a matching descendant');
+
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
   assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.selectionIds }))) === JSON.stringify([
@@ -1683,6 +1723,8 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
   const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
   assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
   assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '空间与策略'), 'archive manager exposes Storage & Retention tab');
+  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '会话血缘'), 'archive manager exposes Session Lineage tab');
 
   const moreTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '更多');
   moreTrigger?.props.onClick();
@@ -2713,8 +2755,8 @@ console.log('\n[11f] client half — recycle navigation and management');
   harness.flushEffects();
   let elements = collectElements(tree);
   const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  assert(tabs.length === 2, 'archive manager renders Archived and Recycle Bin tabs');
-  assert(tabs[0]?.props['aria-selected'] === true && tabs[1]?.props['aria-selected'] === false, 'Archived is the default selected tab');
+  assert(tabs.length === 4, 'archive manager renders Archived, Recycle Bin, Storage, and Lineage tabs');
+  assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
   tabs[1]?.props.onClick();
 
   tree = harness.render({ t, refreshSidebar: () => {} });
