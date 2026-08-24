@@ -18,8 +18,8 @@
 [插件市场](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [版本发布](https://github.com/Ultronen/dsh-archived-chats/releases) · [问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions) · [私密报告漏洞](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
 
 <p align="center">
-  <a href="assets/screenshots/8-conversation-preview.png"><img src="assets/screenshots/8-conversation-preview.png" width="49%" alt="归档聊天正文搜索与只读对话预览"></a>
-  <a href="assets/screenshots/9-recycle-bin.png"><img src="assets/screenshots/9-recycle-bin.png" width="49%" alt="带自动保护快照的归档聊天回收站"></a>
+  <a href="assets/screenshots/04-conversation-preview.png"><img src="assets/screenshots/04-conversation-preview.png" width="49%" alt="归档聊天正文搜索与只读对话预览"></a>
+  <a href="assets/screenshots/08-recycle-bin.png"><img src="assets/screenshots/08-recycle-bin.png" width="49%" alt="带自动保护快照的归档聊天回收站"></a>
 </p>
 
 <p align="center"><sub>无需先取消归档即可搜索和阅读；普通删除先进入带保护快照的回收站。</sub></p>
@@ -46,14 +46,17 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 预览
 
-截图 1–7 来自 `0.9.0` 在本地 DeepSeek Harness `0.1.0-rc.8` Web profile 中的实际操作；归档对话预览来自 `0.10.0`，回收站来自 `0.11.0`，两者都在 DeepSeek Harness `0.1.1-rc.2` 隔离真实宿主中捕获。
+以下截图均来自 `0.11.0` 在隔离的真实 DeepSeek Harness `0.1.1-rc.2` 中文浅色 Web profile 中的实际操作，只使用专门创建的演示会话，不包含真实用户数据。
 
-![已归档的聊天总览](assets/screenshots/1-archived-chats.png)
-![搜索与筛选](assets/screenshots/2-search.png)
-![分组操作](assets/screenshots/4-group-menu.png)
-![标签与备注编辑](assets/screenshots/5-metadata-editor.png)
-![批量操作](assets/screenshots/6-bulk-actions.png)
-![导入预览](assets/screenshots/7-import-preview.png)
+![从会话菜单点击归档](assets/screenshots/01-archive-entry.png)
+![已归档的聊天总览](assets/screenshots/02-archived-overview.png)
+![聊天正文与工具结果全文搜索](assets/screenshots/03-full-text-search.png)
+![归档对话只读预览](assets/screenshots/04-conversation-preview.png)
+![标签与备注编辑](assets/screenshots/05-metadata-editor.png)
+![按需批量选择](assets/screenshots/06-bulk-selection.png)
+![移至回收站确认](assets/screenshots/07-move-to-recycle.png)
+![带保护快照的回收站](assets/screenshots/08-recycle-bin.png)
+![永久删除二次确认](assets/screenshots/09-permanent-delete.png)
 
 ## 使用流程
 

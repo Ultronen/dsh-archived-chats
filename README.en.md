@@ -18,8 +18,8 @@ Once a conversation is archived in DeepSeek Harness it disappears from the sideb
 [Plugin market](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [Releases](https://github.com/Ultronen/dsh-archived-chats/releases) · [Questions and feedback](https://github.com/Ultronen/dsh-archived-chats/discussions) · [Private vulnerability reporting](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
 
 <p align="center">
-  <a href="assets/screenshots/8-conversation-preview.png"><img src="assets/screenshots/8-conversation-preview.png" width="49%" alt="Full-text search and read-only preview for archived chats"></a>
-  <a href="assets/screenshots/9-recycle-bin.png"><img src="assets/screenshots/9-recycle-bin.png" width="49%" alt="Archived-chat Recycle Bin with automatic protection snapshots"></a>
+  <a href="assets/screenshots/04-conversation-preview.png"><img src="assets/screenshots/04-conversation-preview.png" width="49%" alt="Full-text search and read-only preview for archived chats"></a>
+  <a href="assets/screenshots/08-recycle-bin.png"><img src="assets/screenshots/08-recycle-bin.png" width="49%" alt="Archived-chat Recycle Bin with automatic protection snapshots"></a>
 </p>
 
 <p align="center"><sub>Search and read without unarchiving first; ordinary deletion moves through a protection-snapshot Recycle Bin.</sub></p>
@@ -46,14 +46,17 @@ The full 0.11.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can
 
 ## Preview
 
-Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc.8` web profile. The archived preview is from 0.10.0 and the Recycle Bin is from 0.11.0, both captured in an isolated real DeepSeek Harness `0.1.1-rc.2` host.
+All screenshots below were captured from real `0.11.0` interactions in an isolated DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile. They use purpose-built demo conversations and contain no real user data.
 
-![Archived Chats overview](assets/screenshots/1-archived-chats.png)
-![Search and filters](assets/screenshots/2-search.png)
-![Group actions](assets/screenshots/4-group-menu.png)
-![Metadata editor](assets/screenshots/5-metadata-editor.png)
-![Bulk actions](assets/screenshots/6-bulk-actions.png)
-![Import preview](assets/screenshots/7-import-preview.png)
+![Archive a conversation from its session menu](assets/screenshots/01-archive-entry.png)
+![Archived Chats overview](assets/screenshots/02-archived-overview.png)
+![Full-text conversation and tool-result search](assets/screenshots/03-full-text-search.png)
+![Read-only archived conversation preview](assets/screenshots/04-conversation-preview.png)
+![Tags and notes editor](assets/screenshots/05-metadata-editor.png)
+![On-demand bulk selection](assets/screenshots/06-bulk-selection.png)
+![Move to Recycle Bin confirmation](assets/screenshots/07-move-to-recycle.png)
+![Recycle Bin with protection snapshots](assets/screenshots/08-recycle-bin.png)
+![Permanent deletion confirmation](assets/screenshots/09-permanent-delete.png)
 
 ## Usage
 
