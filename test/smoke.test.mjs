@@ -1485,6 +1485,22 @@ console.log('\n[10b] client model — sorting and visible selection');
   for (let index = 1; index < 5000; index += 1) deepCursor = deepCursor.children[0];
   assert(deepCursor?.id === 'deep-4999', 'lineage client filtering handles the advertised maximum depth');
 
+  const fullLineageId = 'session-d81d9954-a56b-4e47-a4ee-2eb2b5a81712';
+  const lineageRowTree = clientExports.__test.LineageTreeNodes?.({
+    nodes: [{ id: fullLineageId, title: null, status: 'active', origin: null, delegationDepth: 0, createdAt: 1, children: [] }],
+    collapsed: new Set(),
+    onToggle: () => {},
+    t: (key) => key === 'lineage.status.active' ? '活动' : key,
+  });
+  const lineageRowElements = collectElements(lineageRowTree);
+  const lineagePrimary = lineageRowElements.find((element) => element.type === 'strong');
+  const lineageStatus = lineageRowElements.find((element) => element.type === 'span' && element.props?.className?.includes('dac-lineage-active'));
+  assert(lineagePrimary?.props.title === fullLineageId, 'lineage primary label exposes the complete session ID on hover');
+  assert(lineageStatus?.props.style?.borderRadius === '8px'
+    && lineageStatus?.props.style?.whiteSpace === 'nowrap'
+    && lineageStatus?.props.style?.flexShrink === 0,
+  'lineage status renders as a non-wrapping rounded rectangle instead of a pill');
+
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
   assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.selectionIds }))) === JSON.stringify([
