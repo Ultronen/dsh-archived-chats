@@ -1490,16 +1490,56 @@ console.log('\n[10b] client model — sorting and visible selection');
     nodes: [{ id: fullLineageId, title: null, status: 'active', origin: null, delegationDepth: 0, createdAt: 1, children: [] }],
     collapsed: new Set(),
     onToggle: () => {},
-    t: (key) => key === 'lineage.status.active' ? '活动' : key,
+    onCopy: (id) => { copiedLineageId = id; },
+    copiedId: null,
+    t: (key) => ({
+      'lineage.status.active': '活动',
+      'lineage.origin.session': '普通会话',
+      'lineage.copyId': '复制 ID',
+      'lineage.copiedId': '已复制',
+      'locale.intl': 'zh-CN',
+    })[key] ?? key,
   });
   const lineageRowElements = collectElements(lineageRowTree);
   const lineagePrimary = lineageRowElements.find((element) => element.type === 'strong');
   const lineageStatus = lineageRowElements.find((element) => element.type === 'span' && element.props?.className?.includes('dac-lineage-active'));
+  const lineageDetails = lineageRowElements.find((element) => element.props?.className === 'dac-lineage-detail');
+  const lineageIdText = collectElements(lineageDetails).find((element) => element.type === 'small' && element.props?.className === 'dac-lineage-id');
+  const lineageCopy = collectElements(lineageDetails).find((element) => element.type === 'button');
   assert(lineagePrimary?.props.title === fullLineageId, 'lineage primary label exposes the complete session ID on hover');
+  assert(lineagePrimary?.props.style?.whiteSpace === 'normal' && lineagePrimary?.props.style?.overflowWrap === 'anywhere'
+    && lineageIdText?.props.children === fullLineageId,
+  'lineage session ID is displayed in full and may wrap');
   assert(lineageStatus?.props.style?.borderRadius === '8px'
     && lineageStatus?.props.style?.whiteSpace === 'nowrap'
     && lineageStatus?.props.style?.flexShrink === 0,
   'lineage status renders as a non-wrapping rounded rectangle instead of a pill');
+  let copiedLineageId = null;
+  lineageCopy?.props.onClick();
+  assert(lineageCopy?.props.children === '复制 ID' && copiedLineageId === fullLineageId,
+  'lineage row exposes a lower-right copy button for the exact session ID');
+
+  const snapshotRowsTree = clientExports.__test.SnapshotInsightRows?.({
+    snapshots: [
+      { snapshotId: 'snapshot-active', sessionId: 'session-a', status: 'ready', active: true, createdAt: '2026-08-25T00:00:00.000Z', totalBytes: 52 * 1024 },
+      { snapshotId: 'snapshot-history', sessionId: 'session-b', status: 'ready', active: false, createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 1024 * 1024 },
+    ],
+    sessions: [{ id: 'session-a', title: '发布计划' }, { id: 'session-b', title: null }],
+    t: (key) => ({
+      'insights.snapshot.active': '活动保护快照',
+      'insights.snapshot.history': '历史保护快照',
+      'insights.snapshot.degraded': '降级保护快照',
+      'insights.snapshot.original': '原会话',
+      'insights.snapshot.created': '创建时间',
+      'insights.snapshot.id': '快照 ID',
+      'locale.intl': 'zh-CN',
+    })[key] ?? key,
+  });
+  const snapshotRowsText = elementText(snapshotRowsTree);
+  assert(snapshotRowsText.includes('活动保护快照') && snapshotRowsText.includes('历史保护快照')
+    && snapshotRowsText.includes('原会话：发布计划') && snapshotRowsText.includes('原会话：session-b')
+    && snapshotRowsText.includes('创建时间：') && snapshotRowsText.includes('快照 ID：snapshot-active'),
+  'snapshot rows explain their state, original chat, creation time, and internal snapshot ID');
 
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
