@@ -2687,6 +2687,39 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 个附件'), 'recycle row renders snapshot bytes and attachment count');
   assert(elementText(tree).includes('保护快照可用') && elementText(tree).includes('快照降级'), 'recycle rows render ready and degraded statuses');
 
+  let recycleCheckboxes = elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(recycleCheckboxes.length === 0, 'recycle rows hide all selection checkboxes by default');
+  assert(!elements.some((element) => element.type === 'button' && ['恢复选中项', '永久删除选中项'].includes(elementText(element))), 'recycle selected-item actions are hidden by default');
+  const startRecycleSelection = elements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
+  assert(startRecycleSelection !== undefined, 'recycle toolbar exposes an on-demand selection trigger');
+  startRecycleSelection?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  recycleCheckboxes = elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+  assert(recycleCheckboxes.some((element) => element.props?.['aria-label'] === '选择全部回收站会话'), 'recycle selection mode exposes the global checkbox');
+  assert(recycleCheckboxes.some((element) => element.props?.['aria-label'] === '选择回收站会话: Trash Alpha'), 'recycle selection mode exposes row checkboxes');
+  assert(elements.some((element) => element.type === 'button' && elementText(element) === '恢复选中项')
+    && elements.some((element) => element.type === 'button' && elementText(element) === '永久删除选中项'), 'recycle selection mode exposes selected-item actions');
+  const finishRecycleSelection = elements.find((element) => element.type === 'button' && elementText(element) === '完成');
+  finishRecycleSelection?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  assert(!elements.some((element) => element.type === 'input' && element.props?.type === 'checkbox'), 'finishing recycle selection hides every checkbox');
+  assert(!elements.some((element) => element.type === 'button' && ['恢复选中项', '永久删除选中项'].includes(elementText(element))), 'finishing recycle selection hides selected-item actions');
+
+  const collapseProject = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '折叠' && elementText(element).includes('项目一'));
+  assert(collapseProject?.props['aria-expanded'] === true, 'recycle project group starts expanded');
+  collapseProject?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  assert(!elements.some((element) => element.props?.['data-session-id'] === 'trash-a'), 'collapsing a recycle group hides its rows');
+  assert(JSON.parse(storageMap.get('dsh-archived-chats:collapsed') ?? '{}')['trash:ws-1'] === true, 'recycle collapse preference uses a tab-specific key');
+  const expandProject = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '展开' && elementText(element).includes('项目一'));
+  expandProject?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  assert(elements.some((element) => element.props?.['data-session-id'] === 'trash-a'), 'expanding a recycle group restores its rows');
+
   const previewButton = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Trash Alpha');
   await previewButton?.props.onClick();
   const previewRequest = requests.findLast((request) => request.path.endsWith('/preview'));
