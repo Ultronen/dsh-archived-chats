@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -53,6 +53,26 @@ test('captures and validates an image whose optional display name is absent', as
   const checked = await store.validate(SNAPSHOT_ID);
   assert.equal(Object.hasOwn(checked.manifest.attachments[0], 'name'), false);
   assert.equal(Object.hasOwn(checked.record.attachments[0], 'name'), false);
+});
+
+test('preserves normalized original dimensions and rejects non-image descriptors', async () => {
+  const ref = image({ originalDimensions: { width: 4, height: 3 } });
+  assert.deepEqual(collectImageReferences([{ data: { image: ref } }]), [ref]);
+  const { store } = await fixture({
+    events: [{ data: { image: ref } }],
+    readImage: async (storedRef) => ({ ref: storedRef, data: new Uint8Array([1, 2, 3, 4]) }),
+  });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  const checked = await store.validate(SNAPSHOT_ID);
+  assert.deepEqual(checked.manifest.attachments[0].originalDimensions, { width: 4, height: 3 });
+  assert.throws(
+    () => collectImageReferences([{ data: { image: image({ mediaType: 'image/svg+xml' }) } }]),
+    (error) => error.code === 'snapshot-attachment-invalid',
+  );
+  assert.throws(
+    () => collectImageReferences([{ data: { image: image({ width: 0 }) } }]),
+    (error) => error.code === 'snapshot-attachment-invalid',
+  );
 });
 
 test('ignores attachment-id lookalikes that are not complete image descriptors', () => {
@@ -379,7 +399,9 @@ test('recovery removes stale staging, preserves valid orphans, selects determini
   another.root = root;
   const second = createSnapshotStore({ root, persistence: another.persistence, attachments: null, uuid: () => ids[1], now: () => new Date('2026-08-24T00:00:00.000Z') });
   await second.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
-  await writeFile(join(root, '.staging', 'stale'), 'stale');
+  const stale = join(root, '.staging', 'stale');
+  await writeFile(stale, 'stale');
+  await utimes(stale, new Date(0), new Date(0));
   await mkdir(join(root, ids[2]));
   await writeFile(join(root, ids[2], 'manifest.json'), '{broken');
   const recovered = await store.recover();
@@ -397,4 +419,24 @@ test('recovery removes stale staging, preserves valid orphans, selects determini
   await store.removeForSession('session-a');
   assert.equal((await readdir(root)).includes(ids[1]), false);
   assert.equal((await readdir(root)).includes(ids[2]), true);
+});
+
+test('latest lookup preserves live staging and recovery removes only pre-start staging', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-snapshot-staging-'));
+  tempRoots.add(root);
+  const staging = join(root, '.staging');
+  await mkdir(staging, { recursive: true });
+  const stale = join(staging, 'stale');
+  await writeFile(stale, 'stale');
+  await utimes(stale, new Date(0), new Date(0));
+  const persistence = { inspect: async () => ({ meta: { id: 'session-a' }, events: [] }) };
+  const store = createSnapshotStore({ root, persistence, attachments: null });
+  const live = join(staging, 'live');
+  await writeFile(live, 'live');
+  const future = new Date(Date.now() + 60_000);
+  await utimes(live, future, future);
+  assert.equal(await store.latestFor('session-a'), null);
+  assert.deepEqual((await readdir(staging)).sort(), ['live', 'stale']);
+  await store.recover();
+  assert.deepEqual(await readdir(staging), ['live']);
 });
