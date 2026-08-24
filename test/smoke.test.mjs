@@ -221,7 +221,7 @@ const events = {
 };
 const headerRows = [
   { id: 'session-a', createdAt: 1786726311605, cwd: '/ws/one' },
-  { id: 'session-b', createdAt: 1786726400000, cwd: '/ws/two', origin: 'subagent' },
+  { id: 'session-b', createdAt: 1786726400000, cwd: '/ws/two', parentSession: 'session-a', seedLength: 2, origin: 'subagent', delegationDepth: 1 },
   { id: 'session-c', createdAt: 1786726500000, cwd: '/ws/one' },
 ];
 // Real on-disk artifacts for the delete path (sessions a, b, c + live one).
@@ -303,12 +303,51 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 17, `seventeen archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 22, `twenty-two archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
 assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
+
+console.log('\n[1a0] storage insights, retention, and lineage routes');
+{
+  const insights = await call(routes, '/plugins/dsh-archived-chats/insights', mockReq('GET', {}));
+  assert(insights.status === 200, `insights answers 200 (got ${insights.status})`);
+  assert(insights.json().summary.sessionBytes >= 0, 'insights exposes measured session bytes');
+  assert(!JSON.stringify(insights.json()).includes('workspacePath'), 'insights never exposes workspace paths');
+
+  const lineage = await call(routes, '/plugins/dsh-archived-chats/lineage', mockReq('GET', {}));
+  assert(lineage.status === 200, `lineage answers 200 (got ${lineage.status})`);
+  assert(lineage.json().roots[0].children[0].id === 'session-b', 'lineage uses durable parentSession edges');
+  assert(!JSON.stringify(lineage.json()).includes('/ws/'), 'lineage never exposes workspace paths');
+
+  const policyGet = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('GET', {}));
+  assert(policyGet.status === 405, 'retention policy rejects GET');
+  const previewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/retention/preview', mockReq('POST', {}, '{}'));
+  assert(previewMissingGuard.status === 403, 'retention preview rejects missing guard');
+  const applyMissingGuard = await call(routes, '/plugins/dsh-archived-chats/retention/apply', mockReq('POST', {}, '{}'));
+  assert(applyMissingGuard.status === 403, 'retention apply rejects missing guard');
+
+  const savedPolicy = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({
+    historicalSnapshotsPerSession: 1,
+    historicalSnapshotMaxAgeDays: null,
+    snapshotQuotaBytes: null,
+    recycleMaxAgeDays: null,
+  })));
+  assert(savedPolicy.status === 200, `retention policy save answers 200 (got ${savedPolicy.status})`);
+
+  const preview = await call(routes, '/plugins/dsh-archived-chats/retention/preview', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, '{}'));
+  assert(preview.status === 200, `retention preview answers 200 (got ${preview.status})`);
+  const applyResult = await call(routes, '/plugins/dsh-archived-chats/retention/apply', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ token: preview.json().token, nonce: preview.json().nonce, keys: [] })));
+  assert(applyResult.status === 200, `empty retention selection safely consumes preview (got ${applyResult.status})`);
+}
 {
   const inspectGet = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('GET', {}));
   assert(inspectGet.status === 405, `import inspect rejects non-POST methods (got ${inspectGet.status})`);
