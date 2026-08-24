@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRecycleService, RecycleError } from '../lib/recycle.js';
@@ -89,7 +89,7 @@ function recycleFixture(options = {}) {
     async detachSession(sessionId) { this.sessionIds.delete(sessionId); },
   };
   const registry = {
-    state: { archivedSessionIds: [id], workspaceIds: ['ws-1'] },
+    state: { archivedSessionIds: options.unarchived ? [] : [id], workspaceIds: ['ws-1'] },
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => [workspace],
     async setState(next) { this.state = next; },
@@ -111,7 +111,22 @@ function recycleFixture(options = {}) {
     async get(sessionId) { return records.has(sessionId) ? structuredClone(records.get(sessionId)) : null; },
     async list() { return [...records.values()].map((record) => structuredClone(record)); },
     async put(record) { calls.push(`trash:put:${record.sessionId}`); records.set(record.sessionId, structuredClone(record)); return structuredClone(record); },
-    async remove(sessionId) { const ids = Array.isArray(sessionId) ? sessionId : [sessionId]; const removed = []; for (const key of ids) if (records.delete(key)) removed.push(key); return removed; },
+    async transition(sessionId, state, patch = {}) {
+      calls.push(`trash:transition:${sessionId}:${state}`);
+      const current = records.get(sessionId);
+      if (!current) throw Object.assign(new Error('missing'), { code: 'trash-record-missing' });
+      const next = { ...current, ...structuredClone(patch), state };
+      if (state === 'purge-pending' && next.purgeRequestedAt == null) next.purgeRequestedAt = NOW;
+      records.set(sessionId, next);
+      return structuredClone(next);
+    },
+    async markDegraded(sessionId, patch = {}) {
+      const current = records.get(sessionId);
+      const next = { ...current, ...structuredClone(patch), state: 'degraded' };
+      records.set(sessionId, next);
+      return structuredClone(next);
+    },
+    async remove(sessionId) { const ids = Array.isArray(sessionId) ? sessionId : [sessionId]; const removed = []; for (const key of ids) if (records.delete(key)) { calls.push(`trash:remove:${key}`); removed.push(key); } return removed; },
     async summary() { return { count: records.size, snapshotBytes: [...records.values()].reduce((sum, record) => sum + record.snapshotBytes, 0), degradedCount: 0, purgePendingCount: 0 }; },
   };
   const snapshots = new Map(options.trashed ? [[id, { snapshotId: SNAPSHOT_ID, sessionId: id, createdAt: NOW }]] : []);
@@ -159,6 +174,15 @@ function recycleFixture(options = {}) {
       calls.push(`snapshot:remove:${snapshotId}`);
       for (const [sessionId, value] of snapshots) if (value.snapshotId === snapshotId) snapshots.delete(sessionId);
     },
+    async removeForSession(sessionId) {
+      calls.push(`snapshot:remove:${sessionId}`);
+      snapshots.delete(sessionId);
+      return [SNAPSHOT_ID];
+    },
+    async recover() {
+      const valid = [...snapshots.values()].map((value) => structuredClone(value));
+      return { valid, degraded: [], latestBySession: new Map(valid.map((value) => [value.sessionId, value])) };
+    },
   };
   const attachments = {
     saved: [],
@@ -178,9 +202,16 @@ function recycleFixture(options = {}) {
     }
     return { disposition: options.disposition ?? 'cold' };
   };
+  const purgedIds = [];
+  const pendingPath = join(root, 'pending-deletions.json');
   const service = createRecycleService({
     registry, persistence, attachments, metadataStore, trashStore, snapshotStore,
-    lifecycle: queue(), disposeLive, purgePhysical: async () => {},
+    lifecycle: queue(), disposeLive, purgePhysical: async (sessionId) => {
+      calls.push(`physical:purge:${sessionId}`);
+      if (options.purgeError) throw options.purgeError;
+      purgedIds.push(sessionId);
+      persistence.ids.delete(sessionId);
+    },
     invalidate: (ids) => { for (const sessionId of ids) calls.push(`cache:invalidate:${sessionId}`); },
     logger: { warn() {} }, now: () => new Date(NOW),
   });
@@ -188,7 +219,7 @@ function recycleFixture(options = {}) {
     service, persistence, attachments, workspace, registry, metadata, trashStore, snapshotStore,
     calls, captures: () => captures, disposeStarted,
     releaseDispose: () => releaseDispose?.(), captureStarted,
-    releaseCapture: () => releaseCapture?.(), records, root, sessionDir,
+    releaseCapture: () => releaseCapture?.(), records, root, sessionDir, purgedIds, pendingPath,
   };
 }
 
@@ -301,4 +332,60 @@ test('append failure rolls back the newly created artifact and preserves trash',
   assert.equal(fixture.persistence.ids.has('session-a'), false);
   assert.equal(existsSync(fixture.sessionDir), false);
   assert.notEqual(await fixture.trashStore.get('session-a'), null);
+});
+
+test('records purge intent before physical deletion and removes trash last', async () => {
+  const fixture = recycleFixture({ trashed: true });
+  assert.deepEqual(await fixture.service.purge(['session-a']), { purged: ['session-a'], failed: [] });
+  assert.deepEqual(fixture.calls.filter((call) => /^(trash:transition|physical:purge|snapshot:remove|trash:remove|cache:invalidate)/.test(call)), [
+    'trash:transition:session-a:purge-pending',
+    'physical:purge:session-a',
+    'snapshot:remove:session-a',
+    'trash:remove:session-a',
+    'cache:invalidate:session-a',
+  ]);
+});
+
+test('startup retries purge-pending but never deletes plain trash', async () => {
+  const fixture = recycleFixture({ records: [trashRecord('a'), trashRecord('b', 'purge-pending')] });
+  writeFileSync(fixture.pendingPath, '{"ids":[]}\n');
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+  assert.deepEqual(fixture.purgedIds, ['b']);
+  assert.notEqual(await fixture.trashStore.get('a'), null);
+  assert.equal(await fixture.trashStore.get('b'), null);
+});
+
+test('legacy pending migration snapshots archived ids and never purges them', async () => {
+  const fixture = recycleFixture();
+  writeFileSync(fixture.pendingPath, '{"ids":["session-a"]}\n');
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+  assert.notEqual(await fixture.trashStore.get('session-a'), null);
+  assert.deepEqual(fixture.purgedIds, []);
+  assert.equal(readFileSync(fixture.pendingPath, 'utf8'), '{\n  "ids": []\n}\n');
+});
+
+test('purge failure retains durable purge-pending intent for startup retry', async () => {
+  const fixture = recycleFixture({ trashed: true, purgeError: Object.assign(new Error('disk failed'), { code: 'purge-failed' }) });
+  assert.deepEqual(await fixture.service.purge(['session-a']), { purged: [], failed: [{ id: 'session-a', reason: 'purge-failed' }] });
+  assert.equal((await fixture.trashStore.get('session-a')).state, 'purge-pending');
+  assert.notEqual(await fixture.snapshotStore.latestFor('session-a'), null);
+});
+
+test('legacy migration removes only unarchived markers and preserves malformed or failed entries', async () => {
+  const unarchived = recycleFixture({ unarchived: true });
+  writeFileSync(unarchived.pendingPath, '{"ids":["session-a"]}\n');
+  await unarchived.service.recoverStartup({ legacyPendingPath: unarchived.pendingPath });
+  assert.equal(readFileSync(unarchived.pendingPath, 'utf8'), '{\n  "ids": []\n}\n');
+  assert.equal(await unarchived.trashStore.get('session-a'), null);
+
+  const failed = recycleFixture({ snapshotError: Object.assign(new Error('full'), { code: 'snapshot-write-failed' }) });
+  writeFileSync(failed.pendingPath, '{"ids":["session-a"]}\n');
+  await failed.service.recoverStartup({ legacyPendingPath: failed.pendingPath });
+  assert.equal(readFileSync(failed.pendingPath, 'utf8'), '{"ids":["session-a"]}\n');
+
+  const malformed = recycleFixture();
+  writeFileSync(malformed.pendingPath, '{broken');
+  assert.deepEqual(await malformed.service.recoverStartup({ legacyPendingPath: malformed.pendingPath }), { status: 'legacy-pending-unavailable' });
+  assert.equal(readFileSync(malformed.pendingPath, 'utf8'), '{broken');
+  assert.deepEqual(malformed.purgedIds, []);
 });
