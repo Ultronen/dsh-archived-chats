@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TrashStoreError, createTrashStore, normalizeTrashRecord, readLegacyPending, selectTrashIds } from '../lib/trash.js';
@@ -27,6 +27,24 @@ const readyRecord = (id = 'session-a') => ({
 test('normalizes an exact record and rejects unsupported states', () => {
   assert.deepEqual(normalizeTrashRecord(readyRecord(), 'session-a'), readyRecord());
   assert.throws(() => normalizeTrashRecord({ ...readyRecord(), state: 'deleted' }, 'session-a'),
+    (error) => error instanceof TrashStoreError && error.code === 'trash-store-unavailable');
+});
+
+test('degraded records accept opaque or null snapshot identifiers', () => {
+  const opaque = normalizeTrashRecord({ ...readyRecord(), state: 'degraded', snapshotId: 'snapshot-repair-needed' }, 'session-a');
+  assert.equal(opaque.snapshotId, 'snapshot-repair-needed');
+  const none = normalizeTrashRecord({ ...readyRecord(), state: 'degraded', snapshotId: null }, 'session-a');
+  assert.equal(none.snapshotId, null);
+});
+
+test('timestamps require canonical UTC ISO milliseconds', () => {
+  for (const field of ['trashedAt', 'metadataUpdatedAt']) {
+    assert.throws(() => normalizeTrashRecord({ ...readyRecord(), [field]: 'August 24, 2026' }, 'session-a'),
+      (error) => error instanceof TrashStoreError && error.code === 'trash-store-unavailable');
+  }
+  assert.throws(() => normalizeTrashRecord({ ...readyRecord(), trashedAt: '2026-08-24T00:00:00Z' }, 'session-a'),
+    (error) => error instanceof TrashStoreError && error.code === 'trash-store-unavailable');
+  assert.throws(() => normalizeTrashRecord({ ...readyRecord(), trashedAt: '2026-02-30T00:00:00.000Z' }, 'session-a'),
     (error) => error instanceof TrashStoreError && error.code === 'trash-store-unavailable');
 });
 
@@ -58,6 +76,22 @@ test('preserves malformed bytes and rejects mutation', async () => {
   assert.equal((await store.load()).status, 'unavailable');
   await assert.rejects(store.put(readyRecord()), (error) => error.code === 'trash-store-unavailable');
   assert.equal(await readFile(path, 'utf8'), '{broken');
+});
+
+test('preserves unsupported-version and invalid-record bytes after rejected mutation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-trash-preserve-'));
+  const path = join(root, 'trash.json');
+  const store = createTrashStore({ path });
+  const unsupported = '{"version":2,"records":{}}\n';
+  await writeFile(path, unsupported, 'utf8');
+  assert.equal((await store.load()).status, 'unavailable');
+  await assert.rejects(store.put(readyRecord('a')), (error) => error.code === 'trash-store-unavailable');
+  assert.equal(await readFile(path, 'utf8'), unsupported);
+  const invalid = JSON.stringify({ version: 1, records: { a: { ...readyRecord('a'), trashedAt: 'not-a-timestamp' } } });
+  await writeFile(path, invalid, 'utf8');
+  assert.equal((await store.load()).status, 'unavailable');
+  await assert.rejects(store.remove('a'), (error) => error.code === 'trash-store-unavailable');
+  assert.equal(await readFile(path, 'utf8'), invalid);
 });
 
 test('missing documents are ready-empty and invalid records fail closed', async () => {
@@ -97,6 +131,39 @@ test('remove is idempotent and summary counts each state', async () => {
   assert.deepEqual(await store.remove('missing'), []);
   assert.deepEqual(await store.remove('a'), ['a']);
   assert.deepEqual(await store.remove('a'), []);
+});
+
+test('clones nested input and output data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-trash-clone-'));
+  const store = createTrashStore({ path: join(root, 'trash.json') });
+  const input = readyRecord();
+  const saved = await store.put(input);
+  input.tags.push('mutated');
+  input.workspace.title = 'Mutated';
+  saved.tags.push('mutated-output');
+  saved.workspace.title = 'Mutated-output';
+  const loaded = await store.get('session-a');
+  assert.deepEqual(loaded.tags, ['important']);
+  assert.equal(loaded.workspace.title, 'Project');
+  loaded.tags.push('mutated-loaded');
+  loaded.workspace.title = 'Mutated-loaded';
+  assert.deepEqual((await store.get('session-a')).tags, ['important']);
+  assert.equal((await store.get('session-a')).workspace.title, 'Project');
+});
+
+test('serializes concurrent writes across store instances and cleans failed temps', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-trash-cross-instance-'));
+  const path = join(root, 'trash.json');
+  const first = createTrashStore({ path });
+  const second = createTrashStore({ path });
+  await Promise.all([first.put(readyRecord('a')), second.put(readyRecord('b'))]);
+  assert.deepEqual((await first.list()).map((record) => record.sessionId), ['a', 'b']);
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  const blockedPath = join(root, 'blocked.json');
+  await mkdir(blockedPath);
+  await assert.rejects(createTrashStore({ path: blockedPath }).put(readyRecord('c')));
+  const leftovers = (await readdir(root)).filter((name) => name.startsWith('blocked.json.') && name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []);
 });
 
 test('legacy pending accepts only the exact ids array shape', async () => {

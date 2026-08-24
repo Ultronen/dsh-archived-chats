@@ -37,3 +37,23 @@ After the implementation, the focused suite reported 8 passing tests and 0 failu
 
 - `list`, `get`, and `summary` expose empty read results when the catalog is unavailable; callers must inspect `load().status` when they need to distinguish unavailable from empty.
 - Snapshot existence/content verification and startup migration orchestration are intentionally deferred to later tasks.
+
+## Fix Round 1
+
+### Findings addressed
+
+- Degraded records now accept either `null` or any string snapshot identifier; UUID validation remains required for `trashed` and `purge-pending`.
+- Writes are serialized across store instances by resolved catalog path. Temporary files use exclusive `wx` creation, random UUID names, explicit `0600` permissions, and cleanup on write/rename failures.
+- Timestamp fields require canonical UTC ISO-8601 milliseconds (`YYYY-MM-DDTHH:mm:ss.sssZ`) and a `Date#toISOString()` round trip.
+
+### RED evidence
+
+Added review coverage, then ran `rtk node --test test/trash.test.mjs`; it failed 3 tests as expected: opaque degraded snapshot IDs were rejected, non-canonical timestamps were accepted, and concurrent store instances collided on the predictable `.1.tmp` filename with `ENOENT` during rename.
+
+### GREEN evidence
+
+- `rtk node --test test/trash.test.mjs` — 13/13 passing.
+- `rtk npm test` — 56/56 passing; exit 0.
+- `rtk git diff --check` — clean.
+
+New coverage also verifies input/output nested immutability, unsupported-version and invalid-record byte preservation with rejected mutation, cross-instance deterministic update order, output mode `0600`, and failed-temp cleanup.
