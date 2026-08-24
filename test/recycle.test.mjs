@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRecycleService, RecycleError } from '../lib/recycle.js';
 
 const NOW = '2026-08-24T00:00:00.000Z';
 const SNAPSHOT_ID = '00000000-0000-4000-8000-000000000001';
+const tempRoots = new Set();
+test.after(() => { for (const root of tempRoots) rmSync(root, { recursive: true, force: true }); });
 
 function trashRecord(id = 'session-a', state = 'trashed') {
   return {
@@ -41,20 +46,47 @@ function recycleFixture(options = {}) {
   const calls = options.calls ?? [];
   const id = 'session-a';
   const headers = new Map([[id, { id, version: 1, cwd: '/project', createdAt: 10, origin: null }]]);
+  const root = mkdtempSync(join(tmpdir(), 'dac-recycle-'));
+  tempRoots.add(root);
+  const sessionDir = join(root, id);
+  let listCalls = 0;
   const persistence = {
     ids: new Set(options.originalMissing ? [] : [id]),
     writeCalls: 0,
     created: [],
     appended: [],
-    async list() { return [...this.ids].map((sessionId) => headers.get(sessionId)); },
+    async list() {
+      listCalls += 1;
+      if (options.raceConflict && listCalls >= 2) return [headers.get(id)];
+      return [...this.ids].map((sessionId) => headers.get(sessionId));
+    },
     async inspect(sessionId) {
       if (!this.ids.has(sessionId)) throw new Error('missing');
       return { meta: headers.get(sessionId), events: [{ seq: 0, type: 'session/title', data: { title: 'Alpha' } }] };
+    },
+    locate: options.unsupportedLocate ? undefined : (meta) => ({ kind: 'jsonl', path: join(root, String(meta.id), 'session.jsonl.zstd') }),
+    async create(meta) {
+      this.writeCalls += 1;
+      this.created.push(structuredClone(meta));
+      this.ids.add(String(meta.id));
+      mkdirSync(join(root, String(meta.id)), { recursive: true });
+      writeFileSync(join(root, String(meta.id), 'session.jsonl.zstd'), 'created');
+    },
+    async append(sessionId, events) {
+      this.writeCalls += 1;
+      this.appended.push(structuredClone(events));
+      if (options.failAppend) throw Object.assign(new Error('append failed'), { code: 'append-failed' });
+      if (!this.ids.has(sessionId)) throw new Error('missing');
+    },
+    async removeSession(sessionId) {
+      this.ids.delete(String(sessionId));
+      rmSync(join(root, String(sessionId)), { recursive: true, force: true });
     },
   };
   const workspace = {
     id: 'ws-1', title: 'Project', path: '/project', sessionIds: new Set([id]),
     async attachSession(sessionId) { this.sessionIds.add(sessionId); },
+    async detachSession(sessionId) { this.sessionIds.delete(sessionId); },
   };
   const registry = {
     state: { archivedSessionIds: [id], workspaceIds: ['ws-1'] },
@@ -70,6 +102,7 @@ function recycleFixture(options = {}) {
       return { status: 'ready', entries };
     },
     async set(sessionId, value) { metadata.set(sessionId, { ...structuredClone(value), updatedAt: NOW }); },
+    async remove(ids) { for (const sessionId of ids) metadata.delete(sessionId); },
   };
   const records = new Map();
   for (const record of options.records ?? (options.trashed ? [trashRecord()] : [])) records.set(record.sessionId, structuredClone(record));
@@ -100,9 +133,38 @@ function recycleFixture(options = {}) {
       return structuredClone(value);
     },
     async latestFor(sessionId) { return snapshots.has(sessionId) ? structuredClone(snapshots.get(sessionId)) : null; },
+    async validate(snapshotId) {
+      if (snapshotId !== SNAPSHOT_ID) throw new Error('missing snapshot');
+      const ref = { attachmentId: 'image-a', mediaType: 'image/png', bytes: 4, width: 2, height: 2, name: 'a.png' };
+      const archive = trashRecord().workspace;
+      return {
+        manifest: { snapshotId, sessionId: id },
+        record: {
+          format: 'dsh-archived-chats/snapshot-session', version: 1,
+          archive: { ...trashRecord(), workspace: archive },
+          source: {
+            meta: structuredClone(headers.get(id)),
+            events: [
+              { seq: 0, type: 'session/start', data: {} },
+              { seq: 1, type: 'user/message', data: { image: ref } },
+              { seq: 2, type: 'session/title', data: { title: 'Alpha' } },
+            ],
+          },
+          attachments: options.withAttachment ? [ref] : [],
+        },
+        attachments: options.withAttachment ? [{ descriptor: { ...ref, file: 'attachments/001.png', sha256: 'a'.repeat(64) }, path: join(root, 'snapshot-image'), data: new Uint8Array([1, 2, 3, 4]) }] : [],
+      };
+    },
     async remove(snapshotId) {
       calls.push(`snapshot:remove:${snapshotId}`);
       for (const [sessionId, value] of snapshots) if (value.snapshotId === snapshotId) snapshots.delete(sessionId);
+    },
+  };
+  const attachments = {
+    saved: [],
+    async saveImage(input) {
+      this.saved.push(structuredClone(input));
+      return { attachmentId: options.attachmentMismatch ? 'different-image' : 'image-a', mediaType: input.mediaType, bytes: input.data.byteLength, width: 2, height: 2, ...(input.name === undefined ? {} : { name: input.name }) };
     },
   };
   let releaseDispose;
@@ -117,16 +179,16 @@ function recycleFixture(options = {}) {
     return { disposition: options.disposition ?? 'cold' };
   };
   const service = createRecycleService({
-    registry, persistence, attachments: null, metadataStore, trashStore, snapshotStore,
+    registry, persistence, attachments, metadataStore, trashStore, snapshotStore,
     lifecycle: queue(), disposeLive, purgePhysical: async () => {},
     invalidate: (ids) => { for (const sessionId of ids) calls.push(`cache:invalidate:${sessionId}`); },
     logger: { warn() {} }, now: () => new Date(NOW),
   });
   return {
-    service, persistence, workspace, registry, metadata, trashStore, snapshotStore,
+    service, persistence, attachments, workspace, registry, metadata, trashStore, snapshotStore,
     calls, captures: () => captures, disposeStarted,
     releaseDispose: () => releaseDispose?.(), captureStarted,
-    releaseCapture: () => releaseCapture?.(), records,
+    releaseCapture: () => releaseCapture?.(), records, root, sessionDir,
   };
 }
 
@@ -199,4 +261,44 @@ test('rejects unavailable stores and purge-pending restore without leaking recor
 
   const pending = recycleFixture({ records: [trashRecord('session-a', 'purge-pending')] });
   assert.deepEqual(await pending.service.restore(['session-a']), { restored: [], failed: [{ id: 'session-a', reason: 'trash-state-conflict' }], warnings: [] });
+});
+
+test('restores a missing original from snapshot without changing identity', async () => {
+  const fixture = recycleFixture({ trashed: true, originalMissing: true, withAttachment: true });
+  const result = await fixture.service.restore(['session-a']);
+  assert.deepEqual(result.restored, ['session-a']);
+  assert.deepEqual(fixture.persistence.created, [{ id: 'session-a', version: 1, cwd: '/project', createdAt: 10, origin: null }]);
+  assert.deepEqual(fixture.persistence.appended.flat().map((event) => event.seq), [0, 1, 2]);
+  assert.equal(fixture.attachments.saved[0].mediaType, 'image/png');
+  assert.equal(fixture.workspace.sessionIds.has('session-a'), true);
+  assert.deepEqual(
+    { tags: fixture.metadata.get('session-a').tags, note: fixture.metadata.get('session-a').note },
+    { tags: ['important'], note: 'keep context' },
+  );
+  assert.equal(fixture.registry.archivedSessionIds.includes('session-a'), true);
+  assert.equal(await fixture.trashStore.get('session-a'), null);
+  assert.equal(existsSync(fixture.sessionDir), true);
+});
+
+test('fallback preflight rejects id races, unsupported rollback, and attachment identity mismatch without writes', async () => {
+  for (const options of [
+    { raceConflict: true, expected: 'id-conflict' },
+    { unsupportedLocate: true, expected: 'snapshot-restore-unsupported' },
+    { withAttachment: true, attachmentMismatch: true, expected: 'snapshot-attachment-identity-mismatch' },
+  ]) {
+    const fixture = recycleFixture({ trashed: true, originalMissing: true, ...options });
+    const result = await fixture.service.restore(['session-a']);
+    assert.deepEqual(result.failed, [{ id: 'session-a', reason: options.expected }]);
+    assert.equal(fixture.persistence.created.length, 0);
+    assert.notEqual(await fixture.trashStore.get('session-a'), null);
+  }
+});
+
+test('append failure rolls back the newly created artifact and preserves trash', async () => {
+  const fixture = recycleFixture({ trashed: true, originalMissing: true, failAppend: true });
+  const result = await fixture.service.restore(['session-a']);
+  assert.deepEqual(result.failed, [{ id: 'session-a', reason: 'append-failed' }]);
+  assert.equal(fixture.persistence.ids.has('session-a'), false);
+  assert.equal(existsSync(fixture.sessionDir), false);
+  assert.notEqual(await fixture.trashStore.get('session-a'), null);
 });
