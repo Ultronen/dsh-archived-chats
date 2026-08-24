@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "DeepSeek Harness 本地归档会话中心：全文搜索、回收站、撤销、自动保护快照与备份恢复。Local archived-chat search, recycle bin, undo, automatic protection snapshots, and backup restore for DeepSeek Harness.",
   "license": "MIT",
   "author": "Ultronen",

@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test('published 0.11 package contains recycle runtime and excludes local state', () => {
+test('published 0.12 package contains insights runtime and excludes local state', () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const cache = mkdtempSync(join(tmpdir(), 'dac-npm-cache-'));
   const result = spawnSync(npm, ['pack', '--dry-run', '--json'], {
@@ -20,7 +20,7 @@ test('published 0.11 package contains recycle runtime and excludes local state',
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const [{ files, version }] = JSON.parse(result.stdout);
-  assert.equal(version, '0.11.0');
+  assert.equal(version, '0.12.0');
   const paths = new Set(files.map((file) => file.path));
 
   for (const required of [

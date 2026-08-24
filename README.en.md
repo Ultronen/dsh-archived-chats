@@ -42,11 +42,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-The full 0.11.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can still expose the archive list, but a missing persistence, attachment, or live-session lifecycle capability produces an explicit capability error instead of guessed internal writes or an incomplete snapshot. The v0.9.0 UI was checked on Harness `0.1.0-rc.8`; v0.10.0 search, preview, and stored-image reads were checked on `0.1.1-rc.2`.
+The full 0.12.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can still expose the archive list, but missing persistence, attachment, or live-session lifecycle capabilities produce explicit errors for recycle, storage, or lineage features instead of guessed internal writes.
 
 ## Preview
 
-All screenshots below were captured from real `0.11.0` interactions in an isolated DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile. They use purpose-built demo conversations and contain no real user data.
+Screenshots 01–09 show `0.11.0`; the storage and lineage screenshots show `0.12.0`. All were captured in an isolated real DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile with purpose-built demo conversations and no real user data.
 
 ![Archive a conversation from its session menu](assets/screenshots/01-archive-entry.png)
 ![Archived Chats overview](assets/screenshots/02-archived-overview.png)
@@ -57,6 +57,8 @@ All screenshots below were captured from real `0.11.0` interactions in an isolat
 ![Move to Recycle Bin confirmation](assets/screenshots/07-move-to-recycle.png)
 ![Recycle Bin with protection snapshots](assets/screenshots/08-recycle-bin.png)
 ![Permanent deletion confirmation](assets/screenshots/09-permanent-delete.png)
+![Storage analysis and retention policy](assets/screenshots/10-storage-retention.png)
+![Read-only session lineage tree](assets/screenshots/11-session-lineage.png)
 
 ## Usage
 
@@ -65,6 +67,7 @@ All screenshots below were captured from real `0.11.0` interactions in an isolat
 3. Search titles, tags, notes, conversation text, or tool output. Open the row preview to read an archived conversation without unarchiving it. Click **Select multiple** only when you need bulk actions.
 4. Click **Import backup** to choose a ZIP produced by this plugin and confirm non-conflicting sessions after the preview. Click **Export backup** to export the current selection, or every archived chat when nothing is selected. Individual rows also have an export action.
 5. Choose **Unarchive** to return a conversation to the sidebar. **Move to Recycle Bin** creates a protection snapshot and offers immediate **Undo**; the session can also be restored later from the **Recycle Bin** tab. Only **Delete permanently / Empty Recycle Bin** removes originals and snapshots irreversibly.
+6. Open **Storage & Retention** to separate session-directory, protection-snapshot, and repeated-snapshot-attachment usage. Saving a policy performs no cleanup; preview and confirm exact candidates separately. **Session Lineage** shows forks and subagents as a read-only tree.
 
 ## Features
 
@@ -80,7 +83,10 @@ All screenshots below were captured from real `0.11.0` interactions in an isolat
 - **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or move the chosen chats to the Recycle Bin, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
 - **Archived / Recycle Bin tabs**: recycled rows stay grouped by their original workspace, each group can collapse independently, and rows show trash time, snapshot size, attachment count, and `trashed` / `degraded` / `purge-pending` state. Checkboxes stay hidden until **Select multiple** is activated.
-- **Automatic protection snapshots**: moving a session captures all conversation events plus verified stored-image bytes before the recycle record commits. One current protection snapshot is kept per session; 0.11 does not provide historical retention or conversation-tree restoration.
+- **Storage analysis**: separately measures archived/recycled session directories and plugin-owned snapshots, with unavailable/degraded diagnostics and repeated snapshot-attachment bytes. It does not label these numbers as globally reclaimable Harness attachment storage.
+- **Preview-first retention policies**: plan by historical count, snapshot age, snapshot quota, and recycle age. Saving never runs cleanup; active/degraded snapshots are excluded and permanent recycle purges start unselected.
+- **Read-only session lineage**: uses durable Harness `parentSession` fields for fork/subagent trees and diagnoses missing parents, cycles, and delegation-depth mismatches without rewriting relationships.
+- **Automatic protection snapshots and history**: moving a session captures all events plus verified image bytes. Repeated restore/recycle cycles retain older valid snapshots until the user explicitly applies retention or permanently purges the chat.
 - **Two-level restore**: when the original session is intact, restore only removes the recycle marker and does not rewrite persistence. If the original is missing, the plugin falls back to the validated session-and-attachment snapshot through public writer capabilities, never overwriting an existing ID.
 - **Explicit permanent purge**: only the Recycle Bin exposes permanent delete and empty. The plugin records durable `purge-pending` crash intent before deleting the original and snapshot; interrupted purges retry at startup.
 - Works in light and dark schemes; localized in English and 中文.
@@ -88,6 +94,8 @@ All screenshots below were captured from real `0.11.0` interactions in an isolat
 ## Recycle Bin, privacy, and attachment limits
 
 The recycle catalog (`trash.json`) and protection snapshots live under `$DSH_HOME/plugin-data/archived-chats/` and stay on this machine. Attachment bytes are read one at a time, digest-verified, and atomically published; neither conversations nor attachments are uploaded. Recycle previews use a separate authorized scope.
+
+Retention policy lives in `retention.json` under the same directory. Policies never run in the background, at startup, or on a timer; every cleanup requires a single-use five-minute preview followed by explicit selection and confirmation.
 
 Permanent purge removes the snapshot's attachment copies, but Harness's global attachment store may retain identical bytes because another session still references them or because the host applies its own garbage-collection policy. This plugin does not claim immediate global attachment GC.
 
@@ -158,6 +166,14 @@ npm test
 The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, metadata and statistics, full-text search, conversation preview, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 0.12.0
+
+- Added separate session/snapshot accounting, repeated snapshot-attachment totals, and unavailable/degraded diagnostics.
+- Added count/age/quota retention planning with separate save/apply, short-lived single-use previews, and execution-time revalidation.
+- Added a read-only lineage tree for forks, subagents, missing parents, cycles, and delegation-depth anomalies.
+- Recycle cycles retain prior valid snapshots; permanent purge still removes the original and every valid snapshot through `purge-pending`.
+- **Downgrade warning:** 0.11.x does not display or govern multiple histories, though it tolerates them and removes them on permanent purge. Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading.
 
 ### 0.11.0
 
@@ -234,7 +250,7 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 dsh plugin --profile web remove dsh-archived-chats
 ```
 
-Uninstalling does not remove `metadata.json`, `trash.json`, protection snapshots, or a legacy `pending-deletions.json` under `$DSH_HOME/plugin-data/archived-chats/`, and it never triggers permanent purge. Restore or back up anything you need before manually handling that directory.
+Uninstalling does not remove `metadata.json`, `trash.json`, `retention.json`, protection snapshots, or a legacy `pending-deletions.json` under `$DSH_HOME/plugin-data/archived-chats/`, and it never triggers permanent purge. Restore or back up anything you need before manually handling that directory.
 
 ## License
 
