@@ -1,5 +1,10 @@
 # dsh-archived-chats
 
+[![npm version](https://img.shields.io/npm/v/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
+[![CI](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml/badge.svg)](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml)
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/)
+
 [English](README.en.md) | 中文
 
 > 🔎 **归档不再等于消失。** 直接搜索聊天正文、阅读完整对话和工具调用，然后安全备份、恢复或删除。
@@ -9,6 +14,17 @@
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 新增一个本地会话归档中心：找回、搜索、阅读、备份、恢复或删除被归档的会话。
 
 在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「已归档的聊天」页面，让所有归档会话都可见、可搜索、可管理。
+
+[插件市场](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [版本发布](https://github.com/Ultronen/dsh-archived-chats/releases) · [问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions) · [私密报告漏洞](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
+
+<p align="center">
+  <a href="assets/screenshots/8-conversation-preview.png"><img src="assets/screenshots/8-conversation-preview.png" width="49%" alt="归档聊天正文搜索与只读对话预览"></a>
+  <a href="assets/screenshots/9-recycle-bin.png"><img src="assets/screenshots/9-recycle-bin.png" width="49%" alt="带自动保护快照的归档聊天回收站"></a>
+</p>
+
+<p align="center"><sub>无需先取消归档即可搜索和阅读；普通删除先进入带保护快照的回收站。</sub></p>
+
+如果它帮你找回或保护过一次重要对话，欢迎给仓库一个 Star——这能帮助真正需要归档恢复功能的用户更容易发现它。
 
 ## 🚀 安装
 
@@ -34,8 +50,6 @@ dsh plugin --profile web update dsh-archived-chats
 
 ![已归档的聊天总览](assets/screenshots/1-archived-chats.png)
 ![搜索与筛选](assets/screenshots/2-search.png)
-![归档对话只读预览](assets/screenshots/8-conversation-preview.png)
-![回收站与自动保护快照](assets/screenshots/9-recycle-bin.png)
 ![分组操作](assets/screenshots/4-group-menu.png)
 ![标签与备注编辑](assets/screenshots/5-metadata-editor.png)
 ![批量操作](assets/screenshots/6-bulk-actions.png)

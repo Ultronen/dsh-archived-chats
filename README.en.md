@@ -1,5 +1,10 @@
 # dsh-archived-chats
 
+[![npm version](https://img.shields.io/npm/v/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
+[![CI](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml/badge.svg)](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml)
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/)
+
 [English](README.en.md) | [中文](README.md)
 
 > 🔎 **Archived no longer means lost.** Search conversation content, read complete messages and tool calls, then back up, restore, or delete safely.
@@ -9,6 +14,17 @@
 A local conversation archive center for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): recover, search, read, back up, restore, or delete archived sessions.
 
 Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds an **Archived Chats** page under Settings where every archived session is visible, searchable, and manageable.
+
+[Plugin market](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [Releases](https://github.com/Ultronen/dsh-archived-chats/releases) · [Questions and feedback](https://github.com/Ultronen/dsh-archived-chats/discussions) · [Private vulnerability reporting](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
+
+<p align="center">
+  <a href="assets/screenshots/8-conversation-preview.png"><img src="assets/screenshots/8-conversation-preview.png" width="49%" alt="Full-text search and read-only preview for archived chats"></a>
+  <a href="assets/screenshots/9-recycle-bin.png"><img src="assets/screenshots/9-recycle-bin.png" width="49%" alt="Archived-chat Recycle Bin with automatic protection snapshots"></a>
+</p>
+
+<p align="center"><sub>Search and read without unarchiving first; ordinary deletion moves through a protection-snapshot Recycle Bin.</sub></p>
+
+If this plugin helps you recover or protect an important conversation, consider starring the repository so people who need archived-chat recovery can discover it more easily.
 
 ## 🚀 Install
 
@@ -34,8 +50,6 @@ Screenshots 1–7 were captured from 0.9.0 in a local DeepSeek Harness `0.1.0-rc
 
 ![Archived Chats overview](assets/screenshots/1-archived-chats.png)
 ![Search and filters](assets/screenshots/2-search.png)
-![Read-only archived conversation preview](assets/screenshots/8-conversation-preview.png)
-![Recycle Bin with automatic protection snapshot](assets/screenshots/9-recycle-bin.png)
 ![Group actions](assets/screenshots/4-group-menu.png)
 ![Metadata editor](assets/screenshots/5-metadata-editor.png)
 ![Bulk actions](assets/screenshots/6-bulk-actions.png)
