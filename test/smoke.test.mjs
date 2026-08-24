@@ -1356,6 +1356,59 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(searchRequest?.options.method === 'POST' && searchRequest?.options.headers['x-dsh-archived-chats'] === '1', 'search helper uses a guarded POST');
   assert(searchRequest?.options.body === '{"query":"needle","limit":20}', 'search helper sends only the bounded query contract');
 
+  const trashRows = [
+    { sessionId: 'session-a', state: 'trashed', title: 'Alpha', workspace: { id: 'ws-1', title: '项目一', path: '/private' } },
+    { sessionId: 'session-b', state: 'degraded', title: 'Beta', workspace: null },
+    { sessionId: 'session-c', state: 'purge-pending', title: 'Gamma', workspace: { id: 'ws-1', title: '项目一', path: '/private' } },
+  ];
+  globalThis.fetch = async (url, options = {}) => {
+    inspectRequests.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ status: 'ready', sessions: trashRows, summary: { total: 3 } }) };
+  };
+  const trashBody = await clientExports.__test.fetchTrash?.();
+  let trashRequest = inspectRequests.at(-1);
+  assert(trashBody?.sessions?.length === 3, 'trash helper returns recycle rows');
+  assert(trashRequest?.url === '/plugins/dsh-archived-chats/trash', 'trash helper targets the recycle route');
+  assert(trashRequest?.options.cache === 'no-store' && trashRequest?.options.method === undefined, 'trash helper uses an uncached GET');
+
+  const restored = await clientExports.__test.restoreTrash?.(['session-b', 'session-a', 'session-b']);
+  trashRequest = inspectRequests.at(-1);
+  assert(restored?.status === 'ready', 'restore helper returns the host response');
+  assert(trashRequest?.url === '/plugins/dsh-archived-chats/trash/restore', 'restore targets trash route');
+  assert(trashRequest?.options.method === 'POST', 'restore uses POST');
+  assert(trashRequest?.options.headers['x-dsh-archived-chats'] === '1', 'restore sends guard');
+  assert(trashRequest?.options.body === '{"sessionIds":["session-b","session-a"]}', 'restore preserves unique order');
+
+  await clientExports.__test.purgeTrash?.(['session-c', 'session-a', 'session-c']);
+  trashRequest = inspectRequests.at(-1);
+  assert(trashRequest?.url === '/plugins/dsh-archived-chats/trash/purge', 'purge targets trash route');
+  assert(trashRequest?.options.method === 'POST' && trashRequest?.options.headers['x-dsh-archived-chats'] === '1', 'purge uses guarded POST');
+  assert(trashRequest?.options.body === '{"sessionIds":["session-c","session-a"]}', 'purge preserves unique order');
+
+  await clientExports.__test.emptyTrash?.();
+  trashRequest = inspectRequests.at(-1);
+  assert(trashRequest?.url === '/plugins/dsh-archived-chats/trash/empty', 'empty targets trash authority route');
+  assert(trashRequest?.options.method === 'POST' && trashRequest?.options.headers['x-dsh-archived-chats'] === '1', 'empty uses guarded POST');
+  assert(trashRequest?.options.body === '{}', 'empty sends no hidden client IDs');
+  let emptyRestoreError = null;
+  try { await clientExports.__test.restoreTrash?.([]); } catch (error) { emptyRestoreError = error; }
+  assert(/sessionIds is required/u.test(String(emptyRestoreError?.message)), 'restore rejects an empty selection before fetch');
+  let emptyPurgeError = null;
+  try { await clientExports.__test.purgeTrash?.([]); } catch (error) { emptyPurgeError = error; }
+  assert(/sessionIds is required/u.test(String(emptyPurgeError?.message)), 'purge rejects an empty selection before fetch');
+
+  assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
+  const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
+  assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.selectionIds }))) === JSON.stringify([
+    { key: 'ws-1', ids: ['session-a', 'session-c'] },
+    { key: '__ungrouped__', ids: ['session-b'] },
+  ]), 'trash grouping keeps first workspace order and row order');
+  assert(trashGroups?.[0]?.items?.[0]?.workspace?.path === undefined, 'trash client model never exposes workspace paths');
+  const statusT = (key) => key;
+  assert(clientExports.__test.trashStatusLabel?.(statusT, trashRows[0]) === 'trash.status.ready', 'ready trash status is localized');
+  assert(clientExports.__test.trashStatusLabel?.(statusT, trashRows[1]) === 'trash.status.degraded', 'degraded trash status is localized');
+  assert(clientExports.__test.trashStatusLabel?.(statusT, trashRows[2]) === 'trash.status.purgePending', 'purge-pending trash status is localized');
+
   assert(clientExports.__test.submitInteropFile === undefined, 'client test surface omits external import helpers');
   assert(clientExports.__test.submitInteropExportPreview === undefined && clientExports.__test.downloadInteropExport === undefined, 'client test surface omits external export helpers');
   globalThis.fetch = savedFetch;
@@ -1368,9 +1421,9 @@ console.log('\n[11] client half — settings section registration');
   assert(clientCalls.localeRegister[0].ns === 'settings.archived-chats', 'locale namespace is settings.archived-chats');
   const zhDict = clientCalls.localeRegister[0].dicts.zh;
   assert(zhDict['nav'] === '已归档的聊天', 'zh nav label is 已归档的聊天');
-  assert(zhDict['delete.all'] === '全部删除', 'zh delete-all label present');
-  assert(zhDict['confirm.deleteOne.title'] === '删除已归档聊天？', 'delete-one confirmation title is localized');
-  assert(zhDict['confirm.deleteOne.body'] === '这将永久删除已归档聊天', 'delete-one confirmation body is localized');
+  assert(zhDict['delete.all'] === '全部移至回收站', 'zh recycle-all label present');
+  assert(zhDict['confirm.deleteOne.title'] === '移至回收站？', 'move-one confirmation title is localized');
+  assert(zhDict['confirm.deleteOne.body'].includes('保护快照'), 'move-one confirmation explains recoverability');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
   assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
@@ -1571,7 +1624,7 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
       json: async () => String(url).endsWith('/state')
         ? { metadataStatus: 'ready', sessions: archivedRows }
         : String(url).endsWith('/delete-all')
-          ? { deleted: ['session-b'], pending: [], failed: [] }
+          ? { trashed: ['session-b'], failed: [] }
           : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} },
     };
   };
@@ -1663,7 +1716,7 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
   deleteCheckbox?.props.onChange({ target: { checked: true } });
   const deleteBulkTree = harness.render({ t, refreshSidebar: () => {} });
   const deleteBulkBar = collectElements(deleteBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
-  const selectedDelete = collectElements(deleteBulkBar).find((element) => element.type === 'button' && elementText(element) === '删除');
+  const selectedDelete = collectElements(deleteBulkBar).find((element) => element.type === 'button' && elementText(element) === '移至回收站');
   selectedDelete?.props.onClick();
   const deleteConfirmTree = harness.render({ t, refreshSidebar: () => {} });
   const confirmDelete = collectElements(deleteConfirmTree).find((element) => element.type === 'button' && element.props?.className === 'dac-btn-danger');
@@ -1758,11 +1811,11 @@ console.log('\n[11c] client half — bulk selection workflow');
     const index = stateCall++;
     const current = index === 0
       ? archivedRows
-      : index === 2
-        ? 'Alpha'
       : index === 7
-          ? { title: '删除选中的已归档聊天？', body: '这将永久删除选中的 1 个已归档聊天', ids: ['session-a'] }
-          : index === 19
+        ? 'Alpha'
+      : index === 12
+          ? { title: '将选中的已归档聊天移至回收站？', body: '这将把选中的 1 个已归档聊天移至回收站', ids: ['session-a'] }
+          : index === 24
             ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
@@ -1793,7 +1846,7 @@ console.log('\n[11c] client half — bulk selection workflow');
 
   const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
   assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
-  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('删除') && elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, delete, and clear actions');
+  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('移至回收站') && elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, recycle, and clear actions');
   assert(!elements.some((el) => el.type === 'button' && elementText(el) === '全部导出'), 'top-level export all is hidden while the selection bar is active');
 
   const formsBeforeExport = createdElements.filter((element) => element.tagName === 'FORM').length;
@@ -1829,7 +1882,7 @@ console.log('\n[11c] client half — bulk selection workflow');
   const cancelControl = { focus: () => { cancelFocuses += 1; documentMock.activeElement = cancelControl; } };
   const destructiveControl = { focus: () => { destructiveFocuses += 1; documentMock.activeElement = destructiveControl; } };
   const cancelButton = elements.find((el) => el.type === 'button' && elementText(el) === '取消');
-  const destructiveButton = elements.find((el) => el.type === 'button' && elementText(el) === '删除' && el.props?.className === 'dac-btn-danger');
+  const destructiveButton = elements.find((el) => el.type === 'button' && elementText(el) === '移至回收站' && el.props?.className === 'dac-btn-danger');
   const pageHeading = elements.find((el) => el.props?.className === 'dac-title');
   if (alertDialog?.props.ref) alertDialog.props.ref.current = { querySelectorAll: () => [cancelControl, destructiveControl] };
   if (cancelButton?.props.ref) cancelButton.props.ref.current = cancelControl;
@@ -1886,11 +1939,11 @@ console.log('\n[11c] client half — archive insights UI');
   const states = [];
   const effectRecords = [];
   states[0] = { value: archivedRows, setter: null };
-  states[12] = { value: '', setter: null };
-  states[13] = { value: 'ready', setter: null };
-  states[14] = { value: statsFixture, setter: null };
-  states[15] = { value: null, setter: null };
-  states[16] = { value: false, setter: null };
+  states[17] = { value: '', setter: null };
+  states[18] = { value: 'ready', setter: null };
+  states[19] = { value: statsFixture, setter: null };
+  states[20] = { value: null, setter: null };
+  states[21] = { value: false, setter: null };
   const setterAt = (index) => (next) => {
     states[index].value = typeof next === 'function' ? next(states[index].value) : next;
   };
@@ -1942,7 +1995,7 @@ console.log('\n[11c] client half — archive insights UI');
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
-  states[9].value = null;
+  states[14].value = null;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -1951,8 +2004,8 @@ console.log('\n[11c] client half — archive insights UI');
   tree = renderSection();
   elements = collectElements(tree);
   const moreMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
-  const deleteAllMenuItem = collectElements(moreMenu).find((el) => el.type === 'button' && elementText(el) === '全部删除');
-  assert(deleteAllMenuItem?.props.className === 'dac-action-menu-item dac-danger', 'delete all is a danger item inside the more menu');
+  const deleteAllMenuItem = collectElements(moreMenu).find((el) => el.type === 'button' && elementText(el) === '全部移至回收站');
+  assert(deleteAllMenuItem?.props.className === 'dac-action-menu-item dac-danger', 'recycle all is a danger item inside the more menu');
 
   const summary = elements.find((el) => el.props?.className === 'dac-summary');
   assert(summary !== undefined, 'summary strip rendered below the title');
@@ -1963,7 +2016,7 @@ console.log('\n[11c] client half — archive insights UI');
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-  states[17].value = {
+  states[22].value = {
     token: 'token-ui',
     nonce: 'nonce-ui',
     package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
@@ -1974,7 +2027,7 @@ console.log('\n[11c] client half — archive insights UI');
     selectedIds: ['new-session'],
     result: null,
   };
-  states[18].value = false;
+  states[23].value = false;
   tree = renderSection();
   elements = collectElements(tree);
   const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
@@ -1997,8 +2050,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoreRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import confirmation sends the guard header');
   assert(JSON.parse(restoreRequests[0]?.options.body ?? '{}').sessionIds.join(',') === 'new-session', 'import confirmation sends only selected non-conflicting IDs');
   globalThis.fetch = savedImportFetch;
-  states[17].value = null;
-  states[14].value = statsFixture;
+  states[22].value = null;
+  states[19].value = statsFixture;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -2007,12 +2060,12 @@ console.log('\n[11c] client half — archive insights UI');
   assert(tagSelect?.props.value === '', 'tag filter defaults to the non-colliding no-filter sentinel');
   const importantOptions = tagSelect?.props.children.filter((option) => String(option.props.children).toLowerCase() === 'important') ?? [];
   assert(importantOptions.length === 1, 'tag filter options de-duplicate labels case-insensitively');
-  states[12].value = 'all';
+  states[17].value = 'all';
   tree = renderSection();
   elements = collectElements(tree);
   const filteredRows = elements.filter(isRow);
   assert(filteredRows.length === 1 && elementText(filteredRows[0]).includes('Beta'), 'selecting the literal all tag renders only sessions carrying that tag');
-  states[12].value = '';
+  states[17].value = '';
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -2078,11 +2131,11 @@ console.log('\n[11c] client half — archive insights UI');
     stopPropagation: () => { stoppedEscape = true; },
   });
   assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
-  assert(states[15].value === null, 'metadata Escape cancels only the metadata editor state');
+  assert(states[20].value === null, 'metadata Escape cancels only the metadata editor state');
   cleanupMeta?.();
   assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
 
-  states[15].value = archivedRows[0];
+  states[20].value = archivedRows[0];
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -2126,7 +2179,7 @@ console.log('\n[11c] client half — archive insights UI');
   // Exercise the real MetadataDialog with persistent hooks so token semantics,
   // IME input, and effect cleanup are verified across actual re-renders.
   const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
-  states[15].value = commaTagSession;
+  states[20].value = commaTagSession;
   const rawSectionTree = renderSection();
   const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
   assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
@@ -2212,8 +2265,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoredDirectFocus === 1 && documentMock.activeElement === returnControl, 'metadata dialog restores focus only when it unmounts');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
-  states[13].value = 'unavailable';
-  states[15].value = null;
+  states[18].value = 'unavailable';
+  states[20].value = null;
   tree = renderSection();
   elements = collectElements(tree);
   const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
@@ -2222,8 +2275,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elements.filter(isRow).length === 3, 'unavailable metadata keeps all rows listed');
 
   // Statistics failure never removes rows or lifecycle actions.
-  states[14].value = { status: 'error', summary: null, sessions: {} };
-  states[13].value = 'ready';
+  states[19].value = { status: 'error', summary: null, sessions: {} };
+  states[18].value = 'ready';
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.filter(isRow).length === 3, 'statistics failure keeps all rows rendered');
@@ -2544,6 +2597,141 @@ console.log('\n[11e] client half — preview primitive fallback');
   const harness = createHookHarness(clientExports.__test.PreviewMarkdown);
   const fallback = harness.render({ text: '<b>literal</b>', t, primitives: missingPrimitives });
   assert(fallback.type === 'p' && fallback.props.className === 'dac-preview-plain' && fallback.props.children === '<b>literal</b>', 'preview Markdown fallback renders literal text in a plain paragraph');
+}
+
+console.log('\n[11f] client half — recycle navigation and management');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  const archiveRows = [{ id: 'archive-a', title: 'Archived Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' }];
+  let recycleRows = [
+    {
+      sessionId: 'trash-a', state: 'trashed', trashedAt: '2026-08-24T01:02:03.000Z', title: 'Trash Alpha',
+      createdAt: 10, workspace: { id: 'ws-1', title: '项目一' }, snapshotBytes: 1536,
+      snapshotAttachmentCount: 2, liveDisposition: 'cold',
+    },
+    {
+      sessionId: 'trash-b', state: 'degraded', trashedAt: '2026-08-24T02:03:04.000Z', title: 'Trash Beta',
+      createdAt: 20, workspace: null, snapshotBytes: 0, snapshotAttachmentCount: 0, liveDisposition: 'parked',
+    },
+  ];
+  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    requests.push({ path, options });
+    if (path.endsWith('/state')) return responseFor({ metadataStatus: 'ready', sessions: archiveRows });
+    if (path.endsWith('/stats')) return responseFor({ summary: { sessionCount: 1, totalBytes: 1, unavailableCount: 0 }, sessions: {} });
+    if (path.endsWith('/trash/restore')) {
+      const ids = JSON.parse(options.body).sessionIds;
+      recycleRows = recycleRows.filter((row) => !ids.includes(row.sessionId));
+      return responseFor({ restored: ids, failed: [], warnings: [] });
+    }
+    if (path.endsWith('/trash/purge')) {
+      const ids = JSON.parse(options.body).sessionIds;
+      recycleRows = recycleRows.filter((row) => !ids.includes(row.sessionId));
+      return responseFor({ purged: ids, failed: [] });
+    }
+    if (path.endsWith('/trash/empty')) {
+      const purged = recycleRows.map((row) => row.sessionId);
+      recycleRows = [];
+      return responseFor({ purged, failed: [] });
+    }
+    if (path.endsWith('/trash')) return responseFor({ trashStatus: 'ready', summary: { total: recycleRows.length }, sessions: recycleRows });
+    if (path.endsWith('/preview')) return responseFor({ session: { id: 'trash-a', title: 'Trash Alpha' }, messages: [], total: 0, nextOffset: null });
+    return responseFor({});
+  };
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  let elements = collectElements(tree);
+  const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
+  assert(tabs.length === 2, 'archive manager renders Archived and Recycle Bin tabs');
+  assert(tabs[0]?.props['aria-selected'] === true && tabs[1]?.props['aria-selected'] === false, 'Archived is the default selected tab');
+  tabs[1]?.props.onClick();
+
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  elements = collectElements(tree);
+  assert(requests.filter((request) => request.path.endsWith('/trash')).length === 1, 'first Recycle Bin activation loads trash once');
+  assert(elements.some((element) => element.type === 'button' && element.props?.role === 'tab' && element.props?.['aria-selected'] === true && elementText(element) === '回收站'), 'Recycle Bin tab becomes selected');
+  assert(elementText(tree).includes('Trash Alpha') && elementText(tree).includes('项目一'), 'recycle row renders title and original project');
+  assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 个附件'), 'recycle row renders snapshot bytes and attachment count');
+  assert(elementText(tree).includes('保护快照可用') && elementText(tree).includes('快照降级'), 'recycle rows render ready and degraded statuses');
+
+  const previewButton = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Trash Alpha');
+  await previewButton?.props.onClick();
+  const previewRequest = requests.findLast((request) => request.path.endsWith('/preview'));
+  assert(JSON.parse(previewRequest?.options.body ?? '{}').scope === 'trash', 'recycle preview is explicitly trash-scoped');
+
+  const restoreButton = elements.find((element) => element.type === 'button' && elementText(element) === '恢复' && element.props?.['data-session-id'] === 'trash-a');
+  await restoreButton?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  assert(requests.some((request) => request.path.endsWith('/trash/restore') && request.options.body === '{"sessionIds":["trash-a"]}'), 'row restore targets exactly one recycle record');
+  assert(!elements.some((element) => element.props?.['data-session-id'] === 'trash-a' && elementText(element) === '恢复')
+    && elements.some((element) => element.props?.['data-session-id'] === 'trash-b' && elementText(element) === '恢复'), 'restore removes only the Host-confirmed row');
+
+  const purgeButton = elements.find((element) => element.type === 'button' && elementText(element) === '永久删除');
+  purgeButton?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const purgeDialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(purgeDialog?.props.title === '永久删除回收站中的会话？', 'permanent purge opens a distinct accessible confirmation');
+  assert(String(purgeDialog?.props.body).includes('原会话和保护快照'), 'permanent purge copy names original and snapshot removal');
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11g] client half — archive move exposes immediate undo');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  const archived = [{ id: 'undo-a', title: 'Undo Alpha', createdAt: 10, origin: null, workspaceId: null, workspaceTitle: null }];
+  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    requests.push({ path, options });
+    if (path.endsWith('/state')) return responseFor({ metadataStatus: 'ready', sessions: archived });
+    if (path.endsWith('/stats')) return responseFor({ summary: { sessionCount: 1, totalBytes: 0, unavailableCount: 0 }, sessions: {} });
+    if (path.endsWith('/delete-all')) return responseFor({ trashed: ['undo-a'], failed: [] });
+    if (path.endsWith('/trash/restore')) return responseFor({ restored: ['undo-a'], failed: [], warnings: [] });
+    return responseFor({});
+  };
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render({ t, refreshSidebar: () => {} });
+  let elements = collectElements(tree);
+  const rowMove = elements.find((element) => element.type === 'button' && element.props?.className === 'dac-iconbtn dac-danger' && element.props?.['aria-label'] === '全部移至回收站');
+  rowMove?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const moveDialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(moveDialog?.props.body === '会自动创建保护快照，之后可从回收站恢复', 'archive move confirmation promises recoverability rather than permanent deletion');
+  await moveDialog?.props.onConfirm();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  elements = collectElements(tree);
+  const undo = elements.find((element) => element.type === 'button' && elementText(element) === '撤销');
+  assert(!elementText(tree).includes('Undo Alpha') && undo !== undefined, 'successful move removes the archived row and exposes Undo');
+  await undo?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  assert(requests.some((request) => request.path.endsWith('/trash/restore') && request.options.body === '{"sessionIds":["undo-a"]}'), 'Undo calls the guarded recycle restore route');
+  assert(elementText(tree).includes('Undo Alpha') && !collectElements(tree).some((element) => element.type === 'button' && elementText(element) === '撤销'), 'successful Undo restores the archive row and clears the action');
+  harness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
 }
 
 console.log('\n[12] client half — sidebar refresh inject face');
