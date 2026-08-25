@@ -24,7 +24,7 @@ const version = (patch = {}) => ({
 });
 
 function fixture(overrides = {}) {
-  const calls = { capture: 0, inspect: 0, inventory: 0 };
+  const calls = { capture: 0, inspect: 0, inventory: 0, page: null, image: null };
   const existing = overrides.existing ?? null;
   const details = new Map((overrides.versions ?? [version()]).map((item) => [item.snapshotId, item]));
   const trashRecords = overrides.trashRecords ?? new Map();
@@ -81,6 +81,21 @@ function fixture(overrides = {}) {
         };
       },
       inspectHistory: async (snapshotId) => structuredClone(details.get(snapshotId)),
+      readHistoryPage: async (snapshotId, window) => {
+        calls.page = { snapshotId, window };
+        return {
+          snapshotId,
+          sessionId: details.get(snapshotId)?.sessionId ?? 'session-a',
+          createdAt: details.get(snapshotId)?.createdAt ?? '2026-08-25T00:00:00.000Z',
+          messages: [{ seq: 1, role: 'user', segments: [{ kind: 'text', text: 'hello' }] }],
+          total: 1,
+          nextOffset: null,
+        };
+      },
+      readHistoryImage: async (snapshotId, reference, signal) => {
+        calls.image = { snapshotId, reference, signal };
+        return { data: new Uint8Array([1, 2, 3]), mediaType: 'image/png', width: 2, height: 2 };
+      },
     },
     lifecycle: { run: (operation) => operation() },
     now: () => new Date('2026-08-25T02:00:00.000Z'),
@@ -192,4 +207,41 @@ test('history invalidation prevents an older in-flight result from repopulating 
   await stale;
   await item.service.list();
   assert.equal(inventories, 2);
+});
+
+test('history preview accepts only a published healthy snapshot identity', async () => {
+  const healthy = version();
+  const item = fixture({
+    versions: [healthy],
+    degraded: [{ snapshotId: '00000000-0000-4000-8000-000000000099', code: 'snapshot-hash-mismatch' }],
+  });
+
+  const page = await item.service.preview(healthy.snapshotId, { offset: 0, limit: 50 });
+  assert.equal(page.snapshot.snapshotId, healthy.snapshotId);
+  assert.equal(page.snapshot.createdAt, healthy.createdAt);
+  assert.equal(page.messages[0].segments[0].text, 'hello');
+  assert.deepEqual(item.calls.page, { snapshotId: healthy.snapshotId, window: { offset: 0, limit: 50 } });
+
+  await assert.rejects(
+    item.service.preview('00000000-0000-4000-8000-000000000099', { offset: 0, limit: 50 }),
+    (error) => error.code === 'history-snapshot-degraded' && error.status === 409,
+  );
+  await assert.rejects(
+    item.service.preview('00000000-0000-4000-8000-000000000098', { offset: 0, limit: 50 }),
+    (error) => error.code === 'history-snapshot-missing' && error.status === 404,
+  );
+});
+
+test('history image reads stay authorized to one healthy snapshot and forward cancellation', async () => {
+  const healthy = version();
+  const item = fixture({ versions: [healthy] });
+  const controller = new AbortController();
+  const reference = { attachmentId: 'image-a', mediaType: 'image/png', bytes: 3, width: 2, height: 2 };
+
+  const image = await item.service.readImage(healthy.snapshotId, reference, controller.signal);
+
+  assert.deepEqual(image.data, new Uint8Array([1, 2, 3]));
+  assert.equal(item.calls.image.snapshotId, healthy.snapshotId);
+  assert.deepEqual(item.calls.image.reference, reference);
+  assert.equal(item.calls.image.signal, controller.signal);
 });
