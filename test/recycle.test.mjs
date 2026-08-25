@@ -64,6 +64,9 @@ function recycleFixture(options = {}) {
       if (!this.ids.has(sessionId)) throw new Error('missing');
       return { meta: headers.get(sessionId), events: [{ seq: 0, type: 'session/title', data: { title: 'Alpha' } }] };
     },
+    async listSnapshots() {
+      return [...this.ids].map((sessionId) => ({ header: headers.get(sessionId), revision: options.sourceRevision ?? 'rev-1' }));
+    },
     locate: options.unsupportedLocate ? undefined : (meta) => ({ kind: 'jsonl', path: join(root, String(meta.id), 'session.jsonl.zstd') }),
     async create(meta) {
       this.writeCalls += 1;
@@ -137,6 +140,12 @@ function recycleFixture(options = {}) {
   let markCaptureStarted;
   const captureStarted = new Promise((resolve) => { markCaptureStarted = resolve; });
   const snapshotStore = {
+    async findRevision(sessionId, sourceRevision) {
+      if (options.existingRevision?.sessionId === sessionId && options.existingRevision.sourceRevision === sourceRevision) {
+        return structuredClone(options.existingRevision);
+      }
+      return null;
+    },
     async capture(input) {
       captures += 1;
       calls.push(`snapshot:capture:${input.sessionId}`);
@@ -240,6 +249,25 @@ test('a new recycle cycle keeps the prior protection snapshot as history', async
   const fixture = recycleFixture({ priorSnapshotId });
   assert.deepEqual(await fixture.service.move(['session-a']), { trashed: ['session-a'], failed: [] });
   assert.equal(fixture.calls.includes(`snapshot:remove:${priorSnapshotId}`), false);
+});
+
+test('recycle reuses a healthy archive snapshot for the same stable source revision', async () => {
+  const existing = {
+    snapshotId: '00000000-0000-4000-8000-000000000009',
+    sessionId: 'session-a',
+    createdAt: '2026-08-23T00:00:00.000Z',
+    sourceRevision: 'rev-1',
+    totalBytes: 456,
+    attachmentCount: 2,
+  };
+  const fixture = recycleFixture({ existingRevision: existing });
+
+  assert.deepEqual(await fixture.service.move(['session-a']), { trashed: ['session-a'], failed: [] });
+  assert.equal(fixture.captures(), 0);
+  const record = await fixture.trashStore.get('session-a');
+  assert.equal(record.snapshotId, existing.snapshotId);
+  assert.equal(record.snapshotBytes, 456);
+  assert.equal(record.snapshotAttachmentCount, 2);
 });
 
 test('intact-original undo removes only marker and writes no persistence', async () => {
