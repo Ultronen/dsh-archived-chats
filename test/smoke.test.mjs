@@ -4087,12 +4087,41 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(!elements.some((element) => element.props?.['data-session-id'] === 'trash-a' && elementText(element) === '恢复')
     && elements.some((element) => element.props?.['data-session-id'] === 'trash-b' && elementText(element) === '恢复'), 'restore removes only the Host-confirmed row');
 
+  let recycleSidebarRefreshes = 0;
+  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
+  elements = collectElements(tree);
   const purgeButton = elements.find((element) => element.type === 'button' && elementText(element) === '永久删除');
   purgeButton?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
   const purgeDialog = findComponentElement(tree, 'ConfirmDialog');
   assert(purgeDialog?.props.title === '永久删除回收站中的会话？', 'permanent purge opens a distinct accessible confirmation');
   assert(String(purgeDialog?.props.body).includes('原会话和保护快照'), 'permanent purge copy names original and snapshot removal');
+  await purgeDialog?.props.onConfirm();
+  assert(recycleSidebarRefreshes === 1, 'permanent purge re-baselines the sidebar so no deleted ungrouped chat remains');
+
+  recycleRows = [{
+    sessionId: 'trash-empty', state: 'trashed', trashedAt: '2026-08-24T03:04:05.000Z', title: 'Trash Empty',
+    createdAt: 30, workspace: null, snapshotBytes: 256, snapshotAttachmentCount: 0, liveDisposition: 'cold',
+  }];
+  let emptySidebarRefreshes = 0;
+  const emptyHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  const emptyProps = { t, refreshSidebar: () => { emptySidebarRefreshes += 1; } };
+  emptyHarness.render(emptyProps);
+  emptyHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let emptyTree = emptyHarness.render(emptyProps);
+  const emptyTabs = collectElements(emptyTree).filter((element) => element.type === 'button' && element.props?.role === 'tab');
+  emptyTabs[2]?.props.onClick();
+  emptyTree = emptyHarness.render(emptyProps);
+  emptyHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  emptyTree = emptyHarness.render(emptyProps);
+  collectElements(emptyTree).find((element) => element.type === 'button' && elementText(element) === '清空回收站')?.props.onClick();
+  emptyTree = emptyHarness.render(emptyProps);
+  const emptyDialog = findComponentElement(emptyTree, 'ConfirmDialog');
+  await emptyDialog?.props.onConfirm();
+  assert(emptySidebarRefreshes === 1, 'emptying Recycle Bin re-baselines the sidebar after every confirmed purge');
+  emptyHarness.unmount();
 
   harness.unmount();
   globalThis.fetch = savedFetch;
