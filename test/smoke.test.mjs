@@ -270,6 +270,19 @@ const persistence = {
     return { meta: headerRows.find((h) => h.id === id), events: events[id] };
   },
   locate: (header) => ({ kind: 'jsonl', path: join(tmp, String(header.id), 'session.jsonl.zstd') }),
+  create: async (header) => {
+    headerRows.push(structuredClone(header));
+    events[header.id] = [];
+    mkdirSync(join(tmp, String(header.id)), { recursive: true });
+    writeFileSync(join(tmp, String(header.id), 'session.jsonl.zstd'), 'created');
+  },
+  append: async (id, batch) => { events[id].push(...structuredClone(batch)); },
+  removeSession: async (id) => {
+    const index = headerRows.findIndex((header) => String(header.id) === String(id));
+    if (index >= 0) headerRows.splice(index, 1);
+    delete events[id];
+    rmSync(join(tmp, String(id)), { recursive: true, force: true });
+  },
 };
 const liveSessions = { get: (id) => (id === 'session-live' ? { id, header: { id, createdAt: 1 } } : undefined) };
 
@@ -288,10 +301,16 @@ let attachmentReads = 0;
 services.attachments = {
   readImage: async (ref, signal) => {
     attachmentReads += 1;
-    assert(signal instanceof AbortSignal, 'image read receives an abort signal');
+    if (signal !== undefined) assert(signal instanceof AbortSignal, 'image read receives an abort signal');
     assert(ref.attachmentId === archivedImageRef.attachmentId, 'image read receives the projected reference');
     return { ref: archivedImageRef, data: archivedImageBytes };
   },
+  saveImage: async ({ data, mediaType, name }) => ({
+    ...archivedImageRef,
+    bytes: data.byteLength,
+    mediaType,
+    ...(name === undefined ? {} : { name }),
+  }),
 };
 
 const { apply, name } = await import(join(here, '../lib/index.js'));
@@ -303,8 +322,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 22, `twenty-two archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 28, `twenty-eight archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
@@ -312,6 +331,67 @@ assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claud
 
 console.log('\n[1a0] storage insights, retention, and lineage routes');
 {
+  const historyCaptureGet = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('GET', {}));
+  assert(historyCaptureGet.status === 405, 'history capture rejects GET');
+  const historyCaptureMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('POST', {}, '{}'));
+  assert(historyCaptureMissingGuard.status === 403, 'history capture rejects missing guard');
+  const historyPreviewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/preview', mockReq('POST', {}, '{}'));
+  assert(historyPreviewMissingGuard.status === 403, 'history preview rejects missing guard');
+  const historyRestorePreviewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/restore/preview', mockReq('POST', {}, '{}'));
+  assert(historyRestorePreviewMissingGuard.status === 403, 'history restore preview rejects missing guard');
+  const historyRestoreMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {}, '{}'));
+  assert(historyRestoreMissingGuard.status === 403, 'history restore rejects missing guard');
+
+  const capturedHistory = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ sessionId: 'session-a' })));
+  assert(capturedHistory.status === 200 && capturedHistory.json().snapshot.sessionId === 'session-a',
+    `history capture answers 200 (got ${capturedHistory.status})`);
+  const capturedSnapshotId = capturedHistory.json().snapshot.snapshotId;
+  const historyList = await call(routes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  assert(historyList.status === 200 && historyList.json().sessions[0].versions[0].snapshotId === capturedSnapshotId,
+    `history list exposes the captured version (got ${historyList.status})`);
+  assert(!JSON.stringify(historyList.json()).includes('/ws/'), 'history list never exposes workspace paths');
+  assert(!JSON.stringify(historyList.json()).includes('keep this'), 'history list never exposes private notes');
+
+  const historyPage = await call(routes, '/plugins/dsh-archived-chats/history/preview', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ snapshotId: capturedSnapshotId, offset: 0, limit: 50 })));
+  assert(historyPage.status === 200 && historyPage.json().snapshot.snapshotId === capturedSnapshotId,
+    `history preview answers 200 (got ${historyPage.status})`);
+  assert(historyPage.json().messages.some((message) => message.role === 'user'), 'history preview returns projected messages');
+
+  const historyImage = await call(routes, '/plugins/dsh-archived-chats/history/preview/image', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ snapshotId: capturedSnapshotId, attachment: archivedImageRef })));
+  assert(historyImage.status === 200 && historyImage.headers['content-type'] === 'image/png',
+    `history image answers 200 (got ${historyImage.status})`);
+  assert(historyImage.bytes().equals(archivedImageBytes), 'history image returns only verified snapshot bytes');
+
+  const preparedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/history/restore/preview', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ snapshotId: capturedSnapshotId })));
+  assert(preparedHistoryRestore.status === 200 && preparedHistoryRestore.json().destination.sessionId !== 'session-a',
+    `history restore preview answers 200 with a new identity (got ${preparedHistoryRestore.status})`);
+  const restoredHistory = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ token: preparedHistoryRestore.json().token, nonce: preparedHistoryRestore.json().nonce })));
+  const restoredHistoryId = restoredHistory.json().restored?.[0];
+  assert(restoredHistory.status === 200 && restoredHistoryId !== undefined && restoredHistoryId !== 'session-a',
+    `history restore creates a new archived session (got ${restoredHistory.status})`);
+  assert(workspaceState.archivedSessionIds.includes('session-a') && workspaceState.archivedSessionIds.includes(restoredHistoryId),
+    'history restore preserves the source and registers the new copy');
+  const replayedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ token: preparedHistoryRestore.json().token, nonce: preparedHistoryRestore.json().nonce })));
+  assert(replayedHistoryRestore.status === 410, 'history restore confirmation is single-use');
+
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== restoredHistoryId);
+  await persistence.removeSession(restoredHistoryId);
+  const metadataAfterHistoryRestore = readMetadataStore();
+  delete metadataAfterHistoryRestore.sessions[restoredHistoryId];
+  writeFileSync(metadataFile, JSON.stringify(metadataAfterHistoryRestore), 'utf8');
+
   const insights = await call(routes, '/plugins/dsh-archived-chats/insights', mockReq('GET', {}));
   assert(insights.status === 200, `insights answers 200 (got ${insights.status})`);
   assert(insights.json().summary.sessionBytes >= 0, 'insights exposes measured session bytes');
@@ -388,6 +468,7 @@ console.log('\n[1a0] storage insights, retention, and lineage routes');
 
 console.log('\n[1a] POST /preview and /search');
 {
+  const attachmentReadsBeforePreview = attachmentReads;
   const jsonReq = (path, body, headers = { 'x-dsh-archived-chats': '1' }, method = 'POST') => call(
     routes,
     `/plugins/dsh-archived-chats/${path}`,
@@ -444,7 +525,7 @@ console.log('\n[1a] POST /preview and /search');
   assert(image.headers['content-type'] === 'image/png', 'preview image uses the verified media type');
   assert(image.headers['cache-control'] === 'no-store', 'preview image disables response caching');
   assert(image.bytes().equals(archivedImageBytes), 'preview image returns the verified bytes');
-  assert(attachmentReads === 1, 'only the authorized request reaches the attachment service');
+  assert(attachmentReads === attachmentReadsBeforePreview + 1, 'only the authorized request reaches the attachment service');
 
   const savedAttachments = services.attachments;
   delete services.attachments;
