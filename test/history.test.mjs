@@ -24,7 +24,7 @@ const version = (patch = {}) => ({
 });
 
 function fixture(overrides = {}) {
-  const calls = { capture: 0, inspect: 0, inventory: 0, page: null, image: null };
+  const calls = { capture: 0, inspect: 0, inventory: 0, remove: [], page: null, image: null };
   const existing = overrides.existing ?? null;
   const details = new Map((overrides.versions ?? [version()]).map((item) => [item.snapshotId, item]));
   const trashRecords = overrides.trashRecords ?? new Map();
@@ -81,6 +81,10 @@ function fixture(overrides = {}) {
         };
       },
       inspectHistory: async (snapshotId) => structuredClone(details.get(snapshotId)),
+      remove: async (snapshotId) => {
+        calls.remove.push(snapshotId);
+        details.delete(snapshotId);
+      },
       readHistoryPage: async (snapshotId, window) => {
         calls.page = { snapshotId, window };
         return {
@@ -209,6 +213,57 @@ test('history invalidation prevents an older in-flight result from repopulating 
   assert.equal(inventories, 2);
 });
 
+test('history deletion bypasses stale in-flight inventory and rechecks recycle protection', async () => {
+  const healthy = version();
+  const validInventory = {
+    valid: [{
+      snapshotId: healthy.snapshotId,
+      sessionId: healthy.sessionId,
+      createdAt: healthy.createdAt,
+      totalBytes: healthy.totalBytes,
+      sessionBytes: healthy.sessionBytes,
+      attachmentCount: healthy.attachmentCount,
+      attachments: [],
+    }],
+    degraded: [],
+  };
+  let resolveFirstInventory;
+  let inventoryCalls = 0;
+  let removeCalls = 0;
+  const trashRecords = new Map();
+  const item = fixture({
+    deps: {
+      trashStore: {
+        get: async (id) => trashRecords.get(id) ?? null,
+        load: async () => ({ status: 'ready', records: new Map(trashRecords) }),
+      },
+      snapshotStore: {
+        findRevision: async () => null,
+        capture: async () => { throw new Error('not expected'); },
+        inventory: async () => {
+          inventoryCalls += 1;
+          if (inventoryCalls === 1) return new Promise((resolve) => { resolveFirstInventory = resolve; });
+          return structuredClone(validInventory);
+        },
+        inspectHistory: async () => structuredClone(healthy),
+        remove: async () => { removeCalls += 1; },
+      },
+    },
+  });
+
+  const stale = item.service.list();
+  await Promise.resolve();
+  trashRecords.set('session-a', { sessionId: 'session-a', snapshotId: healthy.snapshotId });
+  const deletion = item.service.deleteVersion(healthy.snapshotId);
+  await Promise.resolve();
+  resolveFirstInventory(structuredClone(validInventory));
+  await stale;
+
+  await assert.rejects(deletion, (error) => error.code === 'history-snapshot-protected');
+  assert.equal(inventoryCalls, 2);
+  assert.equal(removeCalls, 0);
+});
+
 test('history preview accepts only a published healthy snapshot identity', async () => {
   const healthy = version();
   const item = fixture({
@@ -244,4 +299,68 @@ test('history image reads stay authorized to one healthy snapshot and forward ca
   assert.equal(item.calls.image.snapshotId, healthy.snapshotId);
   assert.deepEqual(item.calls.image.reference, reference);
   assert.equal(item.calls.image.signal, controller.signal);
+});
+
+test('single history deletion removes one healthy version and refuses recycle protection', async () => {
+  const ordinary = version({
+    snapshotId: '00000000-0000-4000-8000-000000000010',
+    totalBytes: 220,
+  });
+  const protectedVersion = version({
+    snapshotId: '00000000-0000-4000-8000-000000000011',
+    createdAt: '2026-08-24T00:00:00.000Z',
+  });
+  const item = fixture({
+    versions: [ordinary, protectedVersion],
+    trashRecords: new Map([['session-a', { sessionId: 'session-a', snapshotId: protectedVersion.snapshotId }]]),
+  });
+
+  const deleted = await item.service.deleteVersion(ordinary.snapshotId);
+  assert.deepEqual(deleted, { deleted: [ordinary.snapshotId], freedBytes: 220 });
+  assert.deepEqual(item.calls.remove, [ordinary.snapshotId]);
+  assert.equal((await item.service.list()).sessions[0].versions.length, 1);
+
+  await assert.rejects(
+    item.service.deleteVersion(protectedVersion.snapshotId),
+    (error) => error instanceof HistoryError && error.code === 'history-snapshot-protected' && error.status === 409,
+  );
+  assert.deepEqual(item.calls.remove, [ordinary.snapshotId]);
+});
+
+test('clear history deletes every ordinary version and skips protected and degraded snapshots', async () => {
+  const first = version({
+    snapshotId: '00000000-0000-4000-8000-000000000020',
+    totalBytes: 120,
+  });
+  const protectedVersion = version({
+    snapshotId: '00000000-0000-4000-8000-000000000021',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    totalBytes: 80,
+  });
+  const second = version({
+    snapshotId: '00000000-0000-4000-8000-000000000022',
+    sessionId: 'session-b',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    totalBytes: 200,
+    archive: { ...version().archive, title: 'Beta', workspace: null },
+  });
+  const degradedId = '00000000-0000-4000-8000-000000000023';
+  const item = fixture({
+    versions: [first, protectedVersion, second],
+    trashRecords: new Map([['session-a', { sessionId: 'session-a', snapshotId: protectedVersion.snapshotId }]]),
+    degraded: [{ snapshotId: degradedId, code: 'snapshot-hash-mismatch' }],
+  });
+
+  const result = await item.service.clear();
+
+  assert.deepEqual(result, {
+    deleted: [second.snapshotId, first.snapshotId],
+    freedBytes: 320,
+    skipped: [
+      { snapshotId: protectedVersion.snapshotId, reason: 'history-snapshot-protected' },
+      { snapshotId: degradedId, reason: 'history-snapshot-degraded' },
+    ],
+    failed: [],
+  });
+  assert.deepEqual(item.calls.remove, [second.snapshotId, first.snapshotId]);
 });

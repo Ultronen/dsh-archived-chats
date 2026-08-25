@@ -2,7 +2,8 @@
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
  * (state, stats, insights, retention/policy, retention/preview, retention/apply,
  * lineage, history, history/capture, history/preview, history/preview/image,
- * history/restore/preview, history/restore, preview, preview/image, search,
+ * history/restore/preview, history/restore, history/delete, history/delete-all,
+ * preview, preview/image, search,
  * export, import/inspect, import/restore,
  * metadata, trash, trash/restore, trash/purge, trash/empty, unarchive,
  * unarchive-all, delete, delete-all), streams
@@ -59,6 +60,13 @@ export interface HistoryRestoreResult {
   sourceSessionId: string;
   snapshotId: string;
   warnings: Array<{ id: string; reason: string }>;
+}
+
+export interface HistoryDeleteResult {
+  deleted: string[];
+  freedBytes: number;
+  skipped?: Array<{ snapshotId: string; reason: string }>;
+  failed?: Array<{ snapshotId: string; reason: string }>;
 }
 
 export interface StorageInsightsSummary {

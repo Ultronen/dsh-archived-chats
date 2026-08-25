@@ -36,6 +36,7 @@ test('published Host and client declarations expose session history contracts', 
       'export interface HistorySession',
       'export interface HistoryResponse',
       'export interface HistoryRestoreResult',
+      'export interface HistoryDeleteResult',
     ]) assert(source.includes(declaration), `${path} is missing ${declaration}`);
   }
 });

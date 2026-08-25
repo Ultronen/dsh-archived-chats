@@ -32,6 +32,8 @@ POST /plugins/dsh-archived-chats/history/preview
 POST /plugins/dsh-archived-chats/history/preview/image
 POST /plugins/dsh-archived-chats/history/restore/preview
 POST /plugins/dsh-archived-chats/history/restore
+POST /plugins/dsh-archived-chats/history/delete
+POST /plugins/dsh-archived-chats/history/delete-all
 POST /plugins/dsh-archived-chats/preview
 POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
@@ -83,6 +85,8 @@ preview/image 的授权顺序固定为：先验证 POST 和 `x-dsh-archived-chat
 `history.js` 将已发布快照分组为 `archived` / `recycled` / `history-only`，单次最多检查 5,000 个快照目录，共用进行中请求并缓存已完成结果 30 秒。清单只含安全标题/工作区标题、时间、大小、附件数和保护状态；降级项只显示快照 ID 与稳定代码。分页预览与图片读取每次都重新验证快照、摘要和完整描述符，不返回路径或原始记录。
 
 `history-restore.js` 先完整验证快照，用 Host 生成新会话 ID，再签发五分钟、单次使用的 token/nonce。确认时先消费凭据并重验 manifest；然后依次创建持久会话、重写会话/附件身份、附加事件、恢复工作区和元数据，最后才写入归档注册表。任一插件控制的边界失败都按逆序回滚；来源会话与快照始终不变，也不声称删除了 Host 全局附件对象。
+
+历史页的单条删除与「清空历史版本」都进入共用生命周期队列，并绕过普通 30 秒缓存/进行中请求，重新计算当前快照与回收保护关系。单条删除拒绝 `recycle-protection`；清空只删除健康普通历史，跳过回收保护和降级快照。删除会物理移除插件快照及其附件副本，无法再预览或恢复，但不修改原聊天或其他版本。
 
 ## 导出流程
 
@@ -154,7 +158,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 
 ## 兼容性和测试
 
-1.0.0 已在 DeepSeek Harness 0.1.1-rc.2 Web profile 中验证加载、28 路由注册、安全空历史清单和能力降级。该 Host 未公开导入/历史恢复所需 writer，因此以 `501 restore-unsupported` 无写入失败。0.12 使用相同 version 1 manifest，能校验、保留和清理 1.0 快照，但不显示历史页或恢复为副本；降级前应备份整个插件数据目录。
+1.0.0 已在 DeepSeek Harness 0.1.1-rc.2 Web profile 中验证加载、30 路由注册、安全空历史清单和能力降级。该 Host 未公开导入/历史恢复所需 writer，因此以 `501 restore-unsupported` 无写入失败。0.12 使用相同 version 1 manifest，能校验、保留和清理 1.0 快照，但不显示历史页或恢复为副本；降级前应备份整个插件数据目录。
 
 测试覆盖：
 

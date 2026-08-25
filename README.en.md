@@ -42,7 +42,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 1.0.0 has been verified to load in a DeepSeek Harness `0.1.1-rc.2` Web profile, register all 28 routes, and expose the archive/history read boundaries. That rc.2 Web Host does not publish the persistence writer required by ZIP import or **Restore as copy**, so preparation returns `501 restore-unsupported` without writing data; full restore requires a Host that explicitly exposes that public capability. Before downgrading from 1.0, back up `$DSH_HOME/plugin-data/archived-chats/`; 0.12 can still validate, retain, and purge version-one snapshots, but it does not show the History tab.
+Version 1.0.0 has been verified to load in a DeepSeek Harness `0.1.1-rc.2` Web profile, register all 30 routes, and expose the archive/history read boundaries. That rc.2 Web Host does not publish the persistence writer required by ZIP import or **Restore as copy**, so preparation returns `501 restore-unsupported` without writing data; full restore requires a Host that explicitly exposes that public capability. Before downgrading from 1.0, back up `$DSH_HOME/plugin-data/archived-chats/`; 0.12 can still validate, retain, and purge version-one snapshots, but it does not show the History tab.
 
 ## Preview
 
@@ -78,7 +78,7 @@ These screenshots are the `0.12.0` UI baseline, captured in an isolated real Dee
 - **Complete archived-session list**, grouped by workspace (project) with a per-group count. Every group can be collapsed or expanded, and the state is remembered per browser.
 - **Archive success notice**: after a chat is archived, a compact frame-wide notice remains for three seconds with **View**, **Undo**, and close actions. Pointer hover or keyboard focus pauses the timer, active View/Undo work cannot time out, and failures retain a retry action.
 - **Local history after archive**: only a successful browser-originated archive captures a validated version, deduplicated by the same non-null source revision. The plugin never scans unrelated active chats and performs no startup, scheduled, or background capture.
-- **History timeline and restore-as-copy**: the fifth History tab shows timestamp, size, attachment count, recycle-protection state, and opaque degraded items by original chat. Preview is read-only. Restore always creates a new archived ID while leaving the source and selected snapshot unchanged.
+- **History timeline, restore, and deletion**: the fifth History tab shows timestamp, size, attachment count, recycle-protection state, and opaque degraded items by original chat. Preview is read-only and restore always creates a new archived ID. Ordinary history can be deleted individually or cleared globally after confirmation and cannot then be recovered. Original chats remain unchanged; recycle-protection and degraded snapshots are skipped.
 - **Full-text conversation search**: one search field matches titles, workspaces, tags, notes, user messages, assistant answers, and tool results, with a readable hit excerpt on each matching row.
 - **Native archived conversation preview and turn navigation**: follow the Harness conversation layout with user messages on the right and assistant messages on the left; present Markdown, reasoning, tool activity, JSON, code, and available stored images read-only, while retaining a responsive turn rail for quick jumps. If the host lacks attachment capability, only images degrade and the rest of the preview remains readable.
 - **Filter and sort** by type (all / regular / subagent), project, and tag; then order results by newest, oldest, or title.
@@ -168,7 +168,7 @@ Yes. The success notice includes **Undo**, and the Recycle Bin keeps a Restore a
 <details>
 <summary><b>Why are recovery snapshots shown when there are no archived chats?</b></summary>
 
-A recovery snapshot is created before an archived chat moves to the Recycle Bin. Restoring removes the recycle record but deliberately keeps the validated snapshot as recovery history, so it may still use storage after the archive list becomes empty. The default keeps one snapshot per original chat. To remove them, set the count to `0`, save, then run **Preview cleanup → Apply selected cleanup**. Saving alone never deletes data.
+A recovery snapshot is created before an archived chat moves to the Recycle Bin. Restoring removes the recycle record but deliberately keeps the validated snapshot as recovery history, so it may still use storage after the archive list becomes empty. Delete one ordinary version or use **Clear history versions** from History; a snapshot still protecting Recycle Bin recovery is skipped. Alternatively, set retention count to `0` and run **Preview cleanup → Apply selected cleanup**.
 
 </details>
 
@@ -193,6 +193,7 @@ The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/pr
 - Added the fifth **History** tab for validated local versions, recycle-protection state, safe search, and opaque degraded entries grouped by source chat.
 - Browser archive success now captures by stable revision; capture failure never rolls back archive and the notice retains safe retry.
 - Reused the conversation preview for snapshot timestamps and verified images. Restore always creates a new archived ID and never overwrites the source.
+- Added confirmed single-version deletion and global History clearing without selection checkboxes; recycle-protection and degraded snapshots are not removed by these actions.
 - Recycle moves may reuse the same healthy non-null revision. Retention continues to govern history, and permanent purge removes every validated snapshot for the source.
 - A real `0.1.1-rc.2` Web Host verified plugin loading, safe inventory, and capability degradation; without a writer, restore fails without mutation as `restore-unsupported`.
 - **Downgrade reminder:** 0.12 does not show History, but it can validate, retain, and purge version-one snapshots. Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading.

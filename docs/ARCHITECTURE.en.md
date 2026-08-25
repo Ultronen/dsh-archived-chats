@@ -32,6 +32,8 @@ POST /plugins/dsh-archived-chats/history/preview
 POST /plugins/dsh-archived-chats/history/preview/image
 POST /plugins/dsh-archived-chats/history/restore/preview
 POST /plugins/dsh-archived-chats/history/restore
+POST /plugins/dsh-archived-chats/history/delete
+POST /plugins/dsh-archived-chats/history/delete-all
 POST /plugins/dsh-archived-chats/preview
 POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
@@ -83,6 +85,8 @@ Cross-session persistence inspection is limited to four concurrent reads. A brok
 `history.js` groups published snapshots as `archived`, `recycled`, or `history-only`, inspects no more than 5,000 snapshot directories, shares one in-flight request, and caches completed inventory for 30 seconds. Inventory contains only safe title/workspace title, timestamps, sizes, attachment counts, and protection state; degraded entries expose only snapshot ID and a stable code. Paginated preview and image reads revalidate snapshot identity, digests, and complete descriptors without returning paths or raw records.
 
 `history-restore.js` fully validates the snapshot, asks the Host for a new session ID, and issues a five-minute single-use token/nonce. Confirmation consumes the credential before writes and rechecks the manifest, then creates persistence, rewrites session/attachment identities, appends events, restores workspace and metadata, and commits archive registry state last. Failures reverse plugin-controlled steps. The source session and snapshot never change, and the plugin makes no claim that Host-global attachment objects were deleted.
+
+Single-version deletion and **Clear history versions** both enter the shared lifecycle queue and bypass the ordinary 30-second cache/in-flight list so current snapshot and recycle-protection state is recomputed. Single deletion rejects `recycle-protection`; clear removes only healthy ordinary history and skips recycle-protection and degraded snapshots. Deletion physically removes the plugin snapshot and its attachment copies, so that version can no longer be previewed or restored, while the original chat and other versions remain unchanged.
 
 ## Export flow
 
@@ -154,7 +158,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 ## Compatibility and testing
 
-Version 1.0.0 has been verified in a DeepSeek Harness 0.1.1-rc.2 Web profile for loading, 28-route registration, safe empty history inventory, and capability degradation. That Host does not expose the writer required by import/history restore, which therefore returns `501 restore-unsupported` without mutation. Version 0.12 uses the same version-one manifest and can validate, retain, and purge 1.0 snapshots, but it does not expose History or restore-as-copy. Back up the complete plugin-data directory before downgrading.
+Version 1.0.0 has been verified in a DeepSeek Harness 0.1.1-rc.2 Web profile for loading, 30-route registration, safe empty history inventory, and capability degradation. That Host does not expose the writer required by import/history restore, which therefore returns `501 restore-unsupported` without mutation. Version 0.12 uses the same version-one manifest and can validate, retain, and purge 1.0 snapshots, but it does not expose History or restore-as-copy. Back up the complete plugin-data directory before downgrading.
 
 Coverage includes:
 

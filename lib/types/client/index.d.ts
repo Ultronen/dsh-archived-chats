@@ -77,6 +77,13 @@ export interface HistoryRestoreResult {
   warnings: Array<{ id: string; reason: string }>;
 }
 
+export interface HistoryDeleteResult {
+  deleted: string[];
+  freedBytes: number;
+  skipped?: Array<{ snapshotId: string; reason: string }>;
+  failed?: Array<{ snapshotId: string; reason: string }>;
+}
+
 export interface StorageInsightsSummary {
   sessionBytes: number;
   snapshotBytes: number;
