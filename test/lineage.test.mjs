@@ -73,6 +73,73 @@ test('lineage applies trash then archive status and strips private fields', () =
   }
 });
 
+test('lineage focus excludes unrelated active descendants but keeps paths between managed sessions', () => {
+  const graph = projectLineage({
+    headers: [
+      { id: 'ancestor', createdAt: 1 },
+      { id: 'archived', createdAt: 2, parentSession: 'ancestor' },
+      { id: 'active-child', createdAt: 3, parentSession: 'archived', origin: 'subagent', delegationDepth: 1 },
+      { id: 'active-bridge', createdAt: 4, parentSession: 'archived', origin: 'subagent', delegationDepth: 1 },
+      { id: 'archived-grandchild', createdAt: 5, parentSession: 'active-bridge', origin: 'subagent', delegationDepth: 2 },
+      { id: 'unrelated-sibling', createdAt: 6, parentSession: 'ancestor' },
+      { id: 'unrelated-root', createdAt: 7 },
+    ],
+    archivedIds: ['archived', 'archived-grandchild'],
+    trashRecords: new Map(),
+    workspaces: [],
+    titles: new Map(),
+    focusIds: ['archived', 'archived-grandchild'],
+  });
+
+  assert.deepEqual(graph.roots.map((node) => node.id), ['ancestor']);
+  assert.deepEqual(graph.roots[0].children.map((node) => node.id), ['archived']);
+  assert.deepEqual(graph.roots[0].children[0].children.map((node) => node.id), ['active-bridge']);
+  assert.deepEqual(graph.roots[0].children[0].children[0].children.map((node) => node.id), ['archived-grandchild']);
+  assert.equal(JSON.stringify(graph).includes('active-child'), false);
+  assert.equal(JSON.stringify(graph).includes('unrelated-sibling'), false);
+  assert.equal(JSON.stringify(graph).includes('unrelated-root'), false);
+  assert.equal(graph.nodeCount, 4);
+});
+
+test('lineage focus is empty without archived or recycled sessions', () => {
+  const graph = projectLineage({
+    headers: [{ id: 'active-only', createdAt: 1 }],
+    archivedIds: [],
+    trashRecords: new Map(),
+    workspaces: [],
+    titles: new Map(),
+    focusIds: [],
+  });
+
+  assert.deepEqual(graph, { roots: [], diagnostics: [], nodeCount: 0 });
+});
+
+test('lineage focus still represents a recycled session whose original header is gone', () => {
+  const graph = projectLineage({
+    headers: [{ id: 'active-only', createdAt: 1 }],
+    archivedIds: [],
+    trashRecords: new Map([['recycled', {
+      sessionId: 'recycled',
+      title: 'Recovered from snapshot',
+      createdAt: 2,
+      origin: 'host-private-origin',
+      workspace: { id: 'workspace-a', title: 'Workspace A', path: '/private' },
+    }]]),
+    workspaces: [],
+    titles: new Map(),
+    focusIds: ['recycled'],
+  });
+
+  assert.deepEqual(graph.roots.map((node) => ({ id: node.id, title: node.title, status: node.status })), [
+    { id: 'recycled', title: 'Recovered from snapshot', status: 'trash' },
+  ]);
+  assert.deepEqual(graph.roots[0].workspace, { id: 'workspace-a', title: 'Workspace A' });
+  assert.equal(graph.roots[0].origin, null);
+  assert.equal(JSON.stringify(graph).includes('/private'), false);
+  assert.equal(JSON.stringify(graph).includes('host-private-origin'), false);
+  assert.equal(graph.nodeCount, 1);
+});
+
 test('lineage rejects more than five thousand real headers without a partial graph', () => {
   const headers = Array.from({ length: 5001 }, (_, index) => ({ id: `s-${index}`, createdAt: index }));
   assert.throws(

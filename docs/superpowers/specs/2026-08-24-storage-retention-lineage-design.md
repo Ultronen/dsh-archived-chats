@@ -1,4 +1,4 @@
-# Storage, Retention, and Session Lineage Design
+# Storage, Retention, and Origins & Branches Design
 
 Date: 2026-08-24
 Target: dsh-archived-chats 0.12.0
@@ -275,12 +275,21 @@ deletion in the retention module. Revalidation and mutation run through the
 same lifecycle queue used by recycle move/restore/purge so those operations
 cannot change active-snapshot ownership between the final check and deletion.
 
-### Session lineage projector
+### Archive relationship projector
 
 Create `lib/lineage.js` with pure `projectLineage(...)`. The route
 `GET /plugins/dsh-archived-chats/lineage` gathers authoritative headers from
 `persistence.list()`, active recycle records, archive membership, and workspace
-accounting, then returns a bounded forest.
+accounting, then returns a bounded forest focused on archived and recycled
+sessions. The pure projector keeps an optional unscoped mode as a foundation
+for a future global Session Center, but the 0.12 route always supplies the
+managed IDs and never sends unrelated active sessions to the browser.
+
+Focused projection includes every archived or recycled focus node plus only the
+ancestor path required to explain where that managed node came from. It does
+not include ordinary active descendants merely because their parent is
+archived. An active intermediate node remains only when it connects one managed
+node to another managed descendant.
 
 Each real node exposes:
 
@@ -304,9 +313,15 @@ parents become synthetic `missing` nodes containing only their ID and children.
 Workspace paths, event bodies, notes, tags, and attachment descriptors are not
 part of this response.
 
-Titles come only from an existing header title, the archive title cache, or a
-recycle record. The lineage route does not inspect every active transcript just
-to obtain a title; rows without a safe cached title display their session ID.
+Titles come from an existing header title, the archive title cache, or a recycle
+record. After focused projection, the lineage route may inspect at most 100
+untitled active nodes that are already necessary source context; unrelated active
+transcripts remain unread. Active context still lacking a safe title uses the
+localized “source information unavailable” label and is never presented as a
+new untitled chat. Managed rows use the ordinary untitled fallback, display one
+compact ID in the dedicated ID field, and copy the full ID only on request. A recycle record whose original
+persistence header is gone remains visible as a standalone recycle node using
+only its safe catalog fields.
 
 Projection rules:
 
@@ -318,6 +333,9 @@ Projection rules:
   diagnostics; traversal never loops.
 - Diagnostics include `missing-parent`, `self-parent`, `cycle`, and
   `delegation-depth-mismatch`.
+- The focused response contains each archived/recycled node, its ancestor chain,
+  and its descendant tree. Siblings and roots unrelated to those nodes are
+  omitted. An empty archive and recycle catalog returns an empty forest.
 - The response is capped at 5,000 real headers. Exceeding the cap returns 413
   without a partial graph.
 
@@ -330,13 +348,14 @@ The existing settings page adds two top-level tabs after **Archived** and
 **Recycle Bin**:
 
 - **Storage & Retention**
-- **Session Lineage**
+- **Origins & Branches**
 
 ### Storage & Retention
 
 The tab shows compact summary cards for session bytes, snapshot bytes, measured
-total, repeated snapshot bytes, and unavailable/degraded counts. A table groups
-session and snapshot usage by project/session without rendering local paths.
+total, repeated snapshot bytes, and unavailable/degraded counts. Session and
+snapshot cards open separate searchable, scroll-bounded detail dialogs without
+rendering local paths; inventories never push the retention policy down the page.
 
 Policy controls use explicit inputs with disabled/null choices. Saving a policy
 does not run it. **Preview cleanup** opens an accessible dialog containing every
@@ -350,13 +369,30 @@ of the original chat and all protection snapshots. Cancel receives initial
 focus, focus is trapped, Escape closes only the plugin dialog, and focus returns
 to the trigger.
 
-### Session Lineage
+### Origins & Branches
 
-The lineage tab renders an accessible collapsible tree, not a free-form canvas.
-Rows show title/ID, active/archived/recycle/missing status, ordinary/subagent
-origin, delegation depth, created time, and child count. Search matches title or
-ID while preserving ancestor context. Diagnostic badges explain missing parents,
-cycles, and depth mismatches. The tree is read-only.
+The relationship tab renders a visually explicit collapsible tree, not a free-form
+canvas or a stack of indented cards. Its DOM uses native `list` / `listitem`
+semantics plus button disclosures rather than claiming the composite ARIA `tree`
+keyboard model while rows also contain Copy ID actions. Compact rows use visible
+left-side spines and elbow connectors. Rows lead with a readable title or localized untitled fallback, show
+one compact ID with a full-ID copy action, and explain project, source,
+related/archived/recycle/missing status, ordinary/subagent origin, relevant
+delegation depth, created time, and branch count in localized user-facing text.
+
+Each branch has a chevron disclosure, with explicit Expand all and Collapse all
+controls. A project filter is derived from `node.workspace`; matches retain the
+ancestor context needed to explain the relationship rather than regrouping or
+duplicating cross-project nodes. Search matches title, project, or ID, preserves
+ancestors, and temporarily expands matching paths. Clearing search restores the
+user's previous fold state. Trees above 50 nodes start with root branches folded,
+while smaller trees start expanded. The independently scrolling tree keeps large
+inventories from extending the settings page. Traversal remains iterative, and
+visual guide columns retain only the nearest 12 levels for pathological deep trees.
+
+Diagnostic badges use readable node labels to explain missing parents, cycles, and
+depth mismatches. A scope note explains why related active nodes may appear and that
+unrelated active chats are omitted. The tree is read-only.
 
 Both tabs preserve the existing responsive host-dialog adaptation, English and
 Chinese locale namespaces, light/dark tokens, loading/error/empty states, and
@@ -435,8 +471,11 @@ on-demand rendering.
 - four-tab navigation and lazy request lifecycle;
 - localized storage cards, policy fields, preview selection defaults, destructive
   confirmation, focus trapping/restoration, and error states;
-- accessible lineage tree, search with ancestor context, collapse state, status
-  and diagnostic badges;
+- accessible list/disclosure semantics for the connector-based lineage tree;
+  compact context strips for active/missing ancestors; full cards only for
+  archived/recycled chats; project and status filtering with ancestor context;
+  search-driven path expansion and fold restoration; per-node/global collapse,
+  large-tree defaults, managed-result counts, status, and diagnostic badges;
 - route method/guard/body bounds and exact response shapes;
 - unchanged archive, preview, export/import, recycle, and sidebar behavior.
 
@@ -455,8 +494,9 @@ release are created.
 5. No default or background behavior permanently deletes a chat.
 6. Repeated recycle cycles retain history until an explicit policy application
    or permanent purge.
-7. Users can navigate a deterministic, bounded session tree and identify missing
-   or malformed lineage without modifying it.
+7. Users can navigate a deterministic, bounded relationship tree centered on
+   archived/recycled chats and identify missing or malformed lineage without
+   exposing unrelated active sessions or modifying persistence.
 8. Existing 0.11.0 data loads without migration and existing features continue
    to pass their tests.
 9. Chinese and English documentation state the local-data, downgrade, attachment

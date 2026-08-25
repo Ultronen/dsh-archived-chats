@@ -1,6 +1,7 @@
 /**
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
- * (state, stats, preview, preview/image, search, export, import/inspect, import/restore,
+ * (state, stats, insights, retention/policy, retention/preview, retention/apply,
+ * lineage, preview, preview/image, search, export, import/inspect, import/restore,
  * metadata, trash, trash/restore, trash/purge, trash/empty, unarchive,
  * unarchive-all, delete, delete-all), streams
  * JSON/Markdown backup ZIPs, and wires archive insights:
@@ -118,6 +119,7 @@ export interface LineageDiagnostic {
 }
 
 export interface LineageResponse {
+  /** Archived/recycled chats plus only the parent/child context needed to explain them. */
   roots: LineageNode[];
   diagnostics: LineageDiagnostic[];
   nodeCount: number;

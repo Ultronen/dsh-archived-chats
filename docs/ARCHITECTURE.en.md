@@ -60,7 +60,7 @@ Metadata and recycle catalogs are versioned. Writes serialize and atomically rep
 
 The stats route measures session directories with concurrency four, skips symbolic links, and caches results for 30 seconds. A measurement failure marks only that row unavailable; list and mutation actions continue. Delete invalidates the affected cache row.
 
-Insights joins session measurement with a stream-verified snapshot inventory and counts repeated snapshot attachments only from validated SHA-256 descriptors. retention.json uses an exact version-one schema; saving never runs cleanup. Preview issues a five-minute single-use token/nonce and apply revalidates inside the lifecycle queue; recycle candidates still delegate to recycle purge. Lineage uses only durable parentSession edges, caps real nodes at 5,000, and never rewrites headers.
+Insights joins session measurement with a stream-verified snapshot inventory and counts repeated snapshot attachments only from validated SHA-256 descriptors. The browser keeps totals in summary cards and presents session/snapshot inventories only in bounded searchable dialogs. retention.json uses an exact version-one schema; saving never runs cleanup. Preview issues a five-minute single-use token/nonce and apply revalidates inside the lifecycle queue; recycle candidates still delegate to recycle purge. Lineage uses only durable parentSession edges, caps real nodes at 5,000, never rewrites headers, and resolves titles for at most 100 untitled active source nodes already included in the focused tree.
 
 ## Preview and full-text search
 
@@ -113,11 +113,12 @@ Permanent purge persists `purge-pending` before physical writes, then removes th
 
 client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, state, and design tokens. The page state includes:
 
+- A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps the public `workspaces.archiveSession` method, publishes the latest session ID only after the original call succeeds, and restores the method on unload. The notice defaults to three seconds and tracks pointer/focus pause reasons independently. View follows the Host's accessible Settings trigger and Archived Chats nav label; Undo calls the guarded `/unarchive` route and refreshes the workspace projection. Failures remain retryable and never present false success.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
 - Selected-item export, unarchive, and move to Recycle Bin.
-- Archived, Recycle Bin, Storage & Retention, and Session Lineage tabs; storage and lineage requests load on demand and are cancellable.
+- Archived, Recycle Bin, Storage & Retention, and Origins & Branches tabs; storage and relationship requests load on demand and are cancellable. Storage summary cards open searchable session-directory/snapshot dialogs, keeping retention controls stable regardless of inventory size. The projector retains global capability, while the 0.12 route returns only archived/recycled chats, their ancestor chains, and descendant trees; unrelated active chats are never sent to the browser. Necessary source titles resolve on demand, and a recycle record whose original header is gone still appears as a standalone recycled node. Compact rows use visible spines and elbows for parent/child structure. The DOM uses native list/listitem and disclosure-button semantics instead of claiming an incomplete composite ARIA tree keyboard model while rows also contain Copy ID actions. Rows lead with titles and include project plus localized source/type/delegation/branch metadata and one compact ID. The tree supports per-node and global folding, project filtering that retains required ancestors, and title/project/ID search that temporarily reveals matching paths before restoring the user's fold state. It scrolls independently, defaults only root branches to collapsed above 50 nodes, traverses iteratively, and caps visible guide columns at the nearest 12 levels.
 - Import preview, disabled conflicts, and restore results.
 - Responsive settings-page markers and sidebar refresh injection.
 
