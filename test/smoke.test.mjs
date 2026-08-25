@@ -2308,6 +2308,9 @@ console.log('\n[11] client half — settings section registration');
     && style?.textContent.includes('.dac-history-version{align-items:flex-start;flex-direction:column}')
     && style?.textContent.includes('.dac-history-actions{width:100%}'),
   'History timeline and actions remain usable in narrow layouts');
+  assert(style?.textContent.includes('.dac-lineage-diagnostic{')
+    && style?.textContent.includes('white-space:normal;overflow-wrap:anywhere'),
+  'relationship diagnostics wrap completely inside managed cards');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
@@ -3994,20 +3997,27 @@ console.log('\n[11f] client half — recycle navigation and management');
       'lineage.search': 'Search titles or session IDs',
       'lineage.untitled': 'Untitled chat',
       'lineage.diagnostic.missing-parent': 'Missing parent',
+      'lineage.diagnostic.missing-parent.detail': 'Parent chat is missing, so source information is unavailable',
       'state.retry': 'Retry',
     })[key] ?? key;
     for (const [localeName, translate, expected] of [
-      ['Chinese', t, '父会话缺失: 未命名会话'],
-      ['English', englishRelationshipsT, 'Missing parent: Untitled chat'],
+      ['Chinese', t, '父会话缺失，无法读取来源会话信息'],
+      ['English', englishRelationshipsT, 'Parent chat is missing, so source information is unavailable'],
     ]) {
       const diagnosticHarness = createHookHarness(RelationshipsPanel);
       diagnosticHarness.render({ t: translate });
       diagnosticHarness.flushEffects();
       await new Promise((resolve) => setTimeout(resolve, 0));
       const diagnosticTree = diagnosticHarness.render({ t: translate });
-      const diagnosticText = elementText(diagnosticTree);
-      assert(diagnosticText.includes(expected) && !diagnosticText.includes(diagnosticSessionId),
-        `${localeName} relationship diagnostics use readable fallback titles instead of full session IDs`);
+      const diagnosticElements = collectElements(diagnosticTree);
+      const diagnosticRow = diagnosticElements.find((element) => element.props?.className?.includes('dac-lineage-row-archived'));
+      const inlineDiagnostic = collectElements(diagnosticRow).find((element) => element.props?.className === 'dac-lineage-diagnostic');
+      const globalDiagnostic = diagnosticElements.find((element) => element.props?.role === 'status'
+        && element.props?.className === 'dac-row-meta');
+      assert(elementText(inlineDiagnostic) === expected
+        && globalDiagnostic === undefined
+        && !elementText(diagnosticTree).includes(diagnosticSessionId),
+      `${localeName} relationship diagnostics stay complete inside the affected managed card`);
       diagnosticHarness.unmount();
     }
 
