@@ -7,11 +7,11 @@
 
 [English](README.en.md) | [中文](README.md)
 
-> 🔎 **Archived no longer means lost.** Search conversation content, read complete messages and tool calls, then back up, restore, or delete safely.
+> 🔎 **Archived no longer means lost.** Search and read complete conversations, inspect local history versions, then back up, restore as a copy, or delete safely.
 
 > ♻️ **Removing an archived chat from this plugin is undoable.** The plugin first creates a local recovery snapshot containing the session and attachments, then moves it to the Recycle Bin. Physical removal happens only after an explicit **Delete permanently** action in the Recycle Bin.
 
-A local archived-chat manager for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): search and preview complete conversations, back up and restore sessions, and safely manage history with an undoable Recycle Bin, recovery snapshots, retention policies, and Origins & Branches.
+A local archived-chat manager for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): search and preview complete conversations, retain a validated local version after archive, restore any healthy version as a new archived copy, and manage old chats through backups, an undoable Recycle Bin, retention policies, and Origins & Branches.
 
 Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds a **Session Archive** page under Settings where every archived session is visible, searchable, and manageable.
 
@@ -42,11 +42,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-The full 0.12.0 feature target is DeepSeek Harness `0.1.1-rc.2`. Older hosts can still expose the archive list, but missing persistence, attachment, or live-session lifecycle capabilities produce explicit errors for recycle, storage, or lineage features instead of guessed internal writes.
+Version 1.0.0 has been verified to load in a DeepSeek Harness `0.1.1-rc.2` Web profile, register all 28 routes, and expose the archive/history read boundaries. That rc.2 Web Host does not publish the persistence writer required by ZIP import or **Restore as copy**, so preparation returns `501 restore-unsupported` without writing data; full restore requires a Host that explicitly exposes that public capability. Before downgrading from 1.0, back up `$DSH_HOME/plugin-data/archived-chats/`; 0.12 can still validate, retain, and purge version-one snapshots, but it does not show the History tab.
 
 ## Preview
 
-These screenshots cover the current `0.12.0` feature set. They were captured in an isolated real DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile with synthetic demo conversations and no real user data. The order follows the complete release path from archive entry, search, and preview through recycle recovery, storage governance, and Origins & Branches.
+These screenshots are the `0.12.0` UI baseline, captured in an isolated real DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile with synthetic demo conversations and no real user data. The 1.0 History UI has not yet replaced this release screenshot set, so the established paths and headings remain unchanged below.
 
 ![Archive a conversation from its session menu](assets/screenshots/01-archive-entry.png)
 ![Three-second archive success notice](assets/screenshots/01b-archive-success.png)
@@ -66,17 +66,19 @@ These screenshots cover the current `0.12.0` feature set. They were captured in 
 
 ## Usage
 
-1. Archive a conversation from the normal DSH session menu. After the Host confirms success, a **Chat archived** notice appears at the top for three seconds with direct **View** and **Undo** actions; hovering or focusing it pauses the timer. Archiving removes the chat from the sidebar but keeps its session data in the workspace store.
-2. Open **Settings → Session Archive**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
-3. Search titles, tags, notes, conversation text, or tool output. Open the row preview to read an archived conversation without unarchiving it. Click **Select multiple** only when you need bulk actions.
-4. Click **Import backup** to choose a ZIP produced by this plugin and confirm non-conflicting sessions after the preview. Click **Export backup** to export the current selection, or every archived chat when nothing is selected. Individual rows also have an export action.
-5. Choose **Unarchive** to return a conversation to the sidebar. **Move to Recycle Bin** creates a protection snapshot and offers immediate **Undo**; the session can also be restored later from the **Recycle Bin** tab. Only **Delete permanently / Empty Recycle Bin** removes originals and snapshots irreversibly.
-6. Open **Storage & Retention** to measure archived/recycled session directories and recovery snapshots this plugin created and retained for them. Restoring a chat may retain its snapshot, so storage can remain when the archive list is empty. Counts apply separately to each original chat; saving performs no cleanup until exact candidates are previewed and applied. **Origins & Branches** uses a collapsible connector tree to show where archived/recycled chats came from and which sessions branched from them, with project filtering and search.
+1. Archive a conversation from the normal DSH session menu. After Host success, the notice first reports **saving history version** and starts its three-second dismissal only after save. Snapshot failure never rolls back archive success; the notice retains **Retry save**, **View**, **Undo**, and close actions.
+2. Open **Settings → Session Archive → History**. Groups can be searched by safe title/workspace and expanded to preview any healthy version read-only or choose **Restore as copy**. The Host generates a new session ID and registers the result as archived; it never overwrites, unarchives, or deletes the source.
+3. Use **Archived** to manage chats by workspace and search titles, tags, notes, message text, or tool output. Row preview does not require unarchive.
+4. Use **Import backup / Export backup** for ZIP backups. ZIP import and history restore are separate flows.
+5. **Move to Recycle Bin** reuses a healthy snapshot for the same revision when possible and otherwise publishes a new protection snapshot. Only **Delete permanently / Empty Recycle Bin** irreversibly removes the original and every validated snapshot for that source.
+6. Use **Storage & Retention** to preview and explicitly apply history-count, age, quota, and recycle-age policy. **Origins & Branches** remains a read-only tree of necessary relationship context.
 
 ## Features
 
 - **Complete archived-session list**, grouped by workspace (project) with a per-group count. Every group can be collapsed or expanded, and the state is remembered per browser.
 - **Archive success notice**: after a chat is archived, a compact frame-wide notice remains for three seconds with **View**, **Undo**, and close actions. Pointer hover or keyboard focus pauses the timer, active View/Undo work cannot time out, and failures retain a retry action.
+- **Local history after archive**: only a successful browser-originated archive captures a validated version, deduplicated by the same non-null source revision. The plugin never scans unrelated active chats and performs no startup, scheduled, or background capture.
+- **History timeline and restore-as-copy**: the fifth History tab shows timestamp, size, attachment count, recycle-protection state, and opaque degraded items by original chat. Preview is read-only. Restore always creates a new archived ID while leaving the source and selected snapshot unchanged.
 - **Full-text conversation search**: one search field matches titles, workspaces, tags, notes, user messages, assistant answers, and tool results, with a readable hit excerpt on each matching row.
 - **Native archived conversation preview and turn navigation**: follow the Harness conversation layout with user messages on the right and assistant messages on the left; present Markdown, reasoning, tool activity, JSON, code, and available stored images read-only, while retaining a responsive turn rail for quick jumps. If the host lacks attachment capability, only images degrade and the rest of the preview remains readable.
 - **Filter and sort** by type (all / regular / subagent), project, and tag; then order results by newest, oldest, or title.
@@ -87,7 +89,7 @@ These screenshots cover the current `0.12.0` feature set. They were captured in 
 - **Compact top-level actions**: common **Import backup** / **Export backup** actions are direct, while the low-frequency destructive action lives under **More**. The page stays focused on DSH archive management without a persistent source selector or redundant menus.
 - **On-demand multi-select**: checkboxes stay hidden by default and appear only after clicking **Select multiple**. Select individual chats, every visible result, or an entire project; the selection bar can export, unarchive, or move the chosen chats to the Recycle Bin, while selections hidden by another filter remain intact.
 - **Unarchive** a single chat or a whole project group from the group's `⋯` menu — restored chats reappear in the sidebar immediately.
-- **Four archive-management views**: Archived, Recycle Bin, Storage & Retention, and Origins & Branches. Recycled rows stay grouped by their original workspace, each group can collapse independently, and rows show trash time, snapshot size, attachment count, and `trashed` / `degraded` / `purge-pending` state. Checkboxes stay hidden until **Select multiple** is activated.
+- **Five archive-management views**: Archived, History, Recycle Bin, Storage & Retention, and Origins & Branches. History loads only on first activation; Recycle Bin stays grouped by original workspace with independent disclosure state.
 - **Storage analysis**: separately measures archived/recycled session directories and plugin-owned snapshots, with unavailable/degraded diagnostics and repeated snapshot-attachment bytes. Searchable detail dialogs open from the summary cards, so long inventories never push retention controls down the page. It does not label these numbers as globally reclaimable Harness attachment storage.
 - **Preview-first retention policies**: plan by retained recovery snapshots per original chat, snapshot age, snapshot quota, and recycle age. The default keeps one recovery snapshot per original chat. Saving never runs cleanup; snapshots in use by Recycle Bin or unavailable snapshots are excluded and permanent recycle purges start unselected.
 - **Read-only Origins & Branches**: uses durable Harness `parentSession` fields to show the sources, forks, and subagent trees of archived/recycled chats, retaining only the parent/child context needed to explain them. Unrelated active chats are not sent to the browser. Managed cards keep source copy inside the card and put a centered disclosure arrow on its own bottom row; users can click the whole card or arrow to fold, copy the full ID, use project/status filters, and expand or collapse all. Searching titles, projects, or IDs automatically reveals matching paths; an independently scrolling tree keeps large datasets from extending the page, and root branches default to collapsed above 50 nodes. Missing parents, cycles, and delegation-depth mismatches are diagnosed without rewriting relationships.
@@ -98,11 +100,11 @@ These screenshots cover the current `0.12.0` feature set. They were captured in 
 
 ## Recycle Bin, privacy, and attachment limits
 
-The recycle catalog (`trash.json`) and protection snapshots live under `$DSH_HOME/plugin-data/archived-chats/` and stay on this machine. Attachment bytes are read one at a time, digest-verified, and atomically published; neither conversations nor attachments are uploaded. Recycle previews use a separate authorized scope.
+The recycle catalog (`trash.json`) plus history/protection snapshots live under `$DSH_HOME/plugin-data/archived-chats/` and stay on this machine. Attachment bytes are read one at a time, digest-verified, and atomically published. Conversations and attachments are never uploaded, cloud-synced, background-scanned, or scheduled for capture.
 
 Retention policy lives in `retention.json` under the same directory. Policies never run in the background, at startup, or on a timer; every cleanup requires a single-use five-minute preview followed by explicit selection and confirmation.
 
-Permanent purge removes the snapshot's attachment copies, but Harness's global attachment store may retain identical bytes because another session still references them or because the host applies its own garbage-collection policy. This plugin does not claim immediate global attachment GC.
+Permanent Recycle Bin purge removes every validated snapshot attachment copy for that source, but Harness's global attachment store may retain identical bytes because another session still references them or because the host applies its own garbage-collection policy. This plugin does not claim immediate global attachment GC.
 
 ## Tags, notes, and statistics
 
@@ -136,6 +138,13 @@ No. DSH hides the conversation from the sidebar and keeps its archived session r
 </details>
 
 <details>
+<summary><b>Are history versions screenshots, and can restore overwrite the source?</b></summary>
+
+No. They are locally stored, validated copies of session records and attachments, and preview is read-only. **Restore as copy** asks the Host for a new ID and creates a new archived chat. It never overwrites, deletes, or unarchives the source or mutates the selected snapshot.
+
+</details>
+
+<details>
 <summary><b>What happens when an imported backup contains an existing session ID?</b></summary>
 
 The conflicting row is shown in the preview, disabled by default, and skipped. Import never overwrites an existing session.
@@ -165,7 +174,7 @@ A recovery snapshot is created before an archived chat moves to the Recycle Bin.
 
 ## Implementation overview
 
-The plugin has two halves: the Host service manages archives, snapshots, the recycle catalog, and restore/purge transactions, while the browser page provides search, preview, backup, restore, and explicit confirmations. Mutations go through guarded local routes. Ordinary removal commits only a recycle record; physical removal is reachable only through the Recycle Bin's crash-safe purge flow.
+The plugin has two halves: the Host service manages archives, version snapshots, the recycle catalog, and restore/purge transactions, while the browser page provides search, history timelines, read-only preview, backup, restore-as-copy, and explicit confirmations. Mutations go through guarded local routes. Ordinary removal commits only a recycle record; physical removal is reachable only through the Recycle Bin's crash-safe purge flow.
 
 User-facing storage, backup limits, deletion outcomes, and compatibility notes stay in this README. Maintainer details such as route contracts, data flow, restore transactions, live-deletion lifecycle, and failure fallbacks are documented in [ARCHITECTURE.md](docs/ARCHITECTURE.en.md).
 
@@ -175,9 +184,18 @@ User-facing storage, backup limits, deletion outcomes, and compatibility notes s
 npm test
 ```
 
-The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bounded import validation, restore transactions, metadata and statistics, full-text search, conversation preview, and host-and-browser smoke tests. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
+The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/preview/image authorization, single-use restore-as-copy transactions and rollback, retention, full-text search, and Host/browser smoke and responsive behavior. It uses an isolated temporary DSH home plus mocked host and browser runtimes; it never reads or changes real sessions.
 
 ## Version history
+
+### 1.0.0
+
+- Added the fifth **History** tab for validated local versions, recycle-protection state, safe search, and opaque degraded entries grouped by source chat.
+- Browser archive success now captures by stable revision; capture failure never rolls back archive and the notice retains safe retry.
+- Reused the conversation preview for snapshot timestamps and verified images. Restore always creates a new archived ID and never overwrites the source.
+- Recycle moves may reuse the same healthy non-null revision. Retention continues to govern history, and permanent purge removes every validated snapshot for the source.
+- A real `0.1.1-rc.2` Web Host verified plugin loading, safe inventory, and capability degradation; without a writer, restore fails without mutation as `restore-unsupported`.
+- **Downgrade reminder:** 0.12 does not show History, but it can validate, retain, and purge version-one snapshots. Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading.
 
 ### 0.12.0
 

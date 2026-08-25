@@ -10,7 +10,7 @@
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
 - 浏览器客户端位于 lib/client.js，通过 settings.section 注册「会话档案」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js 和 lib/lineage.js 中。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证保护快照，lib/recycle.js 组合回收生命周期。
+- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js 和 lib/lineage.js 中。lib/history.js 负责历史抓取、安全清单和预览授权，lib/history-restore.js 负责单次确认的恢复为副本事务。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合回收生命周期。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
 
@@ -26,6 +26,12 @@ POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/preview
 POST /plugins/dsh-archived-chats/retention/apply
 GET  /plugins/dsh-archived-chats/lineage
+POST /plugins/dsh-archived-chats/history/capture
+GET  /plugins/dsh-archived-chats/history
+POST /plugins/dsh-archived-chats/history/preview
+POST /plugins/dsh-archived-chats/history/preview/image
+POST /plugins/dsh-archived-chats/history/restore/preview
+POST /plugins/dsh-archived-chats/history/restore
 POST /plugins/dsh-archived-chats/preview
 POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
@@ -43,7 +49,7 @@ POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
-所有修改路由以及会返回对话内容的 preview、preview/image、search 路由都要求 `x-dsh-archived-chats: 1` 请求头。GET trash、preview/image 和 export 是只读操作。`delete` / `delete-all` 只返回 `trashed` 和 `failed`；`trash/restore` 返回 `restored`，`trash/purge` / `trash/empty` 返回 `purged`，并保留请求的首次出现顺序。
+所有修改路由以及会返回对话内容的 preview、preview/image、search、history/preview 和 history/preview/image 路由都要求 `x-dsh-archived-chats: 1` 请求头。`GET /history` 只返回有界安全清单；历史图片只在快照身份与完整描述符同时匹配时返回。
 
 ## 状态和本地数据
 
@@ -69,6 +75,14 @@ preview 默认只接受当前可见归档 ID；显式 `scope: "trash"` 时仅接
 preview/image 的授权顺序固定为：先验证 POST 和 `x-dsh-archived-chats: 1`，再有界解析 `sessionId` 与 `attachmentId`；随后确认会话仍在当前可见归档集合中，从该会话的规范投影中查找完全匹配的图片描述符，最后才通过可选的 `attachments.readImage` 服务读取。preview 和 preview/image 都会在异步读取完成后、响应发送前再次检查可见归档状态，避免并发取消归档或删除泄露旧内容。图片字节以 `no-store`、`nosniff` 返回；跨会话、非归档或不在投影中的引用均会被拒绝，错误响应不回显文件路径。宿主没有附件读取能力时返回 `preview-image-unsupported`；这只降级图片，不阻塞文本、Markdown、思考、工具、JSON 或代码预览。
 
 跨会话搜索的持久层读取并发上限为 4；单个会话失败会记入 skipped，其他命中仍正常返回。规范投影使用 30 秒 TTL、64 会话 LRU 和单会话最大缓存字符数保护内存；超大会话仍可搜索，但不会常驻缓存。取消归档、删除和恢复会使相关缓存失效。
+
+## 历史版本与恢复为副本
+
+`history/capture` 只在浏览器包装的公开 `workspaces.archiveSession` 成功后调用。Host 进入与回收/保留共用的生命周期队列，重新检查归档所有权与回收状态，为仍存活的会话要求稳定 Host 修订，并复用同一非空修订的健康快照。插件不扫描无关活动会话，不在启动、定时器或后台自动抓取。
+
+`history.js` 将已发布快照分组为 `archived` / `recycled` / `history-only`，单次最多检查 5,000 个快照目录，共用进行中请求并缓存已完成结果 30 秒。清单只含安全标题/工作区标题、时间、大小、附件数和保护状态；降级项只显示快照 ID 与稳定代码。分页预览与图片读取每次都重新验证快照、摘要和完整描述符，不返回路径或原始记录。
+
+`history-restore.js` 先完整验证快照，用 Host 生成新会话 ID，再签发五分钟、单次使用的 token/nonce。确认时先消费凭据并重验 manifest；然后依次创建持久会话、重写会话/附件身份、附加事件、恢复工作区和元数据，最后才写入归档注册表。任一插件控制的边界失败都按逆序回滚；来源会话与快照始终不变，也不声称删除了 Host 全局附件对象。
 
 ## 导出流程
 
@@ -107,18 +121,18 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 会有界读取�
 
 恢复先检查同 ID 冲突。原会话完好时只恢复归档可见性并移除回收记录，不重写持久层，保护快照保留为历史；原件丢失时先完成所有校验和附件身份重发，然后仅通过公开 `create` / `append` / `saveImage` 能力写入。失败会回滚新建件并保留回收记录。
 
-永久删除在任何物理写入前持久化 `purge-pending`，再删除原会话、快照和回收记录。启动恢复仅重试 `purge-pending`，从不删除普通 `trashed`。旧 `pending-deletions.json` 是严格、只读的迁移输入：每个仍归档的 ID 都转成可恢复回收记录，绝不因旧标记在启动时直接删除。
+永久删除在任何物理写入前持久化 `purge-pending`，再删除原会话、该来源的全部已验证快照和回收记录。启动恢复仅重试 `purge-pending`，从不删除普通 `trashed`。旧 `pending-deletions.json` 是严格、只读的迁移输入：每个仍归档的 ID 都转成可恢复回收记录，绝不因旧标记在启动时直接删除。
 
 ## 浏览器客户端
 
 client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、状态和设计令牌。页面状态包括：
 
-- `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发布最近一次会话 ID，卸载时恢复原方法。提示默认 3 秒，指针/焦点暂停原因独立计数；查看通过宿主设置按钮和归档页的可访问文本进入 `archived-chats` section，撤销调用受保护的 `/unarchive` 后刷新 workspace 投影。请求失败保留可重试状态，不显示伪成功。
+- `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发起历史抓取。抓取进行时暂停 3 秒关闭计时，成功后恢复，失败时显示不回滚归档的重试保存；查看与撤销继续可用。
 - 归档列表和工作区分组。
 - 搜索、类型/项目/标签筛选和排序。
 - 标签备注编辑器。
 - 选中项批量导出、取消归档和移入回收站。
-- 归档、回收站、空间与策略、来源与分支四标签；空间请求与关系请求按需加载并可取消。空间摘要卡片打开可搜索的会话目录/快照明细弹窗，保留策略不受明细数量影响。关系投影器保留全局能力，但 0.12 路由只返回已归档/回收站会话、它们的祖先链和后代树；无关活动会话不会发送到浏览器。必要来源节点按需补读标题，原件缺失的回收站记录仍作为独立回收节点显示。浏览器用有竖线和转折线的紧凑树行呈现父子关系，DOM 使用原生列表/列表项和展开按钮语义，避免在同一节点还包含复制操作时宣称不完整的 ARIA 复合树键盘模型。标题是主信息，附带所属项目、本地化来源/类型/委派层级/分支数和一次缩写 ID。树支持逐节点及全部展开/折叠、保留祖先上下文的项目筛选，以及会临时展开命中路径的标题/项目/ID 搜索；清空搜索恢复用户原折叠状态。树在独立滚动区中渲染，超过 50 个节点时只默认折叠根分支，遍历保持迭代式并把可视连接轨道限制在最近 12 层。
+- 归档、历史版本、回收站、空间与策略、来源与分支五标签。历史首次激活才请求安全清单，会话组默认折叠；预览复用对话弹窗并显示快照时间，恢复确认的初始焦点位于取消，token/nonce 不进入渲染树。其他空间与关系视图保留按需加载、有界弹窗和只读关系投影。
 - 导入预览、冲突禁用和恢复结果。
 - 响应式设置页标记和侧边栏刷新注入面。
 
@@ -131,6 +145,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 ## 安全和失败策略
 
 - 所有状态变更路由都要求 POST 和 guard header。
+- 历史响应不包含工作区/快照/附件路径、原始事件、备注或确认 token；日志只记 ID 和稳定代码。
 - 导入限制 ZIP 大小、条目数量、路径格式、版本和 JSON 结构，拒绝遍历、重复和原型污染字段。
 - 普通删除从不调用物理清除；仅已提交回收记录可进入 purge。
 - 快照和回收文件使用 `0600`，目录使用 `0700`，发布为临时写入、sync、原子 rename。
@@ -139,7 +154,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 
 ## 兼容性和测试
 
-0.12.0 的完整能力目标是 DeepSeek Harness 0.1.1-rc.2。0.11.x 能容忍多个有效快照但不显示或治理历史；降级前应备份整个插件数据目录。
+1.0.0 已在 DeepSeek Harness 0.1.1-rc.2 Web profile 中验证加载、28 路由注册、安全空历史清单和能力降级。该 Host 未公开导入/历史恢复所需 writer，因此以 `501 restore-unsupported` 无写入失败。0.12 使用相同 version 1 manifest，能校验、保留和清理 1.0 快照，但不显示历史页或恢复为副本；降级前应备份整个插件数据目录。
 
 测试覆盖：
 
@@ -151,6 +166,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 - search.js 的消息投影、Unicode 搜索、分页、部分失败与 TTL/LRU 缓存。
 - trash.js、snapshot.js 和 recycle.js 的格式验证、并发、恢复、回滚、崩溃意图和旧标记迁移。
 - insights.js、retention.js、retention-service.js 和 lineage.js 的可信分账、策略边界、短效授权、重检和有界图投影。
+- history.js 和 history-restore.js 的修订去重、缓存失效、快照授权、单次确认、事务回滚与来源不变式。
 - Host 路由和浏览器设置页的冒烟及响应式行为。
 
 运行：

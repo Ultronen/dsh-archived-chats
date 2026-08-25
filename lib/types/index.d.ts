@@ -1,7 +1,9 @@
 /**
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
  * (state, stats, insights, retention/policy, retention/preview, retention/apply,
- * lineage, preview, preview/image, search, export, import/inspect, import/restore,
+ * lineage, history, history/capture, history/preview, history/preview/image,
+ * history/restore/preview, history/restore, preview, preview/image, search,
+ * export, import/inspect, import/restore,
  * metadata, trash, trash/restore, trash/purge, trash/empty, unarchive,
  * unarchive-all, delete, delete-all), streams
  * JSON/Markdown backup ZIPs, and wires archive insights:
@@ -25,6 +27,38 @@ export interface RetentionPolicy {
   historicalSnapshotMaxAgeDays: number | null;
   snapshotQuotaBytes: number | null;
   recycleMaxAgeDays: number | null;
+}
+
+export type HistoryScope = 'archived' | 'recycled' | 'history-only';
+export type HistoryVersionState = 'history' | 'recycle-protection';
+
+export interface HistoryVersion {
+  snapshotId: string;
+  createdAt: string;
+  totalBytes: number;
+  attachmentCount: number;
+  state: HistoryVersionState;
+}
+
+export interface HistorySession {
+  sessionId: string;
+  title: string | null;
+  workspace: { id: string | null; title: string | null } | null;
+  scope: HistoryScope;
+  versions: HistoryVersion[];
+}
+
+export interface HistoryResponse {
+  generatedAt: string;
+  sessions: HistorySession[];
+  degraded: Array<{ snapshotId: string; code: string }>;
+}
+
+export interface HistoryRestoreResult {
+  restored: string[];
+  sourceSessionId: string;
+  snapshotId: string;
+  warnings: Array<{ id: string; reason: string }>;
 }
 
 export interface StorageInsightsSummary {

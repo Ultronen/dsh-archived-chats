@@ -1,7 +1,8 @@
 /**
  * Browser client entry — the Session Archive settings section. It keeps the
- * existing searchable archive manager and adds Archived, Recycle Bin, Storage
- * & Retention, and Origins & Branches views. Removing an archived chat from
+ * existing searchable archive manager and adds Archived, History, Recycle Bin,
+ * Storage & Retention, and Origins & Branches views. History versions are
+ * local, read-only previews and restore only as new archived copies. Removing an archived chat from
  * this plugin moves it to recoverable trash and
  * exposes immediate Undo. The recycle view has independent selection, scoped
  * read-only previews, original/snapshot restore, guarded permanent purge and
@@ -42,6 +43,38 @@ export interface RetentionPolicy {
   historicalSnapshotMaxAgeDays: number | null;
   snapshotQuotaBytes: number | null;
   recycleMaxAgeDays: number | null;
+}
+
+export type HistoryScope = 'archived' | 'recycled' | 'history-only';
+export type HistoryVersionState = 'history' | 'recycle-protection';
+
+export interface HistoryVersion {
+  snapshotId: string;
+  createdAt: string;
+  totalBytes: number;
+  attachmentCount: number;
+  state: HistoryVersionState;
+}
+
+export interface HistorySession {
+  sessionId: string;
+  title: string | null;
+  workspace: { id: string | null; title: string | null } | null;
+  scope: HistoryScope;
+  versions: HistoryVersion[];
+}
+
+export interface HistoryResponse {
+  generatedAt: string;
+  sessions: HistorySession[];
+  degraded: Array<{ snapshotId: string; code: string }>;
+}
+
+export interface HistoryRestoreResult {
+  restored: string[];
+  sourceSessionId: string;
+  snapshotId: string;
+  warnings: Array<{ id: string; reason: string }>;
 }
 
 export interface StorageInsightsSummary {
