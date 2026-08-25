@@ -2180,6 +2180,11 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['archiveNotice.captureError'] === '已归档，但历史版本未保存'
     && zhDict['archiveNotice.captureRetry'] === '重试保存',
   'Chinese archive success and history-capture notice copy is localized');
+  assert(zhDict['tab.history'] === '历史版本'
+    && zhDict['history.preview'] === '预览'
+    && zhDict['history.restore'] === '恢复为副本'
+    && zhDict['history.restoreTitle'] === '恢复历史版本为副本？',
+  'Chinese History tab, preview, and restore copy is localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
   assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
     && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
@@ -2192,6 +2197,11 @@ console.log('\n[11] client half — settings section registration');
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureError'] === 'Archived, but history version was not saved'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureRetry'] === 'Retry save',
   'English archive success and history-capture notice copy is localized');
+  assert(clientCalls.localeRegister[0].dicts.en['tab.history'] === 'History'
+    && clientCalls.localeRegister[0].dicts.en['history.preview'] === 'Preview'
+    && clientCalls.localeRegister[0].dicts.en['history.restore'] === 'Restore as copy'
+    && clientCalls.localeRegister[0].dicts.en['history.restoreTitle'] === 'Restore history version as a copy?',
+  'English History tab, preview, and restore copy is localized');
   assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice (got ${clientCalls.slotRegister.length})`);
   const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
   const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
@@ -2262,6 +2272,11 @@ console.log('\n[11] client half — settings section registration');
     && style?.textContent.includes('@media (max-width:640px){.dac-archive-notice{')
     && style?.textContent.includes('.dac-archive-notice-actions{flex-wrap:wrap;justify-content:flex-end}'),
   'archive success notice has stable desktop and wrapping narrow-screen styling');
+  assert(style?.textContent.includes('.dac-history-timeline{')
+    && style?.textContent.includes('.dac-history-actions{')
+    && style?.textContent.includes('.dac-history-version{align-items:flex-start;flex-direction:column}')
+    && style?.textContent.includes('.dac-history-actions{width:100%}'),
+  'History timeline and actions remain usable in narrow layouts');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
@@ -3422,6 +3437,27 @@ console.log('\n[11f] client half — recycle navigation and management');
   const savedFetch = globalThis.fetch;
   const requests = [];
   const archiveRows = [{ id: 'archive-a', title: 'Archived Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' }];
+  const historyPayload = {
+    generatedAt: '2026-08-26T01:00:00.000Z',
+    sessions: [
+      {
+        sessionId: 'history-a', title: 'History Alpha', workspace: { id: 'ws-1', title: '项目一' }, scope: 'archived',
+        versions: [
+          { snapshotId: 'history-newer', createdAt: '2026-08-26T00:00:00.000Z', totalBytes: 2048, attachmentCount: 2, state: 'history' },
+          { snapshotId: 'history-older', createdAt: '2026-08-25T00:00:00.000Z', totalBytes: 1024, attachmentCount: 0, state: 'recycle-protection' },
+        ],
+      },
+      {
+        sessionId: 'history-only', title: null, workspace: null, scope: 'history-only',
+        versions: [{ snapshotId: 'history-orphan', createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 512, attachmentCount: 0, state: 'history' }],
+      },
+    ],
+    degraded: [{ snapshotId: 'history-degraded', code: 'snapshot-hash-mismatch' }],
+  };
+  let servedHistoryPayload = historyPayload;
+  let historyRestorePreparation = 0;
+  let failNextHistoryRestore = false;
+  const historyRestoredCallbacks = [];
   let lineagePayload = { roots: [], diagnostics: [], nodeCount: 0 };
   let recycleRows = [
     {
@@ -3471,6 +3507,32 @@ console.log('\n[11f] client half — recycle navigation and management');
     if (path.endsWith('/insights')) return responseFor(storageInsightsPayload);
     if (path.endsWith('/lineage')) return responseFor(lineagePayload);
     if (path.endsWith('/trash')) return responseFor({ trashStatus: 'ready', summary: { total: recycleRows.length }, sessions: recycleRows });
+    if (path.endsWith('/history/preview/image')) return { ...responseFor({}), blob: async () => new Blob(['history-image'], { type: 'image/png' }) };
+    if (path.endsWith('/history/preview')) return responseFor({
+      snapshot: { snapshotId: 'history-newer', sessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z' },
+      sessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z',
+      messages: [{ index: 0, role: 'user', segments: [{ kind: 'text', text: 'Old local message' }] }],
+      total: 1, nextOffset: null,
+    });
+    if (path.endsWith('/history/restore/preview')) {
+      historyRestorePreparation += 1;
+      return responseFor({
+        token: `secret-token-${historyRestorePreparation}`,
+        nonce: `secret-nonce-${historyRestorePreparation}`,
+        expiresAt: '2026-08-26T01:05:00.000Z',
+        snapshot: { snapshotId: 'history-newer', sourceSessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z', title: 'History Alpha', totalBytes: 2048, attachmentCount: 2 },
+        destination: { sessionId: 'restored-copy', archived: true },
+        warnings: [{ id: 'restored-copy', reason: 'workspace-unresolved' }],
+      });
+    }
+    if (path.endsWith('/history/restore')) {
+      if (failNextHistoryRestore) {
+        failNextHistoryRestore = false;
+        return { ok: false, status: 410, json: async () => ({ error: 'history-restore-expired' }) };
+      }
+      return responseFor({ restored: ['restored-copy'], sourceSessionId: 'history-a', snapshotId: 'history-newer', warnings: [] });
+    }
+    if (path.endsWith('/history')) return responseFor(servedHistoryPayload);
     if (path.endsWith('/preview')) return responseFor({ session: { id: 'trash-a', title: 'Trash Alpha' }, messages: [], total: 0, nextOffset: null });
     return responseFor({});
   };
@@ -3484,8 +3546,163 @@ console.log('\n[11f] client half — recycle navigation and management');
   harness.flushEffects();
   let elements = collectElements(tree);
   const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  assert(tabs.length === 4, 'archive manager renders Archived, Recycle Bin, Storage, and Lineage tabs');
+  assert(tabs.map((tab) => elementText(tab)).join(',') === '归档,历史版本,回收站,空间与策略,来源与分支',
+    'archive manager renders Archived, History, Recycle Bin, Storage, and Lineage tabs in order');
   assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
+  assert(requests.filter((request) => request.path.endsWith('/history')).length === 0, 'History stays lazy before its first activation');
+
+  tabs[1]?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const historyPanelElement = findComponentElement(tree, 'HistoryPanel');
+  assert(historyPanelElement?.props?.active === true, 'History tab mounts the focused history panel on first activation');
+  const HistoryPanel = clientExports.__test.HistoryPanel;
+  if (typeof HistoryPanel !== 'function') {
+    assert(false, 'client exposes the history panel behavior for verification');
+  } else {
+    const historyPreviewSelections = [];
+    const historyHarness = createHookHarness(HistoryPanel);
+    const historyProps = {
+      active: true,
+      t,
+      onPreview: (session, version) => historyPreviewSelections.push({ session, version }),
+      onRestored: async (result) => { historyRestoredCallbacks.push(result); },
+    };
+    historyHarness.render(historyProps);
+    historyHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let historyTree = historyHarness.render(historyProps);
+    let historyElements = collectElements(historyTree);
+    assert(requests.filter((request) => request.path.endsWith('/history')).length === 1,
+      'first History activation loads the safe inventory once');
+    assert(elementText(historyTree).includes('历史版本保存在本机')
+      && elementText(historyTree).includes('History Alpha')
+      && elementText(historyTree).includes('2 个历史版本'),
+    'History explains local versions and groups them by safe session metadata');
+    assert(!historyElements.some((element) => element.type === 'button' && elementText(element) === '预览'),
+      'History timelines are collapsed by default');
+    assert(historyElements.some((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目'),
+      'History search is scoped to safe title and workspace fields');
+    assert(elementText(historyTree).includes('history-degraded')
+      && !elementText(historyTree).includes('snapshot-hash-mismatch:'),
+    'degraded history stays opaque and never guesses session ownership');
+    historyElements.find((element) => element.type === 'button'
+      && element.props?.['aria-label'] === '展开历史版本: History Alpha')?.props.onClick();
+    historyTree = historyHarness.render(historyProps);
+    historyElements = collectElements(historyTree);
+    const historyTimes = historyElements.filter((element) => element.type === 'time').map((element) => element.props?.dateTime);
+    assert(historyTimes.join(',') === '2026-08-26T00:00:00.000Z,2026-08-25T00:00:00.000Z'
+      && elementText(historyTree).includes('2 KB')
+      && elementText(historyTree).includes('2 个附件')
+      && elementText(historyTree).includes('回收站保护'),
+    'expanded History timeline keeps newest-first order and renders bounded version metadata');
+    historyElements.find((element) => element.type === 'button' && elementText(element) === '预览')?.props.onClick();
+    assert(historyPreviewSelections[0]?.session?.sessionId === 'history-a'
+      && historyPreviewSelections[0]?.version?.snapshotId === 'history-newer',
+    'History preview action selects the exact safe snapshot identity');
+    const historySearch = historyElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目');
+    historySearch?.props.onChange({ target: { value: '项目一' } });
+    historyTree = historyHarness.render(historyProps);
+    assert(elementText(historyTree).includes('History Alpha') && !elementText(historyTree).includes('未命名聊天'),
+      'History search matches safe workspace titles and removes unrelated groups');
+    collectElements(historyTree).find((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目')?.props.onChange({ target: { value: '' } });
+    historyTree = historyHarness.render(historyProps);
+
+    const restoreButton = historyElements.find((element) => element.type === 'button' && elementText(element) === '恢复为副本');
+    restoreButton?.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    historyTree = historyHarness.render(historyProps);
+    let historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
+    const firstPrepareRequest = requests.find((request) => request.path.endsWith('/history/restore/preview'));
+    assert(JSON.stringify(JSON.parse(firstPrepareRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer' })
+      && historyRestoreDialog?.props?.title === '恢复历史版本为副本？'
+      && String(historyRestoreDialog?.props?.body).includes('History Alpha')
+      && String(historyRestoreDialog?.props?.body).includes('restored-copy')
+      && String(historyRestoreDialog?.props?.body).includes('不会覆盖原聊天')
+      && !JSON.stringify(historyTree).includes('secret-token-1')
+      && !JSON.stringify(historyTree).includes('secret-nonce-1'),
+    'History restore prepares before confirmation and renders no token values');
+    historyRestoreDialog?.props?.onCancel();
+    historyTree = historyHarness.render(historyProps);
+    assert(findComponentElement(historyTree, 'ConfirmDialog') === undefined
+      && requests.filter((request) => request.path.endsWith('/history/restore')).length === 0,
+    'cancelling History restore performs no restore request');
+
+    collectElements(historyTree).find((element) => element.type === 'button' && elementText(element) === '恢复为副本')?.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    historyTree = historyHarness.render(historyProps);
+    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
+    await historyRestoreDialog?.props?.onConfirm();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    historyTree = historyHarness.render(historyProps);
+    const restoreRequest = requests.find((request) => request.path.endsWith('/history/restore'));
+    assert(JSON.stringify(JSON.parse(restoreRequest?.options?.body ?? '{}')) === JSON.stringify({ token: 'secret-token-2', nonce: 'secret-nonce-2' })
+      && historyRestoredCallbacks[0]?.restored?.[0] === 'restored-copy'
+      && requests.filter((request) => request.path.endsWith('/history')).length === 2
+      && findComponentElement(historyTree, 'ConfirmDialog') === undefined
+      && elementText(historyTree).includes('restored-copy'),
+    'successful History restore refreshes inventory, closes confirmation, and announces the new copy');
+
+    collectElements(historyTree).find((element) => element.type === 'button' && elementText(element) === '恢复为副本')?.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    historyTree = historyHarness.render(historyProps);
+    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
+    failNextHistoryRestore = true;
+    await historyRestoreDialog?.props?.onConfirm();
+    historyTree = historyHarness.render(historyProps);
+    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
+    assert(historyRestoreDialog?.props?.confirmLabel === '重新准备'
+      && String(historyRestoreDialog?.props?.body).includes('请重新准备')
+      && !JSON.stringify(historyTree).includes('secret-token-3'),
+    'failed History restore keeps a safe dialog available for fresh preparation');
+    await historyRestoreDialog?.props?.onConfirm();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    historyTree = historyHarness.render(historyProps);
+    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
+    assert(historyRestorePreparation === 4 && historyRestoreDialog?.props?.confirmLabel === '创建副本',
+      'History restore retry obtains a fresh confirmation before another write');
+    historyRestoreDialog?.props?.onCancel();
+    historyHarness.unmount();
+  }
+
+  servedHistoryPayload = { generatedAt: '2026-08-26T02:00:00.000Z', sessions: [], degraded: [] };
+  const emptyHistoryHarness = createHookHarness(HistoryPanel);
+  const emptyHistoryProps = { active: true, t, onPreview: () => {}, onRestored: async () => {} };
+  emptyHistoryHarness.render(emptyHistoryProps);
+  emptyHistoryHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const emptyHistoryTree = emptyHistoryHarness.render(emptyHistoryProps);
+  assert(elementText(emptyHistoryTree).includes('成功归档聊天后'), 'empty History explains when the first local version appears');
+  emptyHistoryHarness.unmount();
+  servedHistoryPayload = historyPayload;
+
+  historyPanelElement?.props?.onPreview?.(historyPayload.sessions[0], historyPayload.sessions[0].versions[0]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  const historyPreviewDialog = findComponentElement(tree, 'PreviewDialog');
+  const historyPreviewRequest = requests.find((request) => request.path.endsWith('/history/preview'));
+  assert(historyPreviewRequest?.options?.headers?.['x-dsh-archived-chats'] === '1'
+    && JSON.stringify(JSON.parse(historyPreviewRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', offset: 0, limit: 50 })
+    && historyPreviewDialog?.props?.preview?.scope === 'history',
+  'History preview uses the guarded snapshot route and reuses the conversation dialog');
+  assert(typeof historyPanelElement?.props?.onRestored === 'function', 'History panel wires successful restore to archive and sidebar refresh');
+  if (historyPreviewDialog !== undefined) {
+    const previewHarness = createHookHarness(historyPreviewDialog.type);
+    const historyDialogTree = previewHarness.render(historyPreviewDialog.props);
+    assert(elementText(historyDialogTree).includes('只读')
+      && elementText(historyDialogTree).includes('2026')
+      && elementText(historyDialogTree).includes('Old local message'),
+    'History preview visibly identifies the read-only snapshot timestamp');
+    previewHarness.unmount();
+  }
+  const historyImageRef = { attachmentId: 'image-history', sha256: 'a'.repeat(64), bytes: 13, mediaType: 'image/png', width: 10, height: 10 };
+  const historyImageSignal = new AbortController().signal;
+  await clientExports.__test.fetchHistoryImage?.('history-newer', historyImageRef, historyImageSignal);
+  const historyImageRequest = requests.find((request) => request.path.endsWith('/history/preview/image'));
+  assert(historyImageRequest?.options?.signal === historyImageSignal
+    && JSON.stringify(JSON.parse(historyImageRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', attachment: historyImageRef }),
+  'History image helper forwards cancellation and the complete snapshot-scoped descriptor');
+  historyPreviewDialog?.props?.onCancel?.();
+  tree = harness.render({ t, refreshSidebar: () => {} });
 
   const StorageRetentionPanel = clientExports.__test.StorageRetentionPanel;
   if (typeof StorageRetentionPanel !== 'function') {
@@ -3810,7 +4027,7 @@ console.log('\n[11f] client half — recycle navigation and management');
     largeRelationshipsHarness.unmount();
   }
 
-  tabs[1]?.props.onClick();
+  tabs[2]?.props.onClick();
 
   tree = harness.render({ t, refreshSidebar: () => {} });
   harness.flushEffects();
