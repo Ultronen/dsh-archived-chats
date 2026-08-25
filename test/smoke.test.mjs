@@ -221,7 +221,7 @@ const events = {
 };
 const headerRows = [
   { id: 'session-a', createdAt: 1786726311605, cwd: '/ws/one' },
-  { id: 'session-b', createdAt: 1786726400000, cwd: '/ws/two', origin: 'subagent' },
+  { id: 'session-b', createdAt: 1786726400000, cwd: '/ws/two', parentSession: 'session-a', seedLength: 2, origin: 'subagent', delegationDepth: 1 },
   { id: 'session-c', createdAt: 1786726500000, cwd: '/ws/one' },
 ];
 // Real on-disk artifacts for the delete path (sessions a, b, c + live one).
@@ -303,12 +303,80 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 17, `seventeen archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
+assert(routes.size === 22, `twenty-two archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
 assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
+
+console.log('\n[1a0] storage insights, retention, and lineage routes');
+{
+  const insights = await call(routes, '/plugins/dsh-archived-chats/insights', mockReq('GET', {}));
+  assert(insights.status === 200, `insights answers 200 (got ${insights.status})`);
+  assert(insights.json().summary.sessionBytes >= 0, 'insights exposes measured session bytes');
+  assert(!JSON.stringify(insights.json()).includes('workspacePath'), 'insights never exposes workspace paths');
+
+  const originalParent = headerRows[1].parentSession;
+  const originalInspect = persistence.inspect;
+  const lineageInspections = [];
+  headerRows[1].parentSession = 'session-source-context';
+  headerRows.push(
+    { id: 'session-source-context', createdAt: 1786726200000, cwd: '/ws/one', title: '   ' },
+    { id: 'session-unrelated-active', createdAt: 1786726600000, cwd: '/ws/private' },
+  );
+  events['session-source-context'] = [{ type: 'session/title', data: { title: '可读的来源会话' } }];
+  persistence.inspect = async (id) => {
+    lineageInspections.push(id);
+    return originalInspect(id);
+  };
+  const lineage = await call(routes, '/plugins/dsh-archived-chats/lineage', mockReq('GET', {}));
+  persistence.inspect = originalInspect;
+  delete events['session-source-context'];
+  headerRows.splice(-2);
+  headerRows[1].parentSession = originalParent;
+  assert(lineage.status === 200, `lineage answers 200 (got ${lineage.status})`);
+  const sourceContext = lineage.json().roots.find((node) => node.id === 'session-source-context');
+  assert(sourceContext?.title === '可读的来源会话' && sourceContext.children[0]?.id === 'session-b',
+    'lineage resolves a readable title for the necessary active source context');
+  assert(JSON.stringify(lineageInspections) === '["session-source-context"]',
+    'lineage inspects only untitled active context included in the focused relationship tree');
+  assert(!JSON.stringify(lineage.json()).includes('session-unrelated-active'), 'lineage omits active sessions unrelated to archived or recycled chats');
+  assert(!JSON.stringify(lineage.json()).includes('/ws/'), 'lineage never exposes workspace paths');
+
+  const originalArchivedIds = [...workspaceState.archivedSessionIds];
+  workspaceState.archivedSessionIds = [];
+  const emptyLineage = await call(routes, '/plugins/dsh-archived-chats/lineage', mockReq('GET', {}));
+  workspaceState.archivedSessionIds = originalArchivedIds;
+  assert(emptyLineage.status === 200 && emptyLineage.json().roots.length === 0,
+    'lineage is empty when the archive manager has no archived or recycled sessions');
+
+  const policyGet = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('GET', {}));
+  assert(policyGet.status === 405, 'retention policy rejects GET');
+  const previewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/retention/preview', mockReq('POST', {}, '{}'));
+  assert(previewMissingGuard.status === 403, 'retention preview rejects missing guard');
+  const applyMissingGuard = await call(routes, '/plugins/dsh-archived-chats/retention/apply', mockReq('POST', {}, '{}'));
+  assert(applyMissingGuard.status === 403, 'retention apply rejects missing guard');
+
+  const savedPolicy = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({
+    historicalSnapshotsPerSession: 1,
+    historicalSnapshotMaxAgeDays: null,
+    snapshotQuotaBytes: null,
+    recycleMaxAgeDays: null,
+  })));
+  assert(savedPolicy.status === 200, `retention policy save answers 200 (got ${savedPolicy.status})`);
+
+  const preview = await call(routes, '/plugins/dsh-archived-chats/retention/preview', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, '{}'));
+  assert(preview.status === 200, `retention preview answers 200 (got ${preview.status})`);
+  const applyResult = await call(routes, '/plugins/dsh-archived-chats/retention/apply', mockReq('POST', {
+    'x-dsh-archived-chats': '1',
+  }, JSON.stringify({ token: preview.json().token, nonce: preview.json().nonce, keys: [] })));
+  assert(applyResult.status === 200, `empty retention selection safely consumes preview (got ${applyResult.status})`);
+}
 {
   const inspectGet = await call(routes, '/plugins/dsh-archived-chats/import/inspect', mockReq('GET', {}));
   assert(inspectGet.status === 405, `import inspect rejects non-POST methods (got ${inspectGet.status})`);
@@ -1208,8 +1276,14 @@ const windowMock = {
   },
   MutationObserver: MockMutationObserver,
 };
-const clientCalls = { localeRegister: [], slotRegister: [], effects: [], sidebarRefresh: 0 };
-const clientServices = { sessions: { refresh: () => { clientCalls.sidebarRefresh += 1; return Promise.resolve(); } } };
+const clientCalls = { localeRegister: [], slotRegister: [], effects: [], sidebarRefresh: 0, workspaceArchive: [], workspaceRefresh: 0 };
+const clientServices = {
+  sessions: { refresh: () => { clientCalls.sidebarRefresh += 1; return Promise.resolve(); } },
+  workspaces: {
+    archiveSession: async (sessionId) => { clientCalls.workspaceArchive.push(sessionId); },
+    refresh: async () => { clientCalls.workspaceRefresh += 1; },
+  },
+};
 const clientCtx = {
   get: (key) => clientServices[key],
   locale: {
@@ -1276,6 +1350,218 @@ console.log('\n[10b] client model — sorting and visible selection');
   ) === true, 'search includes tags');
   assert(clientExports.__test.filterByTag({ tags: ['Important'] }, 'important') === true, 'tag filter is case-insensitive');
   assert(clientExports.__test.filterByTag({ tags: ['other'] }, 'all') === false, 'literal all filters instead of acting as the no-filter sentinel');
+
+  const noticeTimers = [];
+  const cancelledNoticeTimers = [];
+  const archiveNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => {
+      const timer = { callback, delay, id: noticeTimers.length + 1 };
+      noticeTimers.push(timer);
+      return timer.id;
+    },
+    cancel: (id) => { cancelledNoticeTimers.push(id); },
+    undo: async () => {},
+    view: async () => true,
+  });
+  let archiveNoticeUpdates = 0;
+  archiveNotice?.subscribe(() => { archiveNoticeUpdates += 1; });
+  archiveNotice?.show('session-a');
+  assert(archiveNotice?.getSnapshot()?.sessionId === 'session-a'
+    && noticeTimers[0]?.delay === 3000 && archiveNoticeUpdates === 1,
+  'archive success notice appears and schedules an exact three-second dismissal');
+  archiveNotice?.pause();
+  assert(cancelledNoticeTimers.includes(1) && archiveNotice?.getSnapshot()?.sessionId === 'session-a',
+    'archive success notice pauses without dismissing while hovered or focused');
+  archiveNotice?.resume();
+  assert(noticeTimers[1]?.delay === 3000, 'archive success notice restarts its three-second window after interaction');
+  archiveNotice?.show('session-b');
+  assert(archiveNotice?.getSnapshot()?.sessionId === 'session-b'
+    && cancelledNoticeTimers.includes(2) && noticeTimers[2]?.delay === 3000,
+  'a newer archive replaces the prior notice and resets its dismissal window');
+  noticeTimers[2]?.callback();
+  assert(archiveNotice?.getSnapshot() === null, 'archive success notice dismisses when its three-second timer elapses');
+
+  const overlapTimers = [];
+  const overlapNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => { overlapTimers.push({ callback, delay }); return overlapTimers.length; },
+    cancel: () => {},
+  });
+  overlapNotice?.show('session-overlap');
+  overlapNotice?.pause('pointer');
+  overlapNotice?.pause('focus');
+  overlapNotice?.resume('pointer');
+  assert(overlapTimers.length === 1, 'archive notice remains paused while any pointer or focus interaction is still active');
+  overlapNotice?.resume('focus');
+  assert(overlapTimers.length === 2 && overlapTimers[1]?.delay === 3000,
+    'archive notice resumes only after every active interaction leaves');
+
+  const undoNoticeTimers = [];
+  const undoCalls = [];
+  let rejectUndo = false;
+  const undoNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => { undoNoticeTimers.push({ callback, delay }); return undoNoticeTimers.length; },
+    cancel: () => {},
+    undo: async (sessionId) => {
+      undoCalls.push(sessionId);
+      if (rejectUndo) throw new Error('undo unavailable');
+    },
+    view: async () => true,
+  });
+  undoNotice?.show('session-undo');
+  const undoPromise = undoNotice?.undo();
+  assert(undoNotice?.getSnapshot()?.status === 'undoing', 'archive notice stops its timer and exposes progress while undo is pending');
+  assert(await undoPromise === true && undoCalls.join(',') === 'session-undo' && undoNotice?.getSnapshot() === null,
+  'successful archive undo targets the latest session and closes the notice');
+  rejectUndo = true;
+  undoNotice?.show('session-retry');
+  let undoRetryResult = null;
+  try { undoRetryResult = await undoNotice?.undo(); } catch { undoRetryResult = 'threw'; }
+  assert(undoRetryResult === false
+    && undoNotice?.getSnapshot()?.sessionId === 'session-retry'
+    && undoNotice?.getSnapshot()?.status === 'undo-error',
+  'failed archive undo stays visible for an explicit retry');
+
+  const viewedSessions = [];
+  let viewResult = true;
+  const viewNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: () => 1,
+    cancel: () => {},
+    undo: async () => {},
+    view: async (sessionId) => { viewedSessions.push(sessionId); return viewResult; },
+  });
+  viewNotice?.show('session-view');
+  const viewPromise = viewNotice?.view();
+  assert(viewNotice?.getSnapshot()?.status === 'viewing', 'archive notice stops its timer while opening the archived-chat view');
+  assert(await viewPromise === true && viewedSessions.join(',') === 'session-view' && viewNotice?.getSnapshot() === null,
+    'archive notice closes only after the archived-chat view opens');
+  viewResult = false;
+  viewNotice?.show('session-view-retry');
+  assert(await viewNotice?.view() === false && viewNotice?.getSnapshot()?.status === 'view-error',
+    'archive notice remains available when the archived-chat view cannot open');
+
+  const interceptedNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: () => 1,
+    cancel: () => {},
+  });
+  const archiveCalls = [];
+  let rejectArchive = false;
+  const originalArchiveSession = async function archiveSession(sessionId) {
+    archiveCalls.push({ receiver: this, sessionId });
+    if (rejectArchive) throw new Error('archive rejected');
+    return `archived:${sessionId}`;
+  };
+  const interceptedWorkspaces = { archiveSession: originalArchiveSession };
+  const removeArchiveInterceptor = clientExports.__test.installArchiveNoticeInterceptor?.(interceptedWorkspaces, interceptedNotice);
+  const archiveResult = await interceptedWorkspaces.archiveSession('session-success');
+  assert(archiveResult === 'archived:session-success'
+    && archiveCalls[0]?.receiver === interceptedWorkspaces
+    && interceptedNotice?.getSnapshot()?.sessionId === 'session-success',
+  'successful DSH archive calls preserve their result and show the matching success notice');
+  interceptedNotice?.dismiss();
+  rejectArchive = true;
+  let archiveFailure = null;
+  try { await interceptedWorkspaces.archiveSession('session-failure'); } catch (error) { archiveFailure = error; }
+  assert(archiveFailure?.message === 'archive rejected' && interceptedNotice?.getSnapshot() === null,
+    'failed DSH archive calls propagate the error without showing a false success notice');
+  removeArchiveInterceptor?.();
+  assert(interceptedWorkspaces.archiveSession === originalArchiveSession,
+    'archive notice interceptor restores the original DSH method when the plugin unloads');
+
+  let settingsOpen = false;
+  let settingsTriggerClicks = 0;
+  let archiveNavClicks = 0;
+  let viewPaints = 0;
+  const settingsTrigger = { textContent: '设置', click: () => { settingsTriggerClicks += 1; settingsOpen = true; } };
+  const unrelatedDialogTrigger = { textContent: '打开预览', click: () => {} };
+  const archiveNav = { textContent: ' 已归档的聊天 ', click: () => { archiveNavClicks += 1; } };
+  const generalNav = { textContent: '通用', click: () => {} };
+  const settingsDocument = {
+    querySelectorAll(selector) {
+      if (selector === '[role="dialog"] nav button') return settingsOpen ? [generalNav, archiveNav] : [];
+      if (selector === 'button[aria-haspopup="dialog"]') return [unrelatedDialogTrigger, settingsTrigger];
+      return [];
+    },
+  };
+  const openedArchiveSettings = await clientExports.__test.openArchiveSettings?.(
+    (key) => ({ nav: '已归档的聊天', 'archiveNotice.settings': '设置' })[key] ?? key,
+    settingsDocument,
+    async () => { viewPaints += 1; },
+  );
+  assert(openedArchiveSettings === true && settingsTriggerClicks === 1 && viewPaints === 2 && archiveNavClicks === 1,
+    'archive notice View opens Settings and selects the archived-chat section after it mounts');
+  settingsOpen = true;
+  const reopenedArchiveSettings = await clientExports.__test.openArchiveSettings?.(
+    (key) => ({ nav: '已归档的聊天', 'archiveNotice.settings': '设置' })[key] ?? key,
+    settingsDocument,
+    async () => { viewPaints += 1; },
+  );
+  assert(reopenedArchiveSettings === true && settingsTriggerClicks === 1 && archiveNavClicks === 2,
+    'archive notice View reuses an already-open Settings panel without reopening it');
+  const missingArchiveSettings = await clientExports.__test.openArchiveSettings?.(
+    (key) => key,
+    { querySelectorAll: () => [] },
+    async () => {},
+  );
+  assert(missingArchiveSettings === false, 'archive notice View reports failure when the host Settings surface is unavailable');
+
+  const overlayTimers = [];
+  const overlayCancelledTimers = [];
+  let overlayViewCalls = 0;
+  let overlayUndoCalls = 0;
+  const overlayController = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => { overlayTimers.push({ callback, delay }); return overlayTimers.length; },
+    cancel: (id) => { overlayCancelledTimers.push(id); },
+    view: async () => { overlayViewCalls += 1; return true; },
+    undo: async () => { overlayUndoCalls += 1; },
+  });
+  overlayController?.show('session-overlay');
+  const overlayT = (key) => ({
+    'archiveNotice.title': '已归档的聊天',
+    'archiveNotice.view': '查看',
+    'archiveNotice.undo': '撤销',
+    'archiveNotice.undoing': '正在撤销',
+    'archiveNotice.retry': '重试',
+    'archiveNotice.close': '关闭归档提示',
+  })[key] ?? key;
+  let archiveOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: overlayController, t: overlayT });
+  let archiveOverlayElements = collectElements(archiveOverlayTree);
+  const archiveOverlayView = archiveOverlayElements.find((element) => element.type === 'button' && elementText(element) === '查看');
+  const archiveOverlayUndo = archiveOverlayElements.find((element) => element.type === 'button' && elementText(element) === '撤销');
+  const archiveOverlayClose = archiveOverlayElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭归档提示');
+  assert(archiveOverlayTree?.props?.role === 'region'
+    && archiveOverlayTree?.props?.['aria-live'] === 'polite'
+    && elementText(archiveOverlayTree).includes('已归档的聊天')
+    && archiveOverlayElements.some((element) => element.type === 'svg'),
+  'archive success overlay announces the archived state and renders its archive icon without stealing focus');
+  assert(archiveOverlayView !== undefined && archiveOverlayUndo !== undefined && archiveOverlayClose !== undefined,
+    'archive success overlay exposes View, Undo, and an accessible close action');
+  archiveOverlayTree?.props.onMouseEnter();
+  archiveOverlayTree?.props.onMouseLeave();
+  archiveOverlayTree?.props.onFocusCapture();
+  archiveOverlayTree?.props.onBlurCapture({ currentTarget: { contains: () => false }, relatedTarget: null });
+  assert(overlayCancelledTimers.length === 2 && overlayTimers.length === 3,
+    'archive success overlay pauses and resumes its timer for both pointer and keyboard interaction');
+  archiveOverlayView?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(overlayViewCalls === 1 && overlayController?.getSnapshot() === null,
+    'archive success overlay View action delegates to the controller');
+  overlayController?.show('session-overlay-undo');
+  archiveOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: overlayController, t: overlayT });
+  archiveOverlayElements = collectElements(archiveOverlayTree);
+  archiveOverlayElements.find((element) => element.type === 'button' && elementText(element) === '撤销')?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(overlayUndoCalls === 1 && overlayController?.getSnapshot() === null,
+    'archive success overlay Undo action delegates to the controller');
+  overlayController?.show('session-overlay-close');
+  archiveOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: overlayController, t: overlayT });
+  collectElements(archiveOverlayTree).find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭归档提示')?.props.onClick();
+  assert(overlayController?.getSnapshot() === null, 'archive success overlay close action dismisses immediately');
   assert(
     JSON.stringify(clientExports.__test.editIconSpec) === JSON.stringify({
       size: 16,
@@ -1400,6 +1686,291 @@ console.log('\n[10b] client model — sorting and visible selection');
   try { await clientExports.__test.purgeTrash?.([]); } catch (error) { emptyPurgeError = error; }
   assert(/sessionIds is required/u.test(String(emptyPurgeError?.message)), 'purge rejects an empty selection before fetch');
 
+  globalThis.fetch = async (url, options = {}) => {
+    inspectRequests.push({ url, options });
+    const path = String(url);
+    const body = path.endsWith('/insights')
+      ? { summary: { sessionBytes: 10, snapshotBytes: 20, totalMeasuredBytes: 30, duplicateSnapshotBytes: 0, sessionUnavailableCount: 0, degradedSnapshotCount: 0 }, sessions: [], snapshots: [], policy: { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null }, candidateSummary: { snapshotCount: 0, recycleCount: 0, projectedSnapshotBytes: 20 } }
+      : path.endsWith('/retention/preview')
+        ? { token: 'retention-token', nonce: 'retention-nonce', candidates: [] }
+        : path.endsWith('/lineage')
+          ? { roots: [{ id: 'root', title: 'Root', children: [] }], diagnostics: [], nodeCount: 1 }
+          : { ok: true, policy: { historicalSnapshotsPerSession: 1 } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const insightsController = new AbortController();
+  const insightsBody = await clientExports.__test.fetchInsights?.(insightsController.signal);
+  let featureRequest = inspectRequests.at(-1);
+  assert(insightsBody?.summary?.totalMeasuredBytes === 30, 'insights helper returns storage totals');
+  assert(featureRequest?.url === '/plugins/dsh-archived-chats/insights' && featureRequest?.options.cache === 'no-store' && featureRequest?.options.signal === insightsController.signal, 'insights helper uses cancellable uncached GET');
+  await clientExports.__test.saveRetentionPolicy?.({ historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null });
+  featureRequest = inspectRequests.at(-1);
+  assert(featureRequest?.url === '/plugins/dsh-archived-chats/retention/policy' && featureRequest?.options.headers['x-dsh-archived-chats'] === '1', 'retention save uses guarded policy route');
+  const retentionPreview = await clientExports.__test.previewRetention?.();
+  assert(retentionPreview?.token === 'retention-token', 'retention helper returns preview authority');
+  await clientExports.__test.applyRetention?.('retention-token', 'retention-nonce', ['snapshot:s1', 'snapshot:s1']);
+  featureRequest = inspectRequests.at(-1);
+  assert(featureRequest?.options.body === '{"token":"retention-token","nonce":"retention-nonce","keys":["snapshot:s1"]}', 'retention apply preserves unique ordered candidate keys');
+  const lineageController = new AbortController();
+  const lineageBody = await clientExports.__test.fetchLineage?.(lineageController.signal);
+  featureRequest = inspectRequests.at(-1);
+  assert(lineageBody?.roots?.[0]?.id === 'root' && featureRequest?.url.endsWith('/lineage') && featureRequest?.options.signal === lineageController.signal, 'lineage helper returns cancellable uncached forest');
+
+  const defaults = clientExports.__test.defaultRetentionSelection?.([
+    { key: 'snapshot:s1', action: 'delete-snapshot' },
+    { key: 'trash:t1', action: 'purge-trash' },
+  ]);
+  assert([...defaults].join(',') === 'snapshot:s1', 'retention preview never preselects permanent recycle purges');
+  const lineageVisible = clientExports.__test.filterLineageForest?.([{
+    id: 'root', title: 'Root', children: [{ id: 'child', title: 'Child', children: [{ id: 'grandchild', title: 'Needle', children: [] }] }],
+  }], 'needle');
+  assert(lineageVisible?.[0]?.children?.[0]?.children?.[0]?.id === 'grandchild', 'lineage search preserves ancestors of a matching descendant');
+  const projectFiltered = clientExports.__test.filterLineageForest?.([{
+    id: 'source', title: 'Shared source', workspace: { id: 'ws-source', title: 'Shared' }, children: [
+      { id: 'alpha', title: 'Alpha chat', workspace: { id: 'ws-alpha', title: 'Project Alpha' }, children: [] },
+      { id: 'beta', title: 'Beta chat', workspace: { id: 'ws-beta', title: 'Project Beta' }, children: [] },
+    ],
+  }], '', 'ws-beta');
+  assert(JSON.stringify(projectFiltered?.map((node) => ({ id: node.id, children: node.children.map((child) => child.id) })))
+    === '[{"id":"source","children":["beta"]}]',
+  'lineage project filtering keeps the required ancestor path and removes branches from other projects');
+  const projectSearch = clientExports.__test.filterLineageForest?.([{
+    id: 'source', title: 'Shared source', workspace: { id: 'ws-source', title: 'Shared' }, children: [
+      { id: 'beta', title: 'Ordinary title', workspace: { id: 'ws-beta', title: 'Project Beta' }, children: [] },
+    ],
+  }], 'project beta');
+  assert(projectSearch?.[0]?.children?.[0]?.id === 'beta', 'lineage search matches project names while preserving their ancestor context');
+  const statusFiltered = clientExports.__test.filterLineageForest?.([{
+    id: 'source', title: 'Source', status: 'active', workspace: { id: 'ws-source', title: 'Shared' }, children: [
+      { id: 'archived', title: 'Archived chat', status: 'archived', workspace: { id: 'ws-one', title: 'Project One' }, children: [] },
+      { id: 'trash', title: 'Recycled chat', status: 'trash', workspace: { id: 'ws-two', title: 'Project Two' }, children: [] },
+    ],
+  }], '', 'all', 'trash');
+  assert(statusFiltered?.[0]?.id === 'source'
+    && statusFiltered[0].children.length === 1
+    && statusFiltered[0].children[0].id === 'trash',
+  'lineage status filtering keeps necessary source context and only matching managed chats');
+  let deepLineage = { id: 'deep-4999', title: 'Needle', children: [] };
+  for (let index = 4998; index >= 0; index -= 1) deepLineage = { id: `deep-${index}`, title: '', children: [deepLineage] };
+  const deepVisible = clientExports.__test.filterLineageForest?.([deepLineage], 'needle');
+  let deepCursor = deepVisible?.[0];
+  for (let index = 1; index < 5000; index += 1) deepCursor = deepCursor.children[0];
+  assert(deepCursor?.id === 'deep-4999', 'lineage client filtering handles the advertised maximum depth');
+
+  const fullLineageId = 'session-d81d9954-a56b-4e47-a4ee-2eb2b5a81712';
+  let copiedLineageId = null;
+  const lineageT = (key) => ({
+    'lineage.status.active': '来源会话',
+    'lineage.status.archived': '已归档',
+    'lineage.origin.session': '普通会话',
+    'lineage.origin.subagent': '子代理',
+    'lineage.untitled': '未命名会话',
+    'lineage.sourceUnavailable': '来源信息不可用',
+    'lineage.sourceContext': '来源于',
+    'lineage.contextOnly': '活动会话，仅用于解释关系',
+    'lineage.start': '起始会话',
+    'lineage.created': '创建于',
+    'lineage.project': '项目',
+    'lineage.delegation': '委派层级',
+    'lineage.noBranches': '无分支',
+    'lineage.copyId': '复制 ID',
+    'lineage.copiedId': '已复制',
+    'locale.intl': 'zh-CN',
+  })[key] ?? key;
+  const lineageRowTree = clientExports.__test.LineageTreeNodes?.({
+    nodes: [{
+      id: 'session-source-1234567890-abcdefgh', title: '来源会话', status: 'active', origin: null, delegationDepth: 0, createdAt: 1,
+      workspace: { id: 'ws-one', title: '项目一' },
+      children: [{ id: fullLineageId, title: null, status: 'archived', origin: 'subagent', delegationDepth: 1, createdAt: 2, workspace: { id: 'ws-one', title: '项目一' }, children: [] }],
+    }],
+    collapsed: new Set(),
+    onToggle: () => {},
+    onCopy: (id) => { copiedLineageId = id; },
+    copiedId: null,
+    t: lineageT,
+  });
+  const lineageRowElements = collectElements(lineageRowTree);
+  const lineageRows = lineageRowElements.filter((element) => element.type === 'div' && element.props?.className?.includes('dac-lineage-row'));
+  const lineageContexts = lineageRowElements.filter((element) => element.type === 'div' && element.props?.className === 'dac-lineage-context');
+  const lineagePrimaryLabels = lineageRowElements.filter((element) => element.type === 'strong').map(elementText);
+  const lineageStatus = lineageRowElements.find((element) => element.type === 'span' && element.props?.className?.includes('dac-lineage-archived'));
+  const lineageSourceContexts = lineageRowElements.filter((element) => element.props?.className === 'dac-lineage-source-context');
+  const lineageSources = lineageRowElements.filter((element) => element.props?.className === 'dac-lineage-source');
+  const lineageMetadata = lineageRowElements.find((element) => element.props?.className === 'dac-lineage-meta');
+  const lineageFooter = lineageRowElements.find((element) => element.props?.className === 'dac-lineage-footer');
+  const lineageCreated = lineageRowElements.find((element) => element.props?.className === 'dac-lineage-created');
+  const lineageIdTexts = lineageRowElements.filter((element) => element.type === 'small' && element.props?.className === 'dac-lineage-id');
+  const lineageCopy = lineageRowElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === `复制 ID ${fullLineageId}`);
+  const lineageText = elementText(lineageRowTree);
+  assert(!lineagePrimaryLabels.includes('来源会话') && lineagePrimaryLabels.includes('未命名会话')
+    && lineageContexts.length === 0
+    && lineageSourceContexts.some((element) => elementText(element).includes('来源于：来源会话'))
+    && !lineagePrimaryLabels.includes(fullLineageId),
+  'active ancestors render inside managed cards instead of occupying standalone relationship rows');
+  assert(lineageRowElements.filter((element) => element.props?.role === 'listitem').length === 1
+    && lineageRowElements.find((element) => element.props?.role === 'listitem')?.props?.['aria-level'] === 1,
+  'transparent source context does not leave an empty hierarchy level before a managed card');
+  assert(lineageIdTexts.length === 1 && lineageIdTexts.every((element) => element.props?.children !== element.props?.title)
+    && lineageIdTexts.some((element) => element.props?.title === fullLineageId && element.props?.children === 'session-d81d…b5a81712'),
+  'only managed relationship cards show a compact session ID while retaining the full ID on hover');
+  assert(lineageText.includes('来源于：来源会话') && !lineageText.includes('活动会话，仅用于解释关系')
+    && lineageText.includes('从「来源会话」分出')
+    && lineageText.includes('子代理 · 委派层级 1')
+    && lineageText.includes('项目：项目一')
+    && !lineageText.includes('· d0 ·'),
+  'relationship cards explain source, project, type, and delegation without developer shorthand');
+  assert(lineageRows.length === 1 && lineageRows[0].props.className.includes('dac-lineage-row-archived')
+    && lineageContexts.length === 0 && lineageSourceContexts.length === 1,
+  'fork source context stays inside the managed card instead of rendering a separate context strip');
+  assert(!elementText(lineageMetadata).includes('创建于')
+    && elementText(lineageCreated).startsWith('创建于 ')
+    && collectElements(lineageFooter).some((element) => element.props?.className === 'dac-lineage-id-actions'),
+  'managed relationship cards place creation time and copy-ID actions together in a dedicated footer row');
+  assert(lineageSources.every((element) => element.props.style?.overflowWrap === 'anywhere'),
+  'relationship source labels wrap long unbroken titles on narrow layouts');
+  assert(lineageStatus?.props.style?.borderRadius === '8px'
+    && lineageStatus?.props.style?.whiteSpace === 'nowrap'
+    && lineageStatus?.props.style?.flexShrink === 0,
+  'lineage status renders as a non-wrapping rounded rectangle instead of a pill');
+  lineageCopy?.props.onClick();
+  assert(lineageCopy?.props.children === '复制 ID' && copiedLineageId === fullLineageId,
+  'relationship row copies the exact full session ID from its compact display');
+
+  const connectorNodes = [{
+      id: 'root-connector', title: 'Root', status: 'archived', origin: null, children: [
+        { id: 'branch-a', title: 'Branch A', status: 'archived', origin: null, children: [
+          { id: 'leaf-a', title: 'Leaf A', status: 'archived', origin: null, children: [] },
+        ] },
+        { id: 'branch-b', title: 'Branch B', status: 'archived', origin: null, children: [] },
+      ],
+    }];
+  let toggledConnectorId = null;
+  const connectorTree = clientExports.__test.LineageTreeNodes?.({
+    nodes: connectorNodes,
+    collapsed: new Set(),
+    onToggle: (id) => { toggledConnectorId = id; },
+    t: lineageT,
+  });
+  const connectorElements = collectElements(connectorTree);
+  const connectorItems = connectorElements.filter((element) => element.props?.role === 'listitem');
+  const grandchildItem = connectorItems.find((element) => element.props?.['aria-level'] === 3);
+  const grandchildElements = collectElements(grandchildItem);
+  const continuingGuide = grandchildElements.find((element) => element.props?.className?.includes('dac-lineage-guide-continuing'));
+  const childJunctions = connectorItems
+    .filter((element) => element.props?.['aria-level'] === 2)
+    .flatMap((element) => collectElements(element))
+    .filter((element) => element.props?.className?.includes('dac-lineage-junction-child'));
+  const childGuideCounts = connectorItems
+    .filter((element) => element.props?.['aria-level'] === 2)
+    .map((element) => collectElements(element).filter((child) => child.props?.className?.split(' ').includes('dac-lineage-guide')).length);
+  const connectorToggles = connectorElements.filter((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle');
+  const connectorRails = connectorElements.filter((element) => element.props?.className === 'dac-lineage-rail');
+  const foldableRows = connectorElements.filter((element) => element.props?.className?.includes('dac-lineage-row-foldable'));
+  const expandedConnectorIcons = connectorToggles.map((button) => collectElements(button)
+    .find((element) => element.type === 'span' && element.props?.className?.includes('dac-chev'))?.props?.className);
+  assert(connectorItems.every((element) => element.props?.style?.marginLeft === undefined)
+    && continuingGuide !== undefined && childJunctions.length === 2,
+  'lineage hierarchy renders explicit continuing guides and child elbows instead of margin-only indentation');
+  assert(childGuideCounts.every((count) => count === 0), 'first-level branches connect directly to the root rail without an empty offset column');
+  assert(connectorToggles.length === 2
+    && connectorRails.every((rail) => !collectElements(rail).some((element) => element.type === 'button'))
+    && foldableRows.every((row) => collectElements(row).some((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle'))
+    && foldableRows.every((row) => row.props?.tabIndex === 0 && typeof row.props?.onClick === 'function')
+    && connectorToggles.every((button) => elementText(button) === ''
+      && typeof button.props?.['aria-expanded'] === 'boolean'
+      && collectElements(button).some((element) => element.type === 'svg'))
+    && expandedConnectorIcons.every((className) => className === 'dac-chev collapse'),
+  'foldable cards keep an upward accordion control inside the parent card instead of on the connector rail');
+  const rootFoldableRow = foldableRows.find((row) => elementText(row).includes('Root'));
+  const rootIdActions = collectElements(rootFoldableRow).find((element) => element.props?.className === 'dac-lineage-id-actions');
+  const rootIdRow = collectElements(rootIdActions).find((element) => element.props?.className === 'dac-lineage-id-row');
+  const rootToggleRow = collectElements(rootFoldableRow).find((element) => element.props?.className === 'dac-lineage-toggle-row');
+  const rootInlineToggle = collectElements(rootToggleRow).find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle');
+  assert(rootIdRow !== undefined && rootInlineToggle !== undefined && rootToggleRow !== undefined
+    && !collectElements(rootIdActions).some((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle'),
+    'accordion control occupies its own centered row below the compact ID and Copy ID row');
+  rootFoldableRow?.props.onClick();
+  assert(toggledConnectorId === 'root-connector', 'clicking a foldable card toggles its branch');
+  const rootToggleButton = connectorToggles[0];
+  let stoppedTogglePropagation = false;
+  rootToggleButton?.props.onClick({ stopPropagation: () => { stoppedTogglePropagation = true; } });
+  assert(stoppedTogglePropagation && toggledConnectorId === 'root-connector',
+    'the inline accordion control stops bubbling so one click toggles only once');
+  const collapsedConnectorTree = clientExports.__test.LineageTreeNodes?.({
+    nodes: connectorNodes,
+    collapsed: new Set(['root-connector']),
+    onToggle: () => {},
+    t: lineageT,
+  });
+  const collapsedRootToggle = collectElements(collapsedConnectorTree)
+    .find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle');
+  const collapsedRootIcon = collectElements(collapsedRootToggle)
+    .find((element) => element.type === 'span' && element.props?.className?.includes('dac-chev'));
+  assert(collapsedRootToggle?.props?.['aria-expanded'] === false && collapsedRootIcon?.props?.className === 'dac-chev open',
+    'collapsed parent cards expose a downward accordion control');
+
+  const deepRenderedTree = clientExports.__test.LineageTreeNodes?.({
+    nodes: deepVisible,
+    collapsed: new Set(),
+    onToggle: () => {},
+    t: lineageT,
+  });
+  const deepRenderedItems = deepRenderedTree?.props?.children ?? [];
+  const deepestRenderedElements = collectElements(deepRenderedItems.at(-1));
+  const deepestGuides = deepestRenderedElements.filter((element) => element.props?.className?.split(' ').includes('dac-lineage-guide'));
+  assert(deepRenderedItems.length === 5000
+    && deepRenderedItems.at(-1)?.props?.['aria-level'] === 5000
+    && deepestGuides.length === 12
+    && deepestRenderedElements.some((element) => element.props?.className === 'dac-lineage-guide-overflow'),
+  'deep lineage rendering stays iterative, preserves semantic depth, and caps visible guide columns at twelve');
+
+  const untitledParent = {
+    id: 'parent-without-a-readable-title-1234567890', title: null, status: 'active', origin: null, delegationDepth: 0, createdAt: 1,
+    children: [{ id: 'child-with-a-title', title: 'Readable child', status: 'archived', origin: null, delegationDepth: 0, createdAt: 2, children: [] }],
+  };
+  const zhUntitledSource = clientExports.__test.LineageTreeNodes?.({ nodes: [untitledParent], collapsed: new Set(), onToggle: () => {}, t: lineageT });
+  const englishLineageT = (key) => ({
+    'lineage.status.active': 'Source chat',
+    'lineage.status.archived': 'Archived',
+    'lineage.origin.session': 'Session',
+    'lineage.untitled': 'Untitled chat',
+    'lineage.sourceUnavailable': 'Source information unavailable',
+    'lineage.sourceContext': 'Source',
+    'lineage.contextOnly': 'Active chat, shown for relationship context only',
+    'lineage.start': 'Starting chat',
+    'lineage.created': 'Created',
+    'lineage.noBranches': 'No branches',
+    'lineage.copyId': 'Copy ID',
+    'locale.intl': 'en-US',
+  })[key] ?? key;
+  const enUntitledSource = clientExports.__test.LineageTreeNodes?.({ nodes: [untitledParent], collapsed: new Set(), onToggle: () => {}, t: englishLineageT });
+  const zhSourceLabels = collectElements(zhUntitledSource).filter((element) => element.props?.className === 'dac-lineage-source').map(elementText);
+  const enSourceLabels = collectElements(enUntitledSource).filter((element) => element.props?.className === 'dac-lineage-source').map(elementText);
+  assert(zhSourceLabels.includes('从「来源信息不可用」分出') && enSourceLabels.includes('Branched from "Source information unavailable"'),
+  'unavailable parent relationships use an explicit source-information fallback instead of inventing an untitled chat');
+
+  const snapshotRowsTree = clientExports.__test.SnapshotInsightRows?.({
+    snapshots: [
+      { snapshotId: 'snapshot-active', sessionId: 'session-a', status: 'ready', active: true, createdAt: '2026-08-25T00:00:00.000Z', totalBytes: 52 * 1024 },
+      { snapshotId: 'snapshot-history', sessionId: 'session-b', status: 'ready', active: false, createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 1024 * 1024 },
+    ],
+    sessions: [{ id: 'session-a', title: '发布计划' }, { id: 'session-b', title: null }],
+    t: (key) => ({
+      'insights.snapshot.active': '活动保护快照',
+      'insights.snapshot.history': '历史保护快照',
+      'insights.snapshot.degraded': '降级保护快照',
+      'insights.snapshot.original': '原会话',
+      'insights.snapshot.created': '创建时间',
+      'insights.snapshot.id': '快照 ID',
+      'locale.intl': 'zh-CN',
+    })[key] ?? key,
+  });
+  const snapshotRowsText = elementText(snapshotRowsTree);
+  assert(snapshotRowsText.includes('活动保护快照') && snapshotRowsText.includes('历史保护快照')
+    && snapshotRowsText.includes('原会话：发布计划') && snapshotRowsText.includes('原会话：session-b')
+    && snapshotRowsText.includes('创建时间：') && snapshotRowsText.includes('快照 ID：snapshot-active'),
+  'snapshot rows explain their state, original chat, creation time, and internal snapshot ID');
+
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
   assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.selectionIds }))) === JSON.stringify([
@@ -1429,16 +2000,48 @@ console.log('\n[11] client half — settings section registration');
   assert(zhDict['confirm.deleteOne.body'].includes('保护快照'), 'move-one confirmation explains recoverability');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
   assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
+  assert(zhDict['archiveNotice.title'] === '已归档的聊天'
+    && zhDict['archiveNotice.view'] === '查看'
+    && zhDict['archiveNotice.undo'] === '撤销',
+  'Chinese archive success notice actions are localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
-  assert(clientCalls.slotRegister.length === 1, `exactly one slot registration (got ${clientCalls.slotRegister.length})`);
-  const meta = clientCalls.slotRegister[0].meta;
+  assert(clientCalls.localeRegister[0].dicts.en['archiveNotice.title'] === 'Chat archived'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
+  'English archive success notice actions are localized');
+  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice (got ${clientCalls.slotRegister.length})`);
+  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
+  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
+  const meta = settingsRegistration?.meta;
   assert(meta.name === 'settings.section', 'registration targets settings.section');
   assert(meta.id === 'archived-chats', `section id is "archived-chats" (got "${meta.id}")`);
   assert(meta.order === 30, `section order is 30 (got ${meta.order})`);
   assert(typeof meta.label === 'function', 'nav label is a locale-bound function');
   assert(meta.label() === '已归档的聊天', `label() resolves to 已归档的聊天 (got "${meta.label()}")`);
   assert(meta.locale === 'settings.archived-chats', 'section carries its locale namespace');
-  assert(typeof clientCalls.slotRegister[0].component === 'function', 'section component is a function');
+  assert(typeof settingsRegistration?.component === 'function', 'section component is a function');
+  assert(overlayRegistration?.meta?.id === 'archived-chats-success'
+    && overlayRegistration?.meta?.locale === 'settings.archived-chats'
+    && typeof overlayRegistration?.component === 'function',
+  'archive success notice registers in the frame-wide shell overlay');
+  const noticeController = overlayRegistration?.meta?.inject?.().controller;
+  const savedNoticeFetch = globalThis.fetch;
+  let noticeUndoRequest = null;
+  globalThis.fetch = async (url, options = {}) => {
+    noticeUndoRequest = { url, options };
+    return { ok: true, status: 200, json: async () => ({ ok: true, archivedSessionIds: [] }) };
+  };
+  await clientServices.workspaces.archiveSession('session-notice');
+  assert(clientCalls.workspaceArchive.at(-1) === 'session-notice'
+    && noticeController?.getSnapshot()?.sessionId === 'session-notice',
+  'the real plugin lifecycle shows the shell notice only after a successful workspace archive');
+  await noticeController?.undo();
+  assert(noticeUndoRequest?.url === '/plugins/dsh-archived-chats/unarchive'
+    && noticeUndoRequest?.options?.headers?.['x-dsh-archived-chats'] === '1'
+    && noticeUndoRequest?.options?.body === '{"sessionId":"session-notice"}'
+    && clientCalls.workspaceRefresh === 1,
+  'shell notice Undo uses the guarded unarchive route and refreshes the workspace projection');
+  globalThis.fetch = savedNoticeFetch;
   const style = headChildren.find((c) => c.id === 'dsh-archived-chats-css');
   assert(style !== undefined, 'page stylesheet injected into <head>');
   assert(style?.attrs['data-plugin-css'] === 'dsh-archived-chats', 'stylesheet carries the data-plugin-css marker');
@@ -1470,6 +2073,10 @@ console.log('\n[11] client half — settings section registration');
     'legacy hard-coded destructive and success colors are absent',
   );
   assert(style?.textContent.includes('.dac-tag-editor') && style?.textContent.includes('.dac-tag-editor .dac-chip span{'), 'token tag editor has layout, focus, and long-label styling');
+  assert(style?.textContent.includes('.dac-archive-notice{')
+    && style?.textContent.includes('.dac-archive-notice-undo{')
+    && style?.textContent.includes('@media (max-width:640px){.dac-archive-notice{'),
+  'archive success notice has stable desktop and narrow-screen styling');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
@@ -1644,6 +2251,8 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
   const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
   assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
   assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '空间与策略'), 'archive manager exposes Storage & Retention tab');
+  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '来源与分支'), 'archive manager names the relationship view by its user-visible purpose');
 
   const moreTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '更多');
   moreTrigger?.props.onClick();
@@ -2628,6 +3237,7 @@ console.log('\n[11f] client half — recycle navigation and management');
   const savedFetch = globalThis.fetch;
   const requests = [];
   const archiveRows = [{ id: 'archive-a', title: 'Archived Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' }];
+  let lineagePayload = { roots: [], diagnostics: [], nodeCount: 0 };
   let recycleRows = [
     {
       sessionId: 'trash-a', state: 'trashed', trashedAt: '2026-08-24T01:02:03.000Z', title: 'Trash Alpha',
@@ -2640,6 +3250,19 @@ console.log('\n[11f] client half — recycle navigation and management');
     },
   ];
   const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  let storageInsightsPayload = {
+    summary: { sessionBytes: 3072, snapshotBytes: 3072, totalMeasuredBytes: 6144, duplicateSnapshotBytes: 0, sessionUnavailableCount: 0, degradedSnapshotCount: 0 },
+    sessions: [
+      { id: 'session-alpha', title: 'Alpha 归档', workspaceTitle: '项目一', scope: 'archive', status: 'ready', sizeBytes: 1024 },
+      { id: 'session-beta', title: 'Beta 回收', workspaceTitle: '项目二', scope: 'trash', status: 'ready', sizeBytes: 2048 },
+    ],
+    snapshots: [
+      { snapshotId: 'snapshot-active', sessionId: 'session-alpha', createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 1024, sessionBytes: 1024, attachmentCount: 0, status: 'ready', active: true },
+      { snapshotId: 'snapshot-history', sessionId: 'session-beta', createdAt: '2026-08-23T00:00:00.000Z', totalBytes: 2048, sessionBytes: 2048, attachmentCount: 0, status: 'ready', active: false },
+    ],
+    policy: { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null },
+    candidateSummary: { snapshotCount: 0, recycleCount: 0, projectedSnapshotBytes: 1024 },
+  };
   globalThis.fetch = async (url, options = {}) => {
     const path = String(url);
     requests.push({ path, options });
@@ -2660,6 +3283,8 @@ console.log('\n[11f] client half — recycle navigation and management');
       recycleRows = [];
       return responseFor({ purged, failed: [] });
     }
+    if (path.endsWith('/insights')) return responseFor(storageInsightsPayload);
+    if (path.endsWith('/lineage')) return responseFor(lineagePayload);
     if (path.endsWith('/trash')) return responseFor({ trashStatus: 'ready', summary: { total: recycleRows.length }, sessions: recycleRows });
     if (path.endsWith('/preview')) return responseFor({ session: { id: 'trash-a', title: 'Trash Alpha' }, messages: [], total: 0, nextOffset: null });
     return responseFor({});
@@ -2674,8 +3299,332 @@ console.log('\n[11f] client half — recycle navigation and management');
   harness.flushEffects();
   let elements = collectElements(tree);
   const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  assert(tabs.length === 2, 'archive manager renders Archived and Recycle Bin tabs');
-  assert(tabs[0]?.props['aria-selected'] === true && tabs[1]?.props['aria-selected'] === false, 'Archived is the default selected tab');
+  assert(tabs.length === 4, 'archive manager renders Archived, Recycle Bin, Storage, and Lineage tabs');
+  assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
+
+  const StorageRetentionPanel = clientExports.__test.StorageRetentionPanel;
+  if (typeof StorageRetentionPanel !== 'function') {
+    assert(false, 'client exposes the storage and retention panel behavior for verification');
+  } else {
+    const storageHarness = createHookHarness(StorageRetentionPanel);
+    storageHarness.render({ t });
+    storageHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let storageTree = storageHarness.render({ t });
+    let storageElements = collectElements(storageTree);
+    const storageText = elementText(storageTree);
+    const insightCards = storageElements.filter((element) => element.props?.className === 'dac-insights-card');
+    const insightDetailButtons = storageElements.filter((element) => element.props?.className === 'dac-insights-open');
+    assert(insightCards.length === 5
+      && insightCards.every((card) => card.props?.style?.textAlign === 'center' && card.props?.style?.alignItems === 'center'),
+      'storage summary cards center their labels, values, and detail actions');
+    assert(insightDetailButtons.length === 2
+      && insightDetailButtons.every((button) => button.props?.style?.alignSelf === 'center'),
+      'storage summary detail buttons are centered inside their cards');
+    assert(storageElements.some((element) => element.props?.role === 'note' && elementText(element).includes('归档列表为空')),
+      'storage view explains why retained snapshots can remain without archived chats');
+    assert(!storageText.includes('Alpha 归档') && !storageText.includes('snapshot-active')
+      && storageText.includes('保存策略不会删除任何数据'),
+      'storage view keeps unbounded directory and snapshot rows out of the policy layout');
+
+    const sessionDetailsButton = storageElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看会话目录明细');
+    const snapshotDetailsButton = storageElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看保护快照明细');
+    assert(sessionDetailsButton !== undefined && snapshotDetailsButton !== undefined,
+      'session and snapshot summary cards expose dedicated detail actions');
+
+    sessionDetailsButton?.props.onClick();
+    storageTree = storageHarness.render({ t });
+    let detailsElement = findComponentElement(storageTree, 'StorageDetailsDialog');
+    assert(detailsElement !== undefined, 'session directory details open in a dedicated dialog');
+    if (detailsElement !== undefined) {
+      const detailsHarness = createHookHarness(detailsElement.type);
+      let detailsTree = detailsHarness.render(detailsElement.props);
+      let detailsElements = collectElements(detailsTree);
+      const detailsDialog = detailsElements.find((element) => element.props?.role === 'dialog');
+      const detailsSearch = detailsElements.find((element) => element.type === 'input' && element.props?.type === 'search');
+      assert(detailsDialog?.props['aria-modal'] === 'true' && elementText(detailsDialog).includes('会话目录明细')
+        && elementText(detailsDialog).includes('Alpha 归档') && elementText(detailsDialog).includes('已归档')
+        && elementText(detailsDialog).includes('Beta 回收') && elementText(detailsDialog).includes('回收站'),
+      'session detail dialog localizes archive scope and renders every directory row');
+      detailsSearch?.props.onChange({ target: { value: 'Beta' } });
+      detailsTree = detailsHarness.render(detailsElement.props);
+      assert(!elementText(detailsTree).includes('Alpha 归档') && elementText(detailsTree).includes('Beta 回收'),
+        'session detail search filters by readable session data');
+
+      let closeCalls = 0;
+      let searchFocuses = 0;
+      let returnFocuses = 0;
+      const lifecycleHarness = createHookHarness(detailsElement.type);
+      const lifecycleProps = {
+        ...detailsElement.props,
+        onClose: () => { closeCalls += 1; },
+        returnFocus: { focus: () => { returnFocuses += 1; } },
+      };
+      const lifecycleTree = lifecycleHarness.render(lifecycleProps);
+      const lifecycleElements = collectElements(lifecycleTree);
+      const lifecycleDialog = lifecycleElements.find((element) => element.props?.role === 'dialog');
+      const lifecycleSearch = lifecycleElements.find((element) => element.type === 'input' && element.props?.type === 'search');
+      const searchControl = { focus: () => { searchFocuses += 1; documentMock.activeElement = searchControl; } };
+      const closeControl = { focus: () => { documentMock.activeElement = closeControl; } };
+      if (lifecycleDialog?.props.ref) lifecycleDialog.props.ref.current = { querySelectorAll: () => [searchControl, closeControl] };
+      if (lifecycleSearch?.props.ref) lifecycleSearch.props.ref.current = searchControl;
+      lifecycleHarness.flushEffects();
+      assert(searchFocuses === 1, 'storage detail dialog focuses its search field on mount');
+      documentMock.activeElement = closeControl;
+      let tabTrapped = false;
+      documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { tabTrapped = true; } });
+      assert(tabTrapped && documentMock.activeElement === searchControl, 'storage detail dialog traps forward tab focus');
+      let escapePrevented = false;
+      let escapeStopped = false;
+      let escapeImmediate = false;
+      documentListeners.get('keydown')?.({
+        key: 'Escape',
+        preventDefault: () => { escapePrevented = true; },
+        stopPropagation: () => { escapeStopped = true; },
+        stopImmediatePropagation: () => { escapeImmediate = true; },
+      });
+      assert(escapePrevented && escapeStopped && escapeImmediate && closeCalls === 1,
+        'storage detail Escape closes only the plugin dialog and isolates host listeners');
+      lifecycleHarness.unmount();
+      assert(returnFocuses === 1, 'storage detail dialog restores focus when it unmounts');
+      detailsHarness.unmount();
+      detailsElement.props.onClose();
+    }
+
+    storageTree = storageHarness.render({ t });
+    storageElements = collectElements(storageTree);
+    storageElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看保护快照明细')?.props.onClick();
+    storageTree = storageHarness.render({ t });
+    detailsElement = findComponentElement(storageTree, 'StorageDetailsDialog');
+    assert(detailsElement !== undefined, 'snapshot details open in the same searchable dialog pattern');
+    if (detailsElement !== undefined) {
+      const snapshotHarness = createHookHarness(detailsElement.type);
+      let snapshotTree = snapshotHarness.render(detailsElement.props);
+      let snapshotElements = collectElements(snapshotTree);
+      const snapshotSearch = snapshotElements.find((element) => element.type === 'input' && element.props?.type === 'search');
+      assert(elementText(snapshotTree).includes('回收站使用中的恢复快照')
+        && elementText(snapshotTree).includes('已保留的恢复快照'),
+      'snapshot detail dialog explains active and retained recovery states');
+      snapshotSearch?.props.onChange({ target: { value: 'snapshot-history' } });
+      snapshotTree = snapshotHarness.render(detailsElement.props);
+      assert(!elementText(snapshotTree).includes('snapshot-active') && elementText(snapshotTree).includes('snapshot-history'),
+        'snapshot detail search filters by snapshot identity');
+      snapshotHarness.unmount();
+    }
+    storageHarness.unmount();
+
+    storageInsightsPayload = {
+      ...storageInsightsPayload,
+      summary: { ...storageInsightsPayload.summary, sessionBytes: 0, snapshotBytes: 0 },
+      sessions: [],
+      snapshots: [],
+    };
+    const emptyStorageHarness = createHookHarness(StorageRetentionPanel);
+    emptyStorageHarness.render({ t });
+    emptyStorageHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const emptyStorageTree = emptyStorageHarness.render({ t });
+    const emptyDetailButtons = collectElements(emptyStorageTree).filter((element) => element.type === 'button'
+      && ['查看会话目录明细', '查看保护快照明细'].includes(element.props?.['aria-label']));
+    assert(emptyDetailButtons.length === 2 && emptyDetailButtons.every((button) => button.props.disabled === true),
+      'zero-row storage summary cards disable their detail actions');
+    emptyStorageHarness.unmount();
+  }
+
+  const RelationshipsPanel = clientExports.__test.ArchiveRelationshipsPanel;
+  if (typeof RelationshipsPanel !== 'function') {
+    assert(false, 'client exposes the origins and branches panel behavior for verification');
+  } else {
+    const relationshipsHarness = createHookHarness(RelationshipsPanel);
+    relationshipsHarness.render({ t });
+    relationshipsHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const relationshipsTree = relationshipsHarness.render({ t });
+    const relationshipElements = collectElements(relationshipsTree);
+    assert(relationshipElements.some((element) => element.props?.role === 'note' && elementText(element).includes('不受本插件管理')),
+      'origins and branches view explains that relationship context is not managed');
+    assert(elementText(relationshipsTree).includes('暂无已归档或回收站会话的来源与分支'),
+      'origins and branches view has a scoped empty state');
+    relationshipsHarness.unmount();
+
+    const diagnosticSessionId = 'diagnostic-session-without-a-title-1234567890';
+    lineagePayload = {
+      roots: [{
+        id: diagnosticSessionId, parentSession: null, seedLength: null, origin: null, delegationDepth: 0,
+        title: null, createdAt: null, workspace: { id: null, title: null }, status: 'archived', children: [],
+      }],
+      diagnostics: [{ code: 'missing-parent', sessionId: diagnosticSessionId, relatedId: 'missing-parent-id' }],
+      nodeCount: 1,
+    };
+    const englishRelationshipsT = (key) => ({
+      'lineage.loading': 'Loading origins and branches…',
+      'lineage.error': 'Origins and branches are unavailable',
+      'lineage.scopeNote': 'Relationship context is not managed.',
+      'lineage.search': 'Search titles or session IDs',
+      'lineage.untitled': 'Untitled chat',
+      'lineage.diagnostic.missing-parent': 'Missing parent',
+      'state.retry': 'Retry',
+    })[key] ?? key;
+    for (const [localeName, translate, expected] of [
+      ['Chinese', t, '父会话缺失: 未命名会话'],
+      ['English', englishRelationshipsT, 'Missing parent: Untitled chat'],
+    ]) {
+      const diagnosticHarness = createHookHarness(RelationshipsPanel);
+      diagnosticHarness.render({ t: translate });
+      diagnosticHarness.flushEffects();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const diagnosticTree = diagnosticHarness.render({ t: translate });
+      const diagnosticText = elementText(diagnosticTree);
+      assert(diagnosticText.includes(expected) && !diagnosticText.includes(diagnosticSessionId),
+        `${localeName} relationship diagnostics use readable fallback titles instead of full session IDs`);
+      diagnosticHarness.unmount();
+    }
+
+    lineagePayload = {
+      roots: [{
+        id: 'leaf-source', title: 'Leaf source', status: 'active', origin: null, delegationDepth: 0, createdAt: 1,
+        workspace: { id: 'ws-leaf', title: 'Leaf project' }, children: [
+          { id: 'leaf-managed', title: 'Managed leaf', status: 'archived', origin: null, delegationDepth: 0, createdAt: 2, workspace: { id: 'ws-leaf', title: 'Leaf project' }, children: [] },
+        ],
+      }],
+      diagnostics: [],
+      nodeCount: 2,
+    };
+    const leafRelationshipsHarness = createHookHarness(RelationshipsPanel);
+    leafRelationshipsHarness.render({ t });
+    leafRelationshipsHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const leafRelationshipsTree = leafRelationshipsHarness.render({ t });
+    const leafRelationshipElements = collectElements(leafRelationshipsTree);
+    const leafFilterActions = leafRelationshipElements.find((element) => element.props?.className === 'dac-lineage-filter-actions');
+    const leafFilterWrappers = collectElements(leafFilterActions).filter((element) => element.props?.className?.includes('dac-select-wrap'));
+    const leafFilterSelects = collectElements(leafFilterActions).filter((element) => element.type === 'select');
+    const leafFold = leafRelationshipElements.find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-fold');
+    const leafFoldIcon = collectElements(leafFold)
+      .find((element) => element.type === 'span' && element.props?.className?.includes('dac-chev'));
+    assert(leafFilterSelects.length === 2
+      && leafFilterWrappers.every((element) => element.props?.className === 'dac-select-wrap dac-select-wrap-fill')
+      && leafFilterSelects.every((element) => element.props?.className === 'dac-select dac-select-fill'),
+      'lineage project and status filters fill their right-aligned wrappers so each chevron stays inside its control');
+    assert(leafFold?.props?.disabled === true && elementText(leafFold) === '全部展开' && leafFoldIcon?.props?.className === 'dac-chev open',
+      'leaf-only lineage still shows a disabled dynamic expand control');
+    leafRelationshipsHarness.unmount();
+
+    lineagePayload = {
+      roots: [{
+        id: 'source-root', title: 'Source root', status: 'active', origin: null, delegationDepth: 0, createdAt: 1,
+        workspace: { id: 'ws-source', title: 'Shared sources' }, children: [
+          {
+            id: 'alpha-branch', title: 'Alpha branch', status: 'archived', origin: null, delegationDepth: 0, createdAt: 2,
+            workspace: { id: 'ws-alpha', title: 'Project Alpha' }, children: [
+              { id: 'alpha-needle', title: 'Needle chat', status: 'archived', origin: null, delegationDepth: 0, createdAt: 3, workspace: { id: 'ws-alpha', title: 'Project Alpha' }, children: [] },
+            ],
+          },
+          { id: 'beta-branch', title: 'Beta branch', status: 'trash', origin: null, delegationDepth: 0, createdAt: 4, workspace: { id: 'ws-beta', title: 'Project Beta' }, children: [] },
+        ],
+      }],
+      diagnostics: [],
+      nodeCount: 4,
+    };
+    const richRelationshipsHarness = createHookHarness(RelationshipsPanel);
+    richRelationshipsHarness.render({ t });
+    richRelationshipsHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let richRelationshipsTree = richRelationshipsHarness.render({ t });
+    let richRelationshipElements = collectElements(richRelationshipsTree);
+    const projectSelect = richRelationshipElements.find((element) => element.type === 'select' && element.props?.['aria-label'] === '筛选项目');
+    const statusSelect = richRelationshipElements.find((element) => element.type === 'select' && element.props?.['aria-label'] === '筛选状态');
+    let foldAll = richRelationshipElements.find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-fold');
+    const initialRelationshipItems = richRelationshipElements.filter((element) => element.props?.role === 'listitem');
+    assert(richRelationshipElements.some((element) => element.props?.role === 'list')
+      && !richRelationshipElements.some((element) => ['tree', 'treeitem'].includes(element.props?.role)),
+    'relationship hierarchy uses native list and disclosure semantics instead of an incomplete ARIA tree widget');
+    assert(initialRelationshipItems.length === 3
+      && elementText(projectSelect).includes('Project Alpha') && elementText(projectSelect).includes('Project Beta')
+      && statusSelect !== undefined && elementText(richRelationshipsTree).includes('3 个已管理会话'),
+    'small lineage trees hide standalone source rows while exposing project, status, and managed-result controls');
+    const initialFoldIcon = collectElements(foldAll)
+      .find((element) => element.type === 'span' && element.props?.className?.includes('dac-chev'));
+    assert(richRelationshipElements.filter((element) => element.type === 'button' && element.props?.className === 'dac-lineage-fold').length === 1
+      && elementText(foldAll) === '全部折叠' && initialFoldIcon?.props?.className === 'dac-chev collapse',
+    'lineage toolbar exposes one dynamic fold control whose collapse action points up');
+
+    foldAll?.props.onClick();
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    richRelationshipElements = collectElements(richRelationshipsTree);
+    assert(richRelationshipElements.filter((element) => element.props?.role === 'listitem').length === 2,
+      'collapse all keeps managed top-level cards visible without restoring a standalone source row');
+    foldAll = richRelationshipElements.find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-fold');
+    const collapsedFoldIcon = collectElements(foldAll)
+      .find((element) => element.type === 'span' && element.props?.className?.includes('dac-chev'));
+    assert(elementText(foldAll) === '全部展开' && collapsedFoldIcon?.props?.className === 'dac-chev open',
+      'dynamic fold control switches to an expand action with a downward arrow');
+    foldAll?.props.onClick();
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    richRelationshipElements = collectElements(richRelationshipsTree);
+    assert(richRelationshipElements.filter((element) => element.props?.role === 'listitem').length === 3,
+      'expand all restores every relationship node');
+
+    statusSelect?.props.onChange({ target: { value: 'trash' } });
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    richRelationshipElements = collectElements(richRelationshipsTree);
+    assert(elementText(richRelationshipsTree).includes('Source root') && elementText(richRelationshipsTree).includes('Beta branch')
+      && !elementText(richRelationshipsTree).includes('Alpha branch') && elementText(richRelationshipsTree).includes('1 个已管理会话'),
+    'status filter keeps necessary source context while showing only matching managed cards');
+    statusSelect?.props.onChange({ target: { value: 'all' } });
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    richRelationshipElements = collectElements(richRelationshipsTree);
+
+    const rootToggle = richRelationshipElements.find((element) => element.type === 'button' && element.props?.className === 'dac-lineage-toggle');
+    rootToggle?.props.onClick();
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    richRelationshipElements = collectElements(richRelationshipsTree);
+    const relationshipSearch = richRelationshipElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索会话或项目');
+    assert(richRelationshipElements.filter((element) => element.props?.role === 'listitem').length === 2,
+      'individual branch collapse hides its descendants');
+    relationshipSearch?.props.onChange({ target: { value: 'Needle' } });
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    const searchRelationshipElements = collectElements(richRelationshipsTree);
+    const searchFoldControls = searchRelationshipElements.filter((element) => element.type === 'button'
+      && ['dac-lineage-toggle', 'dac-lineage-fold'].includes(element.props?.className));
+    assert(elementText(richRelationshipsTree).includes('Needle chat'), 'lineage search automatically reveals a matching path inside a collapsed branch');
+    assert(searchFoldControls.length > 0 && searchFoldControls.every((button) => button.props.disabled === true),
+      'search-expanded relationship paths disable fold controls that cannot visibly take effect');
+    relationshipSearch?.props.onChange({ target: { value: '' } });
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    assert(!elementText(richRelationshipsTree).includes('Needle chat'), 'clearing lineage search restores the user\'s previous collapsed state');
+
+    const expandAfterSearch = collectElements(richRelationshipsTree).find((element) => element.type === 'button' && elementText(element) === '全部展开');
+    expandAfterSearch?.props.onClick();
+    projectSelect?.props.onChange({ target: { value: 'ws-beta' } });
+    richRelationshipsTree = richRelationshipsHarness.render({ t });
+    const projectFilteredText = elementText(richRelationshipsTree);
+    assert(projectFilteredText.includes('Source root') && projectFilteredText.includes('Beta branch')
+      && !projectFilteredText.includes('Alpha branch') && !projectFilteredText.includes('Needle chat'),
+    'lineage project selection keeps ancestor context without duplicating unrelated project branches');
+    richRelationshipsHarness.unmount();
+
+    lineagePayload = {
+      roots: [{
+        id: 'large-root', title: 'Large root', status: 'archived', origin: null, workspace: { id: 'ws-large', title: 'Large project' },
+        children: Array.from({ length: 50 }, (_, index) => ({
+          id: `large-child-${index}`, title: `Large child ${index}`, status: 'archived', origin: null,
+          workspace: { id: 'ws-large', title: 'Large project' }, children: [],
+        })),
+      }],
+      diagnostics: [],
+      nodeCount: 51,
+    };
+    const largeRelationshipsHarness = createHookHarness(RelationshipsPanel);
+    largeRelationshipsHarness.render({ t });
+    largeRelationshipsHarness.flushEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const largeRelationshipsTree = largeRelationshipsHarness.render({ t });
+    assert(collectElements(largeRelationshipsTree).filter((element) => element.props?.role === 'listitem').length === 1,
+      'lineage trees over fifty nodes default their roots to collapsed');
+    largeRelationshipsHarness.unmount();
+  }
+
   tabs[1]?.props.onClick();
 
   tree = harness.render({ t, refreshSidebar: () => {} });

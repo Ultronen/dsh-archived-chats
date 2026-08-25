@@ -98,6 +98,42 @@ test('captures and validates one attachment-free snapshot atomically', async () 
   assert.equal((await stat(join(root, SNAPSHOT_ID, 'session.json'))).mode & 0o777, 0o600);
 });
 
+test('inventory verifies published snapshots without returning attachment bytes', async () => {
+  const ids = [nextId(1), nextId(2)];
+  const ref = image();
+  const { store } = await fixture({
+    uuid: () => ids.shift(),
+    events: [{ seq: 1, type: 'assistant/message', data: { image: ref } }],
+    readImage: async (storedRef) => ({ ref: storedRef, data: new Uint8Array([1, 2, 3, 4]) }),
+  });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+
+  const result = await store.inventory();
+  assert.equal(result.valid.length, 2);
+  assert.deepEqual(Object.keys(result.valid[0]).sort(), [
+    'attachmentCount', 'attachments', 'createdAt', 'sessionBytes',
+    'sessionId', 'snapshotId', 'totalBytes',
+  ]);
+  assert.deepEqual(Object.keys(result.valid[0].attachments[0]).sort(), ['bytes', 'sha256']);
+  assert.equal(Object.hasOwn(result.valid[0].attachments[0], 'data'), false);
+});
+
+test('inventory excludes a snapshot whose stored attachment no longer matches its digest', async () => {
+  const ref = image();
+  const { root, store } = await fixture({
+    events: [{ seq: 1, type: 'assistant/message', data: { image: ref } }],
+    readImage: async (storedRef) => ({ ref: storedRef, data: new Uint8Array([1, 2, 3, 4]) }),
+  });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  const attachment = (await readdir(join(root, SNAPSHOT_ID, 'attachments')))[0];
+  await writeFile(join(root, SNAPSHOT_ID, 'attachments', attachment), new Uint8Array([4, 3, 2, 1]));
+
+  const result = await store.inventory();
+  assert.deepEqual(result.valid, []);
+  assert.deepEqual(result.degraded, [{ snapshotId: SNAPSHOT_ID, code: 'snapshot-hash-mismatch' }]);
+});
+
 test('atomic publication never replaces a pre-existing empty snapshot directory', async () => {
   const { root, store } = await fixture();
   await mkdir(join(root, SNAPSHOT_ID), { recursive: true });

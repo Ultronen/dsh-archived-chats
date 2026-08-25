@@ -129,7 +129,9 @@ function recycleFixture(options = {}) {
     async remove(sessionId) { const ids = Array.isArray(sessionId) ? sessionId : [sessionId]; const removed = []; for (const key of ids) if (records.delete(key)) { calls.push(`trash:remove:${key}`); removed.push(key); } return removed; },
     async summary() { return { count: records.size, snapshotBytes: [...records.values()].reduce((sum, record) => sum + record.snapshotBytes, 0), degradedCount: 0, purgePendingCount: 0 }; },
   };
-  const snapshots = new Map(options.trashed ? [[id, { snapshotId: SNAPSHOT_ID, sessionId: id, createdAt: NOW }]] : []);
+  const snapshots = new Map(options.priorSnapshotId
+    ? [[id, { snapshotId: options.priorSnapshotId, sessionId: id, createdAt: '2026-08-23T00:00:00.000Z' }]]
+    : options.trashed ? [[id, { snapshotId: SNAPSHOT_ID, sessionId: id, createdAt: NOW }]] : []);
   let captures = 0;
   let releaseCapture;
   let markCaptureStarted;
@@ -231,6 +233,13 @@ test('cold move snapshots before catalog commit and keeps authoritative state', 
   assert.equal(fixture.persistence.ids.has('session-a'), true);
   assert.equal(fixture.workspace.sessionIds.has('session-a'), true);
   assert.equal(fixture.registry.archivedSessionIds.includes('session-a'), true);
+});
+
+test('a new recycle cycle keeps the prior protection snapshot as history', async () => {
+  const priorSnapshotId = '00000000-0000-4000-8000-000000000009';
+  const fixture = recycleFixture({ priorSnapshotId });
+  assert.deepEqual(await fixture.service.move(['session-a']), { trashed: ['session-a'], failed: [] });
+  assert.equal(fixture.calls.includes(`snapshot:remove:${priorSnapshotId}`), false);
 });
 
 test('intact-original undo removes only marker and writes no persistence', async () => {
