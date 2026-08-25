@@ -1553,6 +1553,44 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(interceptedWorkspaces.archiveSession === originalArchiveSession,
     'archive notice interceptor restores the original DSH method when the plugin unloads');
 
+  const captureOrder = [];
+  const captureTimers = [];
+  let failHistoryCapture = false;
+  const captureNotice = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => { captureTimers.push({ callback, delay }); return captureTimers.length; },
+    cancel: () => {},
+    capture: async (sessionId) => {
+      captureOrder.push(`capture:${sessionId}`);
+      if (failHistoryCapture) throw new Error('history busy');
+      return true;
+    },
+  });
+  const captureWorkspaces = {
+    archiveSession: async (sessionId) => { captureOrder.push(`archive:${sessionId}`); return `archived:${sessionId}`; },
+  };
+  clientExports.__test.installArchiveNoticeInterceptor?.(captureWorkspaces, captureNotice);
+  const capturedArchiveResult = await captureWorkspaces.archiveSession('session-captured');
+  await Promise.resolve();
+  assert(capturedArchiveResult === 'archived:session-captured'
+    && captureOrder.join(',') === 'archive:session-captured,capture:session-captured'
+    && captureNotice?.getSnapshot()?.captureStatus === 'saved'
+    && captureTimers.length === 1,
+  'successful archive captures history after Host success and arms dismissal only after save');
+
+  captureNotice?.dismiss();
+  failHistoryCapture = true;
+  await captureWorkspaces.archiveSession('session-capture-retry');
+  await Promise.resolve();
+  assert(captureNotice?.getSnapshot()?.captureStatus === 'error' && captureTimers.length === 1,
+    'history capture failure keeps successful archive visible without arming dismissal');
+  failHistoryCapture = false;
+  assert(await captureNotice?.retryCapture() === true
+    && captureOrder.at(-1) === 'capture:session-capture-retry'
+    && captureNotice?.getSnapshot()?.captureStatus === 'saved'
+    && captureTimers.length === 2,
+  'history capture retry targets the archived session and restores normal dismissal');
+
   let settingsOpen = false;
   let settingsTriggerClicks = 0;
   let archiveNavClicks = 0;
@@ -1643,6 +1681,59 @@ console.log('\n[10b] client model — sorting and visible selection');
   archiveOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: overlayController, t: overlayT });
   collectElements(archiveOverlayTree).find((element) => element.type === 'button' && element.props?.['aria-label'] === '关闭归档提示')?.props.onClick();
   assert(overlayController?.getSnapshot() === null, 'archive success overlay close action dismisses immediately');
+
+  const captureOverlayTimers = [];
+  let captureOverlayShouldFail = true;
+  let captureOverlayCalls = 0;
+  const captureOverlayController = clientExports.__test.createArchiveNoticeController?.({
+    durationMs: 3000,
+    schedule: (callback, delay) => { captureOverlayTimers.push({ callback, delay }); return captureOverlayTimers.length; },
+    cancel: () => {},
+    capture: async () => {
+      captureOverlayCalls += 1;
+      if (captureOverlayShouldFail) throw new Error('history busy');
+      return true;
+    },
+  });
+  const captureOverlayT = (key) => ({
+    'archiveNotice.title': '已归档的聊天',
+    'archiveNotice.captureSaving': '已归档，正在保存历史版本',
+    'archiveNotice.captureSaved': '已归档，历史版本已保存',
+    'archiveNotice.captureError': '已归档，但历史版本未保存',
+    'archiveNotice.captureRetry': '重试保存',
+    'archiveNotice.view': '查看',
+    'archiveNotice.undo': '撤销',
+    'archiveNotice.close': '关闭归档提示',
+  })[key] ?? key;
+  captureOverlayController?.show('session-overlay-capture');
+  let captureOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: captureOverlayController, t: captureOverlayT });
+  let captureOverlayElements = collectElements(captureOverlayTree);
+  assert(captureOverlayTree?.props?.['aria-busy'] === true
+    && captureOverlayElements.some((element) => element.props?.role === 'status'
+      && elementText(element) === '已归档，正在保存历史版本')
+    && captureOverlayTimers.length === 0,
+  'archive notice announces pending history capture and keeps dismissal paused');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  captureOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: captureOverlayController, t: captureOverlayT });
+  captureOverlayElements = collectElements(captureOverlayTree);
+  const captureRetryButton = captureOverlayElements.find((element) => element.type === 'button'
+    && elementText(element) === '重试保存');
+  assert(captureOverlayTree?.props?.className.includes('dac-archive-notice-error')
+    && captureOverlayElements.some((element) => element.props?.role === 'status'
+      && elementText(element) === '已归档，但历史版本未保存')
+    && captureRetryButton?.props?.autoFocus === true
+    && captureOverlayTimers.length === 0,
+  'archive notice exposes a focused retry when history capture fails without dismissing archive success');
+  captureOverlayShouldFail = false;
+  captureRetryButton?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  captureOverlayTree = clientExports.__test.ArchiveNoticeOverlay?.({ controller: captureOverlayController, t: captureOverlayT });
+  captureOverlayElements = collectElements(captureOverlayTree);
+  assert(captureOverlayCalls === 2
+    && captureOverlayElements.some((element) => element.props?.role === 'status'
+      && elementText(element) === '已归档，历史版本已保存')
+    && captureOverlayTimers.length === 1,
+  'archive notice retry saves the history version and restores normal dismissal');
   assert(
     JSON.stringify(clientExports.__test.editIconSpec) === JSON.stringify({
       size: 16,
@@ -2083,16 +2174,24 @@ console.log('\n[11] client half — settings section registration');
   assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
   assert(zhDict['archiveNotice.title'] === '已归档的聊天'
     && zhDict['archiveNotice.view'] === '查看'
-    && zhDict['archiveNotice.undo'] === '撤销',
-  'Chinese archive success notice actions are localized');
+    && zhDict['archiveNotice.undo'] === '撤销'
+    && zhDict['archiveNotice.captureSaving'] === '已归档，正在保存历史版本'
+    && zhDict['archiveNotice.captureSaved'] === '已归档，历史版本已保存'
+    && zhDict['archiveNotice.captureError'] === '已归档，但历史版本未保存'
+    && zhDict['archiveNotice.captureRetry'] === '重试保存',
+  'Chinese archive success and history-capture notice copy is localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
   assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
     && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
   'English session archive label and page title are localized');
   assert(clientCalls.localeRegister[0].dicts.en['archiveNotice.title'] === 'Chat archived'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
-    && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
-  'English archive success notice actions are localized');
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureSaving'] === 'Archived, saving history version'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureSaved'] === 'Archived, history version saved'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureError'] === 'Archived, but history version was not saved'
+    && clientCalls.localeRegister[0].dicts.en['archiveNotice.captureRetry'] === 'Retry save',
+  'English archive success and history-capture notice copy is localized');
   assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice (got ${clientCalls.slotRegister.length})`);
   const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
   const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
@@ -2159,8 +2258,10 @@ console.log('\n[11] client half — settings section registration');
   assert(style?.textContent.includes('.dac-tag-editor') && style?.textContent.includes('.dac-tag-editor .dac-chip span{'), 'token tag editor has layout, focus, and long-label styling');
   assert(style?.textContent.includes('.dac-archive-notice{')
     && style?.textContent.includes('.dac-archive-notice-undo{')
-    && style?.textContent.includes('@media (max-width:640px){.dac-archive-notice{'),
-  'archive success notice has stable desktop and narrow-screen styling');
+    && style?.textContent.includes('.dac-archive-notice-actions{')
+    && style?.textContent.includes('@media (max-width:640px){.dac-archive-notice{')
+    && style?.textContent.includes('.dac-archive-notice-actions{flex-wrap:wrap;justify-content:flex-end}'),
+  'archive success notice has stable desktop and wrapping narrow-screen styling');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
 }
 
