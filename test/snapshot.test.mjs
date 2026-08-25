@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, utimes, writeFil
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { SNAPSHOT_LIMITS, SnapshotError, collectImageReferences, createSnapshotStore } from '../lib/snapshot.js';
+import { HISTORY_SNAPSHOT_LIMIT, SNAPSHOT_LIMITS, SnapshotError, collectImageReferences, createSnapshotStore } from '../lib/snapshot.js';
 
 const SNAPSHOT_ID = '00000000-0000-4000-8000-000000000001';
 const nextId = (suffix = 1) => `00000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
@@ -117,6 +117,91 @@ test('inventory verifies published snapshots without returning attachment bytes'
   ]);
   assert.deepEqual(Object.keys(result.valid[0].attachments[0]).sort(), ['bytes', 'sha256']);
   assert.equal(Object.hasOwn(result.valid[0].attachments[0], 'data'), false);
+});
+
+test('history inspection exposes a safe cloned descriptor and finds an exact revision', async () => {
+  const archived = {
+    ...archive,
+    workspace: { id: 'workspace-a', title: 'Workspace A', path: '/private/project-a' },
+    tags: ['important'],
+    note: 'private note',
+  };
+  const { store } = await fixture({ revisions: ['rev-a', 'rev-a'] });
+  const saved = await store.capture({ sessionId: 'session-a', archive: archived, liveDisposition: 'parked' });
+
+  const details = await store.inspectHistory(saved.snapshotId);
+  assert.deepEqual(details, {
+    snapshotId: SNAPSHOT_ID,
+    sessionId: 'session-a',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    sourceRevision: 'rev-a',
+    totalBytes: saved.bytes,
+    sessionBytes: saved.bytes,
+    attachmentCount: 0,
+    archive: {
+      title: 'Alpha',
+      createdAt: null,
+      origin: null,
+      workspace: { id: 'workspace-a', title: 'Workspace A' },
+      tags: ['important'],
+      note: 'private note',
+      metadataUpdatedAt: null,
+    },
+  });
+  details.archive.tags.push('mutated');
+  assert.deepEqual((await store.inspectHistory(saved.snapshotId)).archive.tags, ['important']);
+  assert.equal(JSON.stringify(details).includes('/private/project-a'), false);
+  assert.equal((await store.findRevision('session-a', 'rev-a')).snapshotId, SNAPSHOT_ID);
+  assert.equal(await store.findRevision('session-a', 'rev-missing'), null);
+  assert.equal(await store.findRevision('session-a', null), null);
+});
+
+test('history page projects bounded messages and image reads stay snapshot-scoped', async () => {
+  const ref = image();
+  const events = [{
+    seq: 1,
+    time: 1001,
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: {
+      id: 'user-1',
+      role: 'user',
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: 'inspect this' }, { type: 'image', attachment: ref }],
+    },
+  }];
+  const expectedBytes = new Uint8Array([1, 2, 3, 4]);
+  const { store } = await fixture({
+    events,
+    readImage: async (storedRef) => ({ ref: storedRef, data: expectedBytes }),
+  });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+
+  const page = await store.readHistoryPage(SNAPSHOT_ID, { offset: 0, limit: 20 });
+  assert.equal(page.sessionId, 'session-a');
+  assert.equal(page.snapshotId, SNAPSHOT_ID);
+  assert.equal(page.messages[0].role, 'user');
+  assert.equal(page.messages[0].segments[1].attachment.attachmentId, 'image-a');
+  assert.equal(page.nextOffset, null);
+  assert.equal('searchable' in page.messages[0], false);
+
+  const loaded = await store.readHistoryImage(SNAPSHOT_ID, ref, new AbortController().signal);
+  assert.deepEqual(loaded.data, expectedBytes);
+  assert.equal(loaded.mediaType, 'image/png');
+  assert.equal(loaded.name, 'a.png');
+  await assert.rejects(
+    store.readHistoryImage(SNAPSHOT_ID, { ...ref, attachmentId: 'other' }, new AbortController().signal),
+    (error) => error.code === 'snapshot-image-not-found' && error.status === 404,
+  );
+});
+
+test('history revision lookup fails closed above the published snapshot bound', async () => {
+  const { root, store } = await fixture();
+  await Promise.all(Array.from({ length: HISTORY_SNAPSHOT_LIMIT + 1 }, (_, index) => mkdir(join(root, nextId(index + 1)))));
+  await assert.rejects(
+    store.findRevision('session-a', 'rev-a'),
+    (error) => error.code === 'history-limit-exceeded' && error.status === 413,
+  );
 });
 
 test('inventory excludes a snapshot whose stored attachment no longer matches its digest', async () => {
