@@ -1,5 +1,5 @@
 /**
- * Browser client entry — the Archived Chats settings section. It keeps the
+ * Browser client entry — the Session Archive settings section. It keeps the
  * existing searchable archive manager and adds Archived, Recycle Bin, Storage
  * & Retention, and Origins & Branches views. Removing an archived chat from
  * this plugin moves it to recoverable trash and

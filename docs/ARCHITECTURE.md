@@ -9,7 +9,7 @@
 插件由 Host 服务层和浏览器客户端两部分组成：
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
-- 浏览器客户端位于 lib/client.js，通过 settings.section 注册「已归档的聊天」设置页，负责展示状态和发起操作。
+- 浏览器客户端位于 lib/client.js，通过 settings.section 注册「会话档案」设置页，负责展示状态和发起操作。
 - 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js 和 lib/lineage.js 中。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证保护快照，lib/recycle.js 组合回收生命周期。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。

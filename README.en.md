@@ -13,7 +13,7 @@
 
 A local archived-chat manager for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): search and preview complete conversations, back up and restore sessions, and safely manage history with an undoable Recycle Bin, recovery snapshots, retention policies, and Origins & Branches.
 
-Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds an **Archived Chats** page under Settings where every archived session is visible, searchable, and manageable.
+Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds a **Session Archive** page under Settings where every archived session is visible, searchable, and manageable.
 
 [Plugin market](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [Releases](https://github.com/Ultronen/dsh-archived-chats/releases) · [Questions and feedback](https://github.com/Ultronen/dsh-archived-chats/discussions) · [Private vulnerability reporting](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
 
@@ -32,7 +32,7 @@ If this plugin helps you recover or protect an important conversation, consider 
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH once after installing, then open **Settings → Archived Chats**.
+Restart DSH once after installing, then open **Settings → Session Archive**.
 
 To update an existing installation:
 
@@ -50,7 +50,7 @@ These screenshots cover the current `0.12.0` feature set. They were captured in 
 
 ![Archive a conversation from its session menu](assets/screenshots/01-archive-entry.png)
 ![Three-second archive success notice](assets/screenshots/01b-archive-success.png)
-![Archived Chats overview](assets/screenshots/02-archived-overview.png)
+![Session Archive overview](assets/screenshots/02-archived-overview.png)
 ![Full-text conversation and tool-result search](assets/screenshots/03-full-text-search.png)
 ![Read-only archived conversation preview](assets/screenshots/04-conversation-preview.png)
 ![Tags and notes editor](assets/screenshots/05-metadata-editor.png)
@@ -67,7 +67,7 @@ These screenshots cover the current `0.12.0` feature set. They were captured in 
 ## Usage
 
 1. Archive a conversation from the normal DSH session menu. After the Host confirms success, a **Chat archived** notice appears at the top for three seconds with direct **View** and **Undo** actions; hovering or focusing it pauses the timer. Archiving removes the chat from the sidebar but keeps its session data in the workspace store.
-2. Open **Settings → Archived Chats**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
+2. Open **Settings → Session Archive**. The page groups archived conversations by workspace and remembers collapsed groups in this browser.
 3. Search titles, tags, notes, conversation text, or tool output. Open the row preview to read an archived conversation without unarchiving it. Click **Select multiple** only when you need bulk actions.
 4. Click **Import backup** to choose a ZIP produced by this plugin and confirm non-conflicting sessions after the preview. Click **Export backup** to export the current selection, or every archived chat when nothing is selected. Individual rows also have an export action.
 5. Choose **Unarchive** to return a conversation to the sidebar. **Move to Recycle Bin** creates a protection snapshot and offers immediate **Undo**; the session can also be restored later from the **Recycle Bin** tab. Only **Delete permanently / Empty Recycle Bin** removes originals and snapshots irreversibly.
@@ -249,7 +249,7 @@ The suite (`test/*.test.mjs`) covers export records and real ZIP decoding, bound
 
 ### 0.3.0
 
-- First published release of the Archived Chats settings page.
+- First published release of the Session Archive settings page.
 - Added workspace-grouped browsing, title search, type/project filters, unarchive, and confirmed single/group/all deletion.
 - Added host routes, the browser settings section, and the pending-deletion sweep for live sessions.
 
