@@ -237,3 +237,19 @@ test('each failed commit boundary removes the partial destination and restores p
     assert.equal(item.metadata.has(DESTINATION_ID), false, options.expected);
   }
 });
+
+test('unsupported Host writers keep the plugin loadable and reject preparation without writes', async () => {
+  let validations = 0;
+  const service = createHistoryRestoreService({
+    snapshotStore: { async validate() { validations += 1; return {}; } },
+    persistence: { async list() { return []; } },
+    attachments: null,
+    registry: { archivedSessionIds: [], state: { archivedSessionIds: [] }, list: () => [] },
+    metadataStore: { async getMany() { return { status: 'ready', entries: {} }; }, async set() {}, async remove() {} },
+    lifecycle: { run: (operation) => operation() },
+  });
+
+  assert.deepEqual(service.capability, { supported: false, reason: 'writer-missing' });
+  await assert.rejects(service.prepare(SNAPSHOT_ID), (error) => error.code === 'history-restore-unsupported' && error.status === 501);
+  assert.equal(validations, 0);
+});
