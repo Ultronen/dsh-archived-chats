@@ -5,6 +5,12 @@ node_modules/
 # 本地索引与宿主数据
 .codegraph/
 data/
+.screenshot-staging/
+
+# 内部 AI / 发布过程资料（仅保存在工作区本地）
+.superpowers/
+docs/superpowers/
+design-qa.md
 
 # npm 打包产物
 *.tgz
