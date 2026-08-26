@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test('published 0.12 package contains insights runtime and excludes local state', () => {
+test('published 1.0 package contains time-machine runtime and excludes local state', () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const cache = mkdtempSync(join(tmpdir(), 'dac-npm-cache-'));
   const result = spawnSync(npm, ['pack', '--dry-run', '--json'], {
@@ -20,7 +20,7 @@ test('published 0.12 package contains insights runtime and excludes local state'
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const [{ files, version }] = JSON.parse(result.stdout);
-  assert.equal(version, '0.12.0');
+  assert.equal(version, '1.0.0');
   const paths = new Set(files.map((file) => file.path));
 
   for (const required of [
@@ -31,6 +31,8 @@ test('published 0.12 package contains insights runtime and excludes local state'
     'lib/retention.js',
     'lib/retention-service.js',
     'lib/lineage.js',
+    'lib/history.js',
+    'lib/history-restore.js',
     'docs/ARCHITECTURE.md',
     'docs/ARCHITECTURE.en.md',
   ]) assert(paths.has(required), `missing ${required}`);
@@ -42,5 +44,6 @@ test('published 0.12 package contains insights runtime and excludes local state'
     assert(!path.startsWith('.worktrees/'), `worktree leaked: ${path}`);
     assert(!path.includes('/staging/') && !path.endsWith('.tmp'), `staging file leaked: ${path}`);
     assert(!path.startsWith('test/fixtures/'), `test fixture leaked: ${path}`);
+    assert(!path.startsWith('test/'), `test artifact leaked: ${path}`);
   }
 });

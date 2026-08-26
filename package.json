@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-chats",
-  "version": "0.12.0",
-  "description": "DeepSeek Harness 本地归档聊天中心：搜索和预览完整对话，备份与恢复会话，并通过可撤销回收站、恢复快照、保留策略及来源与分支安全管理历史聊天。 Local archived-chat manager for DeepSeek Harness with full-text search, conversation previews, backup and restore, an undoable Recycle Bin, recovery snapshots, retention policies, and Origins & Branches.",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness 本地归档聊天中心：搜索和预览完整对话，保留历史版本并恢复为安全副本，备份与恢复会话，并通过可撤销回收站、保留策略及来源与分支管理历史聊天。 Local archived-chat manager for DeepSeek Harness with local history versions, restore-as-copy, full-text preview, backups, an undoable Recycle Bin, retention policies, and Origins & Branches.",
   "license": "MIT",
   "author": "Ultronen",
   "repository": {
@@ -21,6 +21,9 @@
     "recycle-bin",
     "undo",
     "snapshot",
+    "history",
+    "time-machine",
+    "version-restore",
     "retention",
     "storage-insights",
     "session-lineage",
@@ -60,6 +63,8 @@
     "lib/retention.js",
     "lib/retention-service.js",
     "lib/lineage.js",
+    "lib/history.js",
+    "lib/history-restore.js",
     "lib/search.js",
     "lib/stats.js",
     "lib/types",

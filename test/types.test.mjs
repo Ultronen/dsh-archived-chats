@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -20,4 +21,22 @@ test('published Host and client declarations compile for TypeScript consumers', 
   });
   const diagnostics = ts.getPreEmitDiagnostics(program);
   assert.equal(diagnostics.length, 0, diagnostics.map((item) => ts.flattenDiagnosticMessageText(item.messageText, '\n')).join('\n'));
+});
+
+test('published Host and client declarations expose session history contracts', () => {
+  for (const path of [
+    join(root, 'lib', 'types', 'index.d.ts'),
+    join(root, 'lib', 'types', 'client', 'index.d.ts'),
+  ]) {
+    const source = readFileSync(path, 'utf8');
+    for (const declaration of [
+      'export type HistoryScope',
+      'export type HistoryVersionState',
+      'export interface HistoryVersion',
+      'export interface HistorySession',
+      'export interface HistoryResponse',
+      'export interface HistoryRestoreResult',
+      'export interface HistoryDeleteResult',
+    ]) assert(source.includes(declaration), `${path} is missing ${declaration}`);
+  }
 });
