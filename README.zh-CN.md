@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/session-archive-banner.png" alt="会话档案：面向 DeepSeek Harness 的本地优先归档聊天中心" width="100%">
+</p>
+
 <div align="center">
 
 <h1>会话档案</h1>
@@ -13,7 +17,6 @@
 </p>
 <p>
   <a href="https://github.com/Ultronen/dsh-archived-chats/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square"></a>
-  <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DeepSeek Harness Web plugin" src="https://img.shields.io/badge/DeepSeek_Harness-Web_Plugin-0b7285?style=flat-square"></a>
   <a href="https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/"><img alt="Awesome DSH Plugin" src="https://awesome-dsh-plugin.com/badge.svg"></a>
   <a href="https://github.com/Ultronen/dsh-archived-chats/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Ultronen/dsh-archived-chats?style=flat-square"></a>
 </p>

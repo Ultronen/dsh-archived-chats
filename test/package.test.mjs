@@ -34,7 +34,7 @@ test('author-owned screenshot manifest keeps the eight stable market slots valid
   }
 });
 
-test('published 1.0.1 package contains time-machine runtime, fixed previews, and no local state', () => {
+test('published 1.0.1 package contains runtime, brand banner, fixed previews, and no local state', () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const cache = mkdtempSync(join(tmpdir(), 'dac-npm-cache-'));
   const result = spawnSync(npm, ['pack', '--dry-run', '--json'], {
@@ -51,6 +51,7 @@ test('published 1.0.1 package contains time-machine runtime, fixed previews, and
 
   for (const required of [
     'screenshots.json',
+    'assets/brand/session-archive-banner.png',
     'lib/trash.js',
     'lib/snapshot.js',
     'lib/recycle.js',
