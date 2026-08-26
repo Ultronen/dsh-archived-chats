@@ -15,6 +15,7 @@ import { PassThrough } from 'node:stream';
 import { unzipSync, strFromU8 } from 'fflate';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const packageVersion = JSON.parse(readFileSync(join(here, '../package.json'), 'utf8')).version;
 
 // Isolate the plugin's pending-deletion store from the real user home: the host
 // half writes it under $DSH_HOME/plugin-data/archived-chats/, so point DSH_HOME
@@ -735,6 +736,8 @@ console.log('\n[1b] POST /export ZIP downloads');
     assert(single.headers['cache-control'] === 'no-store', 'single export disables response caching');
     const entries = unzipSync(new Uint8Array(single.bytes()));
     const manifest = JSON.parse(strFromU8(entries['manifest.json']));
+    assert(manifest.generator?.name === 'dsh-archived-chats' && manifest.generator.version === packageVersion,
+      'single export manifest identifies the installed plugin version');
     assert(manifest.sessionCount === 1, 'single export manifest contains one session');
     assert(manifest.sessions[0].id === 'session-a', 'single export manifest identifies the requested session');
     assert(manifest.sessions[0].tags.includes('important'), 'single export manifest includes plugin tags');

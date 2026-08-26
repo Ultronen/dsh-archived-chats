@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const expectedScreenshots = [
   'assets/screenshots/preview-01.png',
   'assets/screenshots/preview-02.png',
@@ -34,7 +35,7 @@ test('author-owned screenshot manifest keeps the eight stable market slots valid
   }
 });
 
-test('published 1.0.1 package contains runtime, brand banner, fixed previews, and no local state', () => {
+test(`published ${packageVersion} package contains runtime, brand banner, fixed previews, and no local state`, () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const cache = mkdtempSync(join(tmpdir(), 'dac-npm-cache-'));
   const result = spawnSync(npm, ['pack', '--dry-run', '--json'], {
@@ -46,7 +47,7 @@ test('published 1.0.1 package contains runtime, brand banner, fixed previews, an
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const [{ files, version }] = JSON.parse(result.stdout);
-  assert.equal(version, '1.0.1');
+  assert.equal(version, packageVersion);
   const paths = new Set(files.map((file) => file.path));
 
   for (const required of [
