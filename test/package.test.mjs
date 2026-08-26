@@ -1,14 +1,40 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const expectedScreenshots = [
+  'assets/screenshots/preview-01.png',
+  'assets/screenshots/preview-02.png',
+  'assets/screenshots/preview-03.png',
+  'assets/screenshots/preview-04.png',
+  'assets/screenshots/preview-05.png',
+  'assets/screenshots/preview-06.png',
+  'assets/screenshots/preview-07.png',
+  'assets/screenshots/preview-08.png',
+];
 
-test('published 1.0 package contains time-machine runtime and excludes local state', () => {
+test('author-owned screenshot manifest keeps the eight stable market slots valid', () => {
+  const declared = JSON.parse(readFileSync(join(root, 'screenshots.json'), 'utf8'));
+
+  assert(Array.isArray(declared), 'screenshots.json must be an array');
+  assert(declared.length >= 1 && declared.length <= 8, 'market accepts 1-8 screenshots');
+  assert.deepEqual(declared, expectedScreenshots);
+
+  for (const screenshot of declared) {
+    assert.equal(typeof screenshot, 'string');
+    assert(screenshot.length > 0, 'screenshot path must not be empty');
+    assert(!isAbsolute(screenshot), `screenshot path must be relative: ${screenshot}`);
+    assert(!screenshot.split('/').includes('..'), `screenshot path escapes repository: ${screenshot}`);
+    assert(existsSync(join(root, screenshot)), `missing screenshot: ${screenshot}`);
+  }
+});
+
+test('published 1.0.1 package contains time-machine runtime, fixed previews, and no local state', () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const cache = mkdtempSync(join(tmpdir(), 'dac-npm-cache-'));
   const result = spawnSync(npm, ['pack', '--dry-run', '--json'], {
@@ -20,10 +46,11 @@ test('published 1.0 package contains time-machine runtime and excludes local sta
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const [{ files, version }] = JSON.parse(result.stdout);
-  assert.equal(version, '1.0.0');
+  assert.equal(version, '1.0.1');
   const paths = new Set(files.map((file) => file.path));
 
   for (const required of [
+    'screenshots.json',
     'lib/trash.js',
     'lib/snapshot.js',
     'lib/recycle.js',
@@ -36,6 +63,9 @@ test('published 1.0 package contains time-machine runtime and excludes local sta
     'docs/ARCHITECTURE.md',
     'docs/ARCHITECTURE.en.md',
   ]) assert(paths.has(required), `missing ${required}`);
+
+  const screenshots = [...paths].filter((path) => path.startsWith('assets/screenshots/')).sort();
+  assert.deepEqual(screenshots, expectedScreenshots);
 
   for (const path of paths) {
     assert(!path.startsWith('data/'), `local data leaked: ${path}`);
