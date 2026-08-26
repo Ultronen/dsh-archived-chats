@@ -34,7 +34,7 @@
 
 - `lib/snapshot.js` — bounded history inspection, session-page/image reads, and revision lookup.
 - `lib/recycle.js` — reuse an existing same-revision snapshot before publishing duplicate protection bytes.
-- `lib/index.js` — construct services, register six routes, serialize mutations, and invalidate dependent caches.
+- `lib/index.js` — construct services, register eight routes, serialize mutations, and invalidate dependent caches.
 - `lib/client.js` — capture-aware archive notice, History tab, history timeline, preview, and restore confirmation.
 - `lib/types/index.d.ts` and `lib/types/client/index.d.ts` — public history response and restore types.
 - `package.json` and `package-lock.json` — release version `1.0.0` and package file list/keywords.
@@ -49,7 +49,7 @@
 
 - `test/snapshot.test.mjs` — new store primitives and limits.
 - `test/recycle.test.mjs` — same-revision reuse.
-- `test/smoke.test.mjs` — six routes, archive notice, fifth tab, dialogs, localization, and regression assertions.
+- `test/smoke.test.mjs` — eight routes, archive notice, fifth tab, dialogs, localization, and regression assertions.
 - `test/package.test.mjs` — 1.0 package metadata and packed file set.
 - `test/types.test.mjs` — declaration compilation.
 
@@ -186,6 +186,8 @@ git commit -m "feat: expose validated snapshot history reads"
   - `createHistoryService(deps)`
   - `captureArchived(sessionId)`
   - `list()`
+  - `deleteVersion(snapshotId)`
+  - `clear()`
   - `invalidate(sessionIds?)`
   - `HistoryError { code, status }`
 
@@ -421,7 +423,7 @@ git commit -m "feat: restore history as a new session"
 
 ---
 
-### Task 5: Register the six Host routes
+### Task 5: Register the eight Host routes
 
 **Files:**
 - Modify: `lib/index.js`
@@ -429,11 +431,11 @@ git commit -m "feat: restore history as a new session"
 
 **Interfaces:**
 - Consumes: Tasks 2–4 service constructors and methods.
-- Produces the six routes named in the spec and safe HTTP response shapes.
+- Produces the eight routes named in the spec and safe HTTP response shapes.
 
 - [ ] **Step 1: Add failing route-registration and method/guard tests**
 
-Update the expected route count from 22 to 28 and assert each history path is
+Update the expected route count from 22 to 30 and assert each history path is
 registered. Add checks:
 
 ```js
@@ -469,6 +471,8 @@ POST /history/preview              body <= 64 KiB, exact { snapshotId, offset, l
 POST /history/preview/image        body <= 64 KiB, exact snapshot/image identity
 POST /history/restore/preview      body <= 64 KiB, exact { snapshotId }
 POST /history/restore              body <= 64 KiB, exact { token, nonce }
+POST /history/delete               body <= 64 KiB, exact { snapshotId }
+POST /history/delete-all           body <= 64 KiB, exact {}
 ```
 
 Use `sendImage` for authorized bytes and `requestAbort` for image cancellation.
@@ -672,6 +676,11 @@ transient localized notice containing the safe restored ID/title only.
 Verify Chinese and English labels, `Intl` dates, narrow action wrapping, stable
 icons, theme tokens, keyboard disclosure, focus restoration, and degraded
 disabled actions.
+
+Also verify direct deletion has no selection mode, requires an irreversible
+confirmation, refuses recycle protection, and refreshes inventory. Verify Clear
+history summarizes counts/bytes, preserves source chats, skips protected and
+degraded versions, and performs no write when cancelled.
 
 - [ ] **Step 8: Run smoke and history tests**
 

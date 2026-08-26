@@ -44,6 +44,10 @@ does not become a general-purpose manager for unrelated active sessions.
 - preview projected messages and verified stored images from one version;
 - restore one version as a new archived session with a fresh ID;
 - retain the snapshot after a successful restore;
+- permanently delete one ordinary healthy history version after an explicit
+  irreversible confirmation;
+- clear all ordinary healthy history versions after a summary confirmation,
+  while skipping recycle protection and degraded versions;
 - reuse the 0.12 retention policy and permanent-purge paths;
 - Chinese and English copy, themes, narrow layouts, keyboard navigation, focus
   management, and reduced-motion-compatible behavior;
@@ -57,8 +61,8 @@ does not become a general-purpose manager for unrelated active sessions.
 - overwriting or rewinding an existing session in place;
 - merging branches, repairing `parentSession`, or restoring descendant trees;
 - cloud sync, remote backup, encryption, or cross-tool migration;
-- direct deletion of one history row in the initial 1.0 surface (existing
-  retention preview/apply remains the cleanup control);
+- deleting the active recycle-protection snapshot or guessing ownership of a
+  degraded snapshot;
 - changing Harness private files or inventing a persistence backend;
 - claiming rollback or garbage collection of unreferenced global attachment
   objects when the Host exposes no deletion API.
@@ -123,7 +127,10 @@ restore(token, nonce)
 ```
 
 `HistoryService` never accepts a filesystem path, a serialized session record,
-or attachment bytes from the browser.
+or attachment bytes from the browser. `deleteVersion(snapshotId)` revalidates
+the current inventory inside the lifecycle queue and refuses active recycle
+protection. `clear()` deletes ordinary healthy history serially and reports
+deleted, skipped, and failed identities without touching source sessions.
 
 ### Archive capture flow
 
@@ -269,7 +276,7 @@ the UI and documentation must not claim global attachment garbage collection.
 
 ## HTTP surface
 
-Version 1.0 registers six routes:
+Version 1.0 registers eight routes:
 
 ```text
 POST /plugins/dsh-archived-chats/history/capture
@@ -278,6 +285,8 @@ POST /plugins/dsh-archived-chats/history/preview
 POST /plugins/dsh-archived-chats/history/preview/image
 POST /plugins/dsh-archived-chats/history/restore/preview
 POST /plugins/dsh-archived-chats/history/restore
+POST /plugins/dsh-archived-chats/history/delete
+POST /plugins/dsh-archived-chats/history/delete-all
 ```
 
 All POST routes require `x-dsh-archived-chats: 1`, exact JSON schemas, bounded
@@ -298,7 +307,11 @@ The tab contains:
 - session groups ordered by newest version;
 - a collapsed-by-default version timeline for each session;
 - version rows with timestamp, size, attachment count, state, and health;
-- **预览 / Preview** and **恢复为副本 / Restore as copy** actions;
+- **预览 / Preview**, **恢复为副本 / Restore as copy**, and confirmed
+  **删除 / Delete** actions for ordinary healthy versions;
+- a direct **清空历史版本 / Clear history versions** action whose confirmation
+  names version/session counts, estimated bytes, irreversibility, preserved
+  source chats, and skipped protection/degraded versions;
 - an empty state explaining that the first version appears after a successful
   archive;
 - an opaque degraded section that never guesses ownership.
@@ -328,6 +341,10 @@ remain usable at narrow widths.
   is missing;
 - `history-restore-rollback-failed`: rollback could not fully restore
   plugin-controlled state and safe diagnostics were logged.
+- `history-snapshot-protected`: direct deletion refused because the snapshot is
+  current recycle protection;
+- `history-delete-failed`: one healthy ordinary history version could not be
+  removed after revalidation.
 
 Errors return stable codes and user-safe localized copy. Logs may contain
 snapshot/session IDs and stable error codes but never titles, notes, messages,
@@ -360,6 +377,9 @@ repopulating the cache after a mutation.
 - 5,000-directory bound and cache invalidation are enforced;
 - preview pagination and projected output remain bounded;
 - image reads require exact membership and digest;
+- single deletion rechecks protection inside the lifecycle queue;
+- clear deletes all ordinary healthy versions and skips protected/degraded
+  versions with exact results;
 - no response contains a path or raw attachment bytes except the authorized
   single-image response.
 
@@ -388,7 +408,7 @@ repopulating the cache after a mutation.
 
 ### Client and route tests
 
-- twenty-eight total routes register after the six history routes are added;
+- thirty total routes register after the eight history routes are added;
 - method, guard, body, token, and response schemas are exact;
 - fifth-tab order, lazy load, empty/error/degraded states, grouping, search, and
   timeline disclosure are localized;
@@ -423,6 +443,8 @@ repopulating the cache after a mutation.
    state, and explicit about unreachable global attachment cleanup.
 5. Degraded or over-limit history fails closed without leaking untrusted data.
 6. Existing retention and purge paths continue managing all snapshots.
-7. No background scanning, active-chat takeover, in-place rewind, cloud sync,
+7. Direct history deletion never deletes a source chat, active recycle
+   protection, or an opaque degraded snapshot.
+8. No background scanning, active-chat takeover, in-place rewind, cloud sync,
    cross-tool migration, or private Host storage writes are introduced.
-8. Existing 0.12 behavior and all automated tests remain passing.
+9. Existing 0.12 behavior and all automated tests remain passing.
