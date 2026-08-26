@@ -13,7 +13,7 @@
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 新增一个本地归档聊天中心：搜索和预览完整对话，备份与恢复会话，并通过可撤销回收站、恢复快照、保留策略及来源与分支安全管理历史聊天。
 
-在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「已归档的聊天」页面，让所有归档会话都可见、可搜索、可管理。
+在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「会话档案」页面，让所有归档会话都可见、可搜索、可管理。
 
 [插件市场](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [版本发布](https://github.com/Ultronen/dsh-archived-chats/releases) · [问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions) · [私密报告漏洞](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
 
@@ -32,7 +32,7 @@
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-安装后重启一次 DSH，然后打开 **设置 → 已归档的聊天**。
+安装后重启一次 DSH，然后打开 **设置 → 会话档案**。
 
 更新已有安装：
 
@@ -50,7 +50,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ![从会话菜单点击归档](assets/screenshots/01-archive-entry.png)
 ![归档成功后的三秒提示](assets/screenshots/01b-archive-success.png)
-![已归档的聊天总览](assets/screenshots/02-archived-overview.png)
+![会话档案总览](assets/screenshots/02-archived-overview.png)
 ![聊天正文与工具结果全文搜索](assets/screenshots/03-full-text-search.png)
 ![归档对话只读预览](assets/screenshots/04-conversation-preview.png)
 ![标签与备注编辑](assets/screenshots/05-metadata-editor.png)
@@ -66,8 +66,8 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 使用流程
 
-1. 在 DSH 正常聊天的会话菜单中点击归档。宿主确认成功后，页面顶部会显示 3 秒的 **已归档的聊天** 提示，可立即 **查看** 归档中心或 **撤销**；悬停或键盘聚焦时计时暂停。归档只会把会话从侧边栏隐藏，工作区存档仍会保留会话数据。
-2. 打开 **设置 → 已归档的聊天**。页面按工作区分组，并在当前浏览器中记住分组的折叠状态。
+1. 在 DSH 正常聊天的会话菜单中点击归档。宿主确认成功后，页面顶部会显示 3 秒的 **已归档的聊天** 提示，可立即 **查看** 会话档案或 **撤销**；悬停或键盘聚焦时计时暂停。归档只会把会话从侧边栏隐藏，工作区存档仍会保留会话数据。
+2. 打开 **设置 → 会话档案**。页面按工作区分组，并在当前浏览器中记住分组的折叠状态。
 3. 搜索标题、标签、备注、聊天正文或工具结果；点击行内预览按钮可直接阅读归档对话，无需先取消归档。需要多选时点击 **批量选择** 显示复选框。
 4. 点击顶部 **导入备份** 选择本插件导出的 ZIP，预览后确认无冲突会话；点击 **导出备份** 导出当前选中项，未选择时导出全部归档会话。单条会话也可以从行内操作导出。
 5. 点击 **取消归档** 将会话放回侧边栏；点击 **移至回收站** 会创建保护快照，可立即点击 **撤销**，也可稍后在 **回收站** 标签恢复。只有回收站中的 **永久删除 / 清空回收站** 会不可撤销地移除原会话和快照。
@@ -249,7 +249,7 @@ npm test
 
 ### 0.3.0
 
-- 首个公开发布版本，提供「已归档的聊天」设置页。
+- 首个公开发布版本，提供「会话档案」设置页。
 - 新增按工作区分组浏览、标题搜索、类型/项目筛选、取消归档，以及带确认的单条/分组/全部删除。
 - 新增 Host 路由、浏览器设置区块，以及用于处理运行中会话的待删队列清扫。
 

@@ -1478,7 +1478,7 @@ console.log('\n[10b] client model — sorting and visible selection');
   let viewPaints = 0;
   const settingsTrigger = { textContent: '设置', click: () => { settingsTriggerClicks += 1; settingsOpen = true; } };
   const unrelatedDialogTrigger = { textContent: '打开预览', click: () => {} };
-  const archiveNav = { textContent: ' 已归档的聊天 ', click: () => { archiveNavClicks += 1; } };
+  const archiveNav = { textContent: ' 会话档案 ', click: () => { archiveNavClicks += 1; } };
   const generalNav = { textContent: '通用', click: () => {} };
   const settingsDocument = {
     querySelectorAll(selector) {
@@ -1488,7 +1488,7 @@ console.log('\n[10b] client model — sorting and visible selection');
     },
   };
   const openedArchiveSettings = await clientExports.__test.openArchiveSettings?.(
-    (key) => ({ nav: '已归档的聊天', 'archiveNotice.settings': '设置' })[key] ?? key,
+    (key) => ({ nav: '会话档案', 'archiveNotice.settings': '设置' })[key] ?? key,
     settingsDocument,
     async () => { viewPaints += 1; },
   );
@@ -1496,7 +1496,7 @@ console.log('\n[10b] client model — sorting and visible selection');
     'archive notice View opens Settings and selects the archived-chat section after it mounts');
   settingsOpen = true;
   const reopenedArchiveSettings = await clientExports.__test.openArchiveSettings?.(
-    (key) => ({ nav: '已归档的聊天', 'archiveNotice.settings': '设置' })[key] ?? key,
+    (key) => ({ nav: '会话档案', 'archiveNotice.settings': '设置' })[key] ?? key,
     settingsDocument,
     async () => { viewPaints += 1; },
   );
@@ -1994,7 +1994,7 @@ console.log('\n[11] client half — settings section registration');
   assert(clientCalls.localeRegister.length === 1, 'locale dictionaries registered once');
   assert(clientCalls.localeRegister[0].ns === 'settings.archived-chats', 'locale namespace is settings.archived-chats');
   const zhDict = clientCalls.localeRegister[0].dicts.zh;
-  assert(zhDict['nav'] === '已归档的聊天', 'zh nav label is 已归档的聊天');
+  assert(zhDict['nav'] === '会话档案' && zhDict['page.title'] === '会话档案', 'zh session archive label and page title are localized');
   assert(zhDict['delete.all'] === '全部移至回收站', 'zh recycle-all label present');
   assert(zhDict['confirm.deleteOne.title'] === '移至回收站？', 'move-one confirmation title is localized');
   assert(zhDict['confirm.deleteOne.body'].includes('保护快照'), 'move-one confirmation explains recoverability');
@@ -2005,6 +2005,9 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['archiveNotice.undo'] === '撤销',
   'Chinese archive success notice actions are localized');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
+  assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
+    && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
+  'English session archive label and page title are localized');
   assert(clientCalls.localeRegister[0].dicts.en['archiveNotice.title'] === 'Chat archived'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
@@ -2017,7 +2020,7 @@ console.log('\n[11] client half — settings section registration');
   assert(meta.id === 'archived-chats', `section id is "archived-chats" (got "${meta.id}")`);
   assert(meta.order === 30, `section order is 30 (got ${meta.order})`);
   assert(typeof meta.label === 'function', 'nav label is a locale-bound function');
-  assert(meta.label() === '已归档的聊天', `label() resolves to 已归档的聊天 (got "${meta.label()}")`);
+  assert(meta.label() === '会话档案', `label() resolves to 会话档案 (got "${meta.label()}")`);
   assert(meta.locale === 'settings.archived-chats', 'section carries its locale namespace');
   assert(typeof settingsRegistration?.component === 'function', 'section component is a function');
   assert(overlayRegistration?.meta?.id === 'archived-chats-success'
@@ -3759,7 +3762,7 @@ console.log('\n[13] client half — settings nav icon patch');
   assert(observers[0].opts?.subtree === true && observers[0].opts?.childList === true, 'observer watches the body subtree');
   const gearSvg = { dataset: {}, attrs: {}, innerHTML: '<circle cx="12" cy="12" r="3"/>', setAttribute(k, v) { this.attrs[k] = v; } };
   const otherSvg = { dataset: {}, attrs: {}, innerHTML: '<circle cx="12" cy="12" r="3"/>', setAttribute(k, v) { this.attrs[k] = v; } };
-  const ownButton = { textContent: '已归档的聊天', querySelector: (sel) => (sel === 'svg' ? gearSvg : null) };
+  const ownButton = { textContent: '会话档案', querySelector: (sel) => (sel === 'svg' ? gearSvg : null) };
   const otherButton = { textContent: '通用', querySelector: (sel) => (sel === 'svg' ? otherSvg : null) };
   mockDialogs = [{ querySelectorAll: (sel) => (sel === 'nav button' ? [ownButton, otherButton] : []) }];
   observers[0].cb();

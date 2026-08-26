@@ -9,7 +9,7 @@ This document is for maintainers and developers who need to understand data beha
 The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
-- The browser client in lib/client.js registers the Archived Chats settings.section and renders state and actions.
+- The browser client in lib/client.js registers the Session Archive settings.section and renders state and actions.
 - Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, lib/stats.js, lib/insights.js, lib/retention.js, lib/retention-service.js, and lib/lineage.js. lib/trash.js owns the recycle catalog, lib/snapshot.js owns verified snapshots, and lib/recycle.js composes recycle lifecycle operations.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
@@ -113,7 +113,7 @@ Permanent purge persists `purge-pending` before physical writes, then removes th
 
 client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, state, and design tokens. The page state includes:
 
-- A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps the public `workspaces.archiveSession` method, publishes the latest session ID only after the original call succeeds, and restores the method on unload. The notice defaults to three seconds and tracks pointer/focus pause reasons independently. View follows the Host's accessible Settings trigger and Archived Chats nav label; Undo calls the guarded `/unarchive` route and refreshes the workspace projection. Failures remain retryable and never present false success.
+- A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps the public `workspaces.archiveSession` method, publishes the latest session ID only after the original call succeeds, and restores the method on unload. The notice defaults to three seconds and tracks pointer/focus pause reasons independently. View follows the Host's accessible Settings trigger and Session Archive nav label; Undo calls the guarded `/unarchive` route and refreshes the workspace projection. Failures remain retryable and never present false success.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
