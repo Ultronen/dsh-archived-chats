@@ -1,11 +1,26 @@
-# dsh-archived-chats
+<div align="center">
 
-[![npm version](https://img.shields.io/npm/v/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
-[![npm downloads](https://img.shields.io/npm/dm/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
-[![CI](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml/badge.svg)](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml)
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/)
+<h1>Session Archive</h1>
 
-[English](README.en.md) | [中文](README.md)
+<p><strong>A local archived-chat center for DeepSeek Harness</strong></p>
+<p><code>dsh-archived-chats</code></p>
+
+<p>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm downloads" src="https://img.shields.io/npm/dm/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ultronen/dsh-archived-chats/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="Node.js 18 and 24" src="https://img.shields.io/badge/Node.js-18%20%7C%2024-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white"></a>
+</p>
+<p>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DeepSeek Harness Web plugin" src="https://img.shields.io/badge/DeepSeek_Harness-Web_Plugin-0b7285?style=flat-square"></a>
+  <a href="https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/"><img alt="Awesome DSH Plugin" src="https://awesome-dsh-plugin.com/badge.svg"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Ultronen/dsh-archived-chats?style=flat-square"></a>
+</p>
+
+<p>English · <a href="README.md">中文</a></p>
+
+</div>
 
 > 🔎 **Archived no longer means lost.** Search and read complete conversations, inspect local history versions, then back up, restore as a copy, or delete safely.
 
@@ -15,11 +30,13 @@ A local archived-chat manager for [DeepSeek Harness](https://github.com/deepseek
 
 Once a conversation is archived in DeepSeek Harness it disappears from the sidebar, and there is no built-in way to browse it again — only the workspace store (`~/.dsh/storages/workspace.json`) still remembers it. This plugin adds a **Session Archive** page under Settings where every archived session is visible, searchable, and manageable.
 
-[Plugin market](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [Releases](https://github.com/Ultronen/dsh-archived-chats/releases) · [Questions and feedback](https://github.com/Ultronen/dsh-archived-chats/discussions) · [Private vulnerability reporting](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
+> ℹ️ **The entry has been formally renamed.** The former **Archived Chats** entry is now **Session Archive** (中文：**会话档案**). The npm package `dsh-archived-chats`, GitHub repository, install command, and local data location are unchanged. Existing users do not need a data migration; after updating, open **Settings → Session Archive**.
+
+<p align="center"><a href="https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/">Plugin market</a> · <a href="https://www.npmjs.com/package/dsh-archived-chats">npm</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/releases">Releases</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/discussions">Questions and feedback</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/security/advisories/new">Private vulnerability reporting</a></p>
 
 <p align="center">
-  <a href="assets/screenshots/04-conversation-preview.png"><img src="assets/screenshots/04-conversation-preview.png" width="49%" alt="Full-text search and read-only preview for archived chats"></a>
-  <a href="assets/screenshots/11-storage-retention.png"><img src="assets/screenshots/11-storage-retention.png" width="49%" alt="Storage and Retention with session directories, recovery snapshots, and policy controls"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="Native read-only History preview with snapshot time and a synthetic stored image"></a>
+  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="Storage and Retention with session directories, protection snapshots, and policy controls"></a>
 </p>
 
 <p align="center"><sub>Search and read without unarchiving first; removing an archived chat here moves it through a recovery-snapshot Recycle Bin.</sub></p>
@@ -42,36 +59,30 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## Compatibility
 
-Version 1.0.0 has been verified to load in a DeepSeek Harness `0.1.1-rc.2` Web profile, register all 30 routes, and expose the archive/history read boundaries. That rc.2 Web Host does not publish the persistence writer required by ZIP import or **Restore as copy**, so preparation returns `501 restore-unsupported` without writing data; full restore requires a Host that explicitly exposes that public capability. Before downgrading from 1.0, back up `$DSH_HOME/plugin-data/archived-chats/`; 0.12 can still validate, retain, and purge version-one snapshots, but it does not show the History tab.
+The plugin enables features from the public capabilities exposed by the DeepSeek Harness Host instead of binding to one Host version. Archived browsing, full-text search, native read-only preview, History, Recycle Bin, storage policies, and session lineage work when their corresponding services are available. ZIP import, History **Restore as copy**, and snapshot fallback when an original is missing require a public persistence writer. Without it, the operation returns `restore-unsupported` without writing or overwriting data. If the attachment service is unavailable, only image reads degrade; the rest of the conversation remains readable. Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading to an older release that does not display History or understand recycle snapshots.
 
-## Preview
+## Demo Preview
 
-These screenshots are the `0.12.0` UI baseline, captured in an isolated real DeepSeek Harness `0.1.1-rc.2` Chinese light-theme web profile with synthetic demo conversations and no real user data. The 1.0 History UI has not yet replaced this release screenshot set, so the established paths and headings remain unchanged below.
+These images use an isolated Chinese light-theme Web demo environment with synthetic conversations to show the real current release UI. They contain no real user data, paths, notes, or credentials. The README and plugin market use the same fixed demo image set.
 
-![Archive a conversation from its session menu](assets/screenshots/01-archive-entry.png)
-![Three-second archive success notice](assets/screenshots/01b-archive-success.png)
-![Session Archive overview](assets/screenshots/02-archived-overview.png)
-![Full-text conversation and tool-result search](assets/screenshots/03-full-text-search.png)
-![Read-only archived conversation preview](assets/screenshots/04-conversation-preview.png)
-![Tags and notes editor](assets/screenshots/05-metadata-editor.png)
-![On-demand bulk selection](assets/screenshots/06-bulk-selection.png)
-![Import backup preview](assets/screenshots/07-import-preview.png)
-![Undo notice after moving a chat to Recycle Bin](assets/screenshots/08-move-undo.png)
-![Recycle Bin with recovery snapshots and restore actions](assets/screenshots/09-recycle-restore.png)
-![Permanent deletion confirmation for the chat and protection snapshot](assets/screenshots/10-permanent-delete.png)
-![Storage and Retention overview](assets/screenshots/11-storage-retention.png)
-![Protection snapshot details](assets/screenshots/12-storage-details.png)
-![Retention cleanup preview](assets/screenshots/13-retention-preview.png)
-![Origins & Branches relationship view](assets/screenshots/14-origins-branches.png)
+![Session Archive overview with the new title and five management views](assets/screenshots/preview-01.png)
+![Full-text search, filters, tags, and readable hit excerpts](assets/screenshots/preview-02.png)
+![Native read-only History preview with snapshot time and a synthetic stored image](assets/screenshots/preview-03.png)
+![History timeline with restore-as-copy and deletion actions](assets/screenshots/preview-04.png)
+![Irreversible confirmation before clearing ordinary History](assets/screenshots/preview-05.png)
+![Recycle Bin protection snapshot, restore, and permanent deletion](assets/screenshots/preview-06.png)
+![Storage accounting, retention policy, and cleanup preview entry](assets/screenshots/preview-07.png)
+![Origins & Branches with forks, subagents, and recycled state](assets/screenshots/preview-08.png)
 
 ## Usage
 
 1. Archive a conversation from the normal DSH session menu. After Host success, the notice first reports **saving history version** and starts its three-second dismissal only after save. Snapshot failure never rolls back archive success; the notice retains **Retry save**, **View**, **Undo**, and close actions.
 2. Open **Settings → Session Archive → History**. Groups can be searched by safe title/workspace and expanded to preview any healthy version read-only or choose **Restore as copy**. The Host generates a new session ID and registers the result as archived; it never overwrites, unarchives, or deletes the source.
-3. Use **Archived** to manage chats by workspace and search titles, tags, notes, message text, or tool output. Row preview does not require unarchive.
-4. Use **Import backup / Export backup** for ZIP backups. ZIP import and history restore are separate flows.
-5. **Move to Recycle Bin** reuses a healthy snapshot for the same revision when possible and otherwise publishes a new protection snapshot. Only **Delete permanently / Empty Recycle Bin** irreversibly removes the original and every validated snapshot for that source.
-6. Use **Storage & Retention** to preview and explicitly apply history-count, age, quota, and recycle-age policy. **Origins & Branches** remains a read-only tree of necessary relationship context.
+3. Delete one ordinary History version after confirmation, or use **Clear history versions** to remove all ordinary history at once. The source chat remains unchanged, while Recycle Bin protection and unreadable degraded versions are skipped.
+4. Use **Archived** to manage chats by workspace and search titles, tags, notes, message text, or tool output. Row preview does not require unarchive.
+5. Use **Import backup / Export backup** for ZIP backups. ZIP import and history restore are separate flows.
+6. **Move to Recycle Bin** reuses a healthy snapshot for the same revision when possible and otherwise publishes a new protection snapshot. Only **Delete permanently / Empty Recycle Bin** irreversibly removes the original and every validated snapshot for that source.
+7. Use **Storage & Retention** to preview and explicitly apply history-count, age, quota, and recycle-age policy. **Origins & Branches** remains a read-only tree of necessary relationship context.
 
 ## Features
 
@@ -188,6 +199,13 @@ The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/pr
 
 ## Version history
 
+### 1.0.1
+
+- Formally document the settings-entry rename from **Archived Chats** to **Session Archive**; package name, repository, install command, and local data location remain unchanged.
+- Recapture eight fixed demo images from the current release UI and make the README and plugin market reference the same set.
+- Describe compatibility through public Host capabilities rather than repeated RC versions and internal route counts.
+- Add the missing user flow for deleting one History version or clearing ordinary History; remove internal plans, QA evidence, and machine paths from the public tree, with an automated hygiene gate preventing recurrence.
+
 ### 1.0.0
 
 - Added the fifth **History** tab for validated local versions, recycle-protection state, safe search, and opaque degraded entries grouped by source chat.
@@ -195,7 +213,7 @@ The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/pr
 - Reused the conversation preview for snapshot timestamps and verified images. Restore always creates a new archived ID and never overwrites the source.
 - Added confirmed single-version deletion and global History clearing without selection checkboxes; recycle-protection and degraded snapshots are not removed by these actions.
 - Recycle moves may reuse the same healthy non-null revision. Retention continues to govern history, and permanent purge removes every validated snapshot for the source.
-- A real `0.1.1-rc.2` Web Host verified plugin loading, safe inventory, and capability degradation; without a writer, restore fails without mutation as `restore-unsupported`.
+- A real Web Host verified plugin loading, safe inventory, and capability degradation; without a writer, restore fails without mutation as `restore-unsupported`.
 - **Downgrade reminder:** 0.12 does not show History, but it can validate, retain, and purge version-one snapshots. Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading.
 
 ### 0.12.0
@@ -227,7 +245,7 @@ The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/pr
 - Added an on-demand multi-select mode: list checkboxes stay hidden until requested, then disappear automatically after a completed bulk action.
 - Made common ZIP backup actions direct **Import backup / Export backup** controls and moved the destructive action under **More** for a cleaner header.
 - Removed the cross-tool JSONL migration surface that could not provide native resume, keeping the plugin focused on DSH archived-chat management.
-- Verified the new controls, backup preview, and single-line page title in a real DeepSeek Harness `0.1.0-rc.8` host.
+- Verified the new controls, backup preview, and single-line page title in a real Host.
 
 ### 0.8.1
 
@@ -253,8 +271,8 @@ The suite (`test/*.test.mjs`) covers export/import, history capture/inventory/pr
 
 ### 0.5.1
 
-- Published a compatibility-focused patch release for DeepSeek Harness `0.1.0-rc.7`.
-- Updated the browser settings section to use the rc.7 overlay and state design tokens.
+- Published a compatibility-focused patch release.
+- Updated the browser settings section to use the overlay and state design tokens exposed by the Host.
 
 ### 0.5.0
 

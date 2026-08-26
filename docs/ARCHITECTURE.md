@@ -129,7 +129,7 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 会有界读取�
 
 ## 浏览器客户端
 
-client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、状态和设计令牌。页面状态包括：
+client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮层、状态和设计令牌。页面状态包括：
 
 - `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发起历史抓取。抓取进行时暂停 3 秒关闭计时，成功后恢复，失败时显示不回滚归档的重试保存；查看与撤销继续可用。
 - 归档列表和工作区分组。
@@ -158,7 +158,7 @@ client.js 注册 order 30 的 settings.section，并使用 DSH rc.7 的浮层、
 
 ## 兼容性和测试
 
-1.0.0 已在 DeepSeek Harness 0.1.1-rc.2 Web profile 中验证加载、30 路由注册、安全空历史清单和能力降级。该 Host 未公开导入/历史恢复所需 writer，因此以 `501 restore-unsupported` 无写入失败。0.12 使用相同 version 1 manifest，能校验、保留和清理 1.0 快照，但不显示历史页或恢复为副本；降级前应备份整个插件数据目录。
+插件通过能力检测适配 Host：归档读取、附件读取、持久层写入和运行中会话生命周期能力分别判断，缺失能力必须安全降级或返回明确错误。导入、历史版本恢复为副本和原件丢失时的快照回退需要公开 writer；缺少时返回 `restore-unsupported` 且不写入数据。旧版若不显示历史页或不识别回收快照，降级前应备份整个插件数据目录。
 
 测试覆盖：
 

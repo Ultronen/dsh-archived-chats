@@ -129,7 +129,7 @@ Permanent purge persists `purge-pending` before physical writes, then removes th
 
 ## Browser client
 
-client.js registers an order-30 settings.section and uses the DSH rc.7 overlay, state, and design tokens. The page state includes:
+client.js registers an order-30 settings.section and uses the public Harness overlay, state, and design tokens. The page state includes:
 
 - A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps public `workspaces.archiveSession` and starts history capture only after the original succeeds. Capture pauses the three-second dismissal; success resumes it, while failure retains retry-save without rolling back archive. View and Undo remain available.
 - Archived sessions and workspace groups.
@@ -158,7 +158,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 ## Compatibility and testing
 
-Version 1.0.0 has been verified in a DeepSeek Harness 0.1.1-rc.2 Web profile for loading, 30-route registration, safe empty history inventory, and capability degradation. That Host does not expose the writer required by import/history restore, which therefore returns `501 restore-unsupported` without mutation. Version 0.12 uses the same version-one manifest and can validate, retain, and purge 1.0 snapshots, but it does not expose History or restore-as-copy. Back up the complete plugin-data directory before downgrading.
+The plugin adapts through Host capability detection: archive reads, attachment reads, persistence writes, and live-session lifecycle support are evaluated independently, and missing capabilities must degrade safely or return explicit errors. Import, History restore-as-copy, and snapshot fallback when the original is missing require a public writer; without it they return `restore-unsupported` without mutation. Back up the complete plugin-data directory before downgrading to a release that does not display History or understand recycle snapshots.
 
 Coverage includes:
 

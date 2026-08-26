@@ -1,11 +1,26 @@
-# dsh-archived-chats
+<div align="center">
 
-[![npm version](https://img.shields.io/npm/v/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
-[![npm downloads](https://img.shields.io/npm/dm/dsh-archived-chats)](https://www.npmjs.com/package/dsh-archived-chats)
-[![CI](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml/badge.svg)](https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml)
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/)
+<h1>会话档案</h1>
 
-[English](README.en.md) | 中文
+<p><strong>面向 DeepSeek Harness 的本地归档聊天中心</strong></p>
+<p><code>dsh-archived-chats</code></p>
+
+<p>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm downloads" src="https://img.shields.io/npm/dm/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ultronen/dsh-archived-chats/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="Node.js 18 and 24" src="https://img.shields.io/badge/Node.js-18%20%7C%2024-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white"></a>
+</p>
+<p>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DeepSeek Harness Web plugin" src="https://img.shields.io/badge/DeepSeek_Harness-Web_Plugin-0b7285?style=flat-square"></a>
+  <a href="https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/"><img alt="Awesome DSH Plugin" src="https://awesome-dsh-plugin.com/badge.svg"></a>
+  <a href="https://github.com/Ultronen/dsh-archived-chats/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Ultronen/dsh-archived-chats?style=flat-square"></a>
+</p>
+
+<p>中文 · <a href="README.en.md">English</a></p>
+
+</div>
 
 > 🔎 **归档不再等于消失。** 直接搜索和阅读完整对话，查看本地历史版本，再安全备份、恢复为副本或删除。
 
@@ -15,11 +30,13 @@
 
 在 DeepSeek Harness 里，聊天一旦归档就会从侧边栏消失，界面中没有任何入口可以再看到它，只有工作区存档（`~/.dsh/storages/workspace.json`）还记得它。这个插件在「设置」中补上一个「会话档案」页面，让所有归档会话都可见、可搜索、可管理。
 
-[插件市场](https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/) · [npm](https://www.npmjs.com/package/dsh-archived-chats) · [版本发布](https://github.com/Ultronen/dsh-archived-chats/releases) · [问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions) · [私密报告漏洞](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new)
+> ℹ️ **入口已正式更名。** 原「已归档的聊天」现为「会话档案」（English: **Session Archive**）。npm 包名 `dsh-archived-chats`、GitHub 仓库名、安装方式和本地数据位置均未改变；现有用户无需迁移数据，更新后从 **设置 → 会话档案** 进入。
+
+<p align="center"><a href="https://awesome-dsh-plugin.com/p/Ultronen/dsh-archived-chats/">插件市场</a> · <a href="https://www.npmjs.com/package/dsh-archived-chats">npm</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/releases">版本发布</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/discussions">问题交流</a> · <a href="https://github.com/Ultronen/dsh-archived-chats/security/advisories/new">私密报告漏洞</a></p>
 
 <p align="center">
-  <a href="assets/screenshots/04-conversation-preview.png"><img src="assets/screenshots/04-conversation-preview.png" width="49%" alt="归档聊天正文搜索与只读对话预览"></a>
-  <a href="assets/screenshots/11-storage-retention.png"><img src="assets/screenshots/11-storage-retention.png" width="49%" alt="空间与策略中的会话目录、恢复快照和保留策略"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="带历史快照时间和合成图片的原生只读预览"></a>
+  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="空间与策略中的会话目录、保护快照和保留策略"></a>
 </p>
 
 <p align="center"><sub>无需先取消归档即可搜索和阅读；从本插件移除归档聊天时会先进入带恢复快照的回收站。</sub></p>
@@ -42,36 +59,30 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 兼容性
 
-1.0.0 已在 DeepSeek Harness `0.1.1-rc.2` Web profile 中验证能正常加载、注册 30 条路由并提供归档/历史读取边界。该 rc.2 Web Host 未公开导入与「恢复为副本」所需的持久层 writer，因此确认准备会返回 `501 restore-unsupported`且不写入数据；完整恢复需要宿主明确提供该公开能力。从 1.0 降级前请先备份 `$DSH_HOME/plugin-data/archived-chats/`；0.12 可继续校验、保留和清理 version 1 快照，但不会显示「历史版本」页签。
+插件按 DeepSeek Harness 公开能力逐项启用功能，不绑定某个具体 Host 版本。归档浏览、全文搜索、原生只读预览、历史版本、回收站、空间策略和会话血缘在相应服务可用时正常工作。ZIP 导入、历史版本的 **恢复为副本**，以及原件丢失时的快照回退恢复，需要 Host 提供持久层 writer；缺少该能力时会明确返回 `restore-unsupported`，且不会写入或覆盖数据。附件服务不可用时只影响图片读取，其余对话内容仍可预览。降级到不显示历史版本或不识别回收快照的旧版前，请先备份 `$DSH_HOME/plugin-data/archived-chats/`。
 
-## 预览
+## 演示预览
 
-以下截图是 `0.12.0` 界面基线，在隔离的真实 DeepSeek Harness `0.1.1-rc.2` 中文浅色 Web profile 中捕获，只使用合成演示会话，不包含真实用户数据。1.0 的「历史版本」界面尚未替换这组发布截图，因此下方仍保留原有路径和标题。
+以下图片使用隔离的中文浅色 Web 演示环境和合成会话，展示当前正式版本的真实界面，不包含真实用户数据、路径、备注或凭据。README 与插件市场使用同一套固定演示图片。
 
-![从会话菜单点击归档](assets/screenshots/01-archive-entry.png)
-![归档成功后的三秒提示](assets/screenshots/01b-archive-success.png)
-![会话档案总览](assets/screenshots/02-archived-overview.png)
-![聊天正文与工具结果全文搜索](assets/screenshots/03-full-text-search.png)
-![归档对话只读预览](assets/screenshots/04-conversation-preview.png)
-![标签与备注编辑](assets/screenshots/05-metadata-editor.png)
-![按需批量选择](assets/screenshots/06-bulk-selection.png)
-![导入归档备份预览](assets/screenshots/07-import-preview.png)
-![移至回收站后的撤销提示](assets/screenshots/08-move-undo.png)
-![回收站中的恢复快照与恢复操作](assets/screenshots/09-recycle-restore.png)
-![永久删除会话与保护快照确认](assets/screenshots/10-permanent-delete.png)
-![空间与策略概览](assets/screenshots/11-storage-retention.png)
-![保护快照明细](assets/screenshots/12-storage-details.png)
-![保留策略清理预览](assets/screenshots/13-retention-preview.png)
-![来源与分支关系视图](assets/screenshots/14-origins-branches.png)
+![会话档案总览、新标题与五个管理视图](assets/screenshots/preview-01.png)
+![全文搜索、筛选、标签与命中摘要](assets/screenshots/preview-02.png)
+![带历史快照时间和合成图片的原生只读预览](assets/screenshots/preview-03.png)
+![历史版本时间线、恢复为副本与删除操作](assets/screenshots/preview-04.png)
+![清空普通历史版本的不可恢复确认](assets/screenshots/preview-05.png)
+![回收站中的保护快照、恢复与永久删除](assets/screenshots/preview-06.png)
+![空间分账、保留策略与清理预览入口](assets/screenshots/preview-07.png)
+![来源与分支中的分叉、子代理和回收状态](assets/screenshots/preview-08.png)
 
 ## 使用流程
 
 1. 在 DSH 正常聊天的会话菜单中点击归档。宿主确认成功后，顶部提示会先显示「正在保存历史版本」，保存完成后才开始 3 秒关闭计时。快照失败不会回滚已成功的归档，提示会保留「重试保存」、**查看**、**撤销** 和关闭操作。
 2. 打开 **设置 → 会话档案 → 历史版本**。这里按原会话分组，可搜索安全标题/项目，展开后可只读预览任意健康版本，或选择 **恢复为副本**。恢复由 Host 生成新会话 ID，始终作为已归档副本，不覆盖、取消归档或删除来源。
-3. 在 **归档** 页签按工作区管理会话，搜索标题、标签、备注、聊天正文或工具结果；行内预览无需先取消归档。
-4. 使用顶部 **导入备份 / 导出备份** 管理 ZIP 备份；ZIP 导入与历史恢复是两条独立流程。
-5. 点击 **取消归档** 将会话放回侧边栏；点击 **移至回收站** 会在同一修订已有健康快照时复用它，否则创建新的保护快照。只有回收站中的 **永久删除 / 清空回收站** 会不可撤销地移除原会话与该来源的全部已验证历史快照。
-6. 打开 **空间与策略** 预览并明确应用历史数量、年龄、容量和回收站年龄策略。**来源与分支** 仍以只读分支树展示必要关系上下文。
+3. 普通历史版本可经确认后单条删除，也可使用 **清空历史版本** 一次删除全部普通历史；原聊天不会被删除，回收站正在使用的保护版本和无法读取的降级版本会自动跳过。
+4. 在 **归档** 页签按工作区管理会话，搜索标题、标签、备注、聊天正文或工具结果；行内预览无需先取消归档。
+5. 使用顶部 **导入备份 / 导出备份** 管理 ZIP 备份；ZIP 导入与历史恢复是两条独立流程。
+6. 点击 **取消归档** 将会话放回侧边栏；点击 **移至回收站** 会在同一修订已有健康快照时复用它，否则创建新的保护快照。只有回收站中的 **永久删除 / 清空回收站** 会不可撤销地移除原会话与该来源的全部已验证历史快照。
+7. 打开 **空间与策略** 预览并明确应用历史数量、年龄、容量和回收站年龄策略。**来源与分支** 仍以只读分支树展示必要关系上下文。
 
 ## 功能
 
@@ -188,6 +199,13 @@ npm test
 
 ## 版本更新记录
 
+### 1.0.1
+
+- 正式说明设置入口由「已归档的聊天」更名为「会话档案」；包名、仓库名、安装方式和本地数据位置保持不变。
+- 用当前版本真实界面重新拍摄固定的 8 张演示图，并让 README 与插件市场引用同一套图片。
+- 兼容性改为按 Host 公开能力说明，移除重复的具体 RC 版本和内部路由数量描述。
+- 补齐历史版本单条删除与清空历史的用户流程说明；清理公共仓库中的内部计划、QA 和机器临时路径，并增加自动卫生门禁。
+
 ### 1.0.0
 
 - 新增第五个 **历史版本** 页签：按原会话查看本地已验证版本、回收保护状态和不透明降级项。
@@ -195,7 +213,7 @@ npm test
 - 复用原有对话预览显示快照时间与已验证图片；恢复始终生成新的已归档 ID，不覆盖来源。
 - 新增经过危险确认的单条历史删除和全局清空；不使用复选框，回收站保护/降级快照不会被该操作删除。
 - 回收移动可复用相同非空修订快照；保留策略继续治理历史，永久删除会清掉该来源的全部已验证快照。
-- 真实 `0.1.1-rc.2` Web Host 验证了插件加载、安全清单与能力降级；宿主缺少 writer 时恢复以 `restore-unsupported` 无写入失败。
+- 在真实 Web Host 中验证了插件加载、安全清单与能力降级；Host 缺少 writer 时恢复以 `restore-unsupported` 无写入失败。
 - **降级提醒：** 0.12 不显示「历史版本」页签，但仍能校验、保留和清理 version 1 快照。降级前仍应备份 `$DSH_HOME/plugin-data/archived-chats/`。
 
 ### 0.12.0
@@ -227,7 +245,7 @@ npm test
 - 新增按需显示的批量选择模式：列表默认不展示复选框，点击入口后才显示，完成批量操作后自动退出。
 - 将常用 ZIP 备份操作改为直接的 **导入备份 / 导出备份**，危险操作收纳到 **更多**，精简页头布局。
 - 移除未提供原生继续能力的跨工具 JSONL 迁移入口，让插件专注于 DSH 已归档聊天管理。
-- 在 DeepSeek Harness `0.1.0-rc.8` 真实宿主中复核新控件、备份预览和标题单行布局。
+- 在真实宿主中复核新控件、备份预览和标题单行布局。
 
 ### 0.8.1
 
@@ -253,8 +271,8 @@ npm test
 
 ### 0.5.1
 
-- 发布面向 DeepSeek Harness `0.1.0-rc.7` 的兼容性修订版本。
-- 更新浏览器设置区块，使用 rc.7 的浮层和状态设计令牌。
+- 发布兼容性修订版本。
+- 更新浏览器设置区块，使用宿主提供的浮层和状态设计令牌。
 
 ### 0.5.0
 
