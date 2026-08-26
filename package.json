@@ -71,6 +71,7 @@
     "lib/types",
     "docs/ARCHITECTURE.md",
     "docs/ARCHITECTURE.en.md",
+    "assets/brand",
     "assets/screenshots",
     "cordis.patch.yml"
   ],
