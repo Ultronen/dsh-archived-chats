@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, truncate, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -12,7 +12,7 @@ const image = (patch = {}) => ({ attachmentId: 'image-a', mediaType: 'image/png'
 const archive = { title: 'Alpha', workspace: null, tags: [], note: '', wasArchived: true, origin: null, metadataUpdatedAt: null };
 const tempRoots = new Set();
 test.after(async () => Promise.all([...tempRoots].map((root) => rm(root, { recursive: true, force: true }))));
-const fixture = async ({ events = [{ seq: 0, type: 'session/start', data: {} }], revisions = ['rev-1'], readImage, listSnapshots = true, uuid = () => SNAPSHOT_ID } = {}) => {
+const fixture = async ({ events = [{ seq: 0, type: 'session/start', data: {} }], revisions = ['rev-1'], readImage, listSnapshots = true, uuid = () => SNAPSHOT_ID, openFile } = {}) => {
   const root = await mkdtemp(join(tmpdir(), 'dac-snapshot-'));
   tempRoots.add(root);
   const meta = { id: 'session-a', version: 1, cwd: '/project' };
@@ -27,7 +27,7 @@ const fixture = async ({ events = [{ seq: 0, type: 'session/start', data: {} }],
     persistence.listSnapshots = async () => [{ header: meta, revision: revisions[Math.min(revisionCall++, revisions.length - 1)] }];
   }
   const attachments = readImage === undefined ? null : { readImage };
-  const store = createSnapshotStore({ root, persistence, attachments, uuid, now: () => new Date('2026-08-24T00:00:00.000Z') });
+  const store = createSnapshotStore({ root, persistence, attachments, uuid, openFile, now: () => new Date('2026-08-24T00:00:00.000Z') });
   return { root, meta, persistence, store, revisionCalls: () => revisionCall };
 };
 
@@ -96,6 +96,21 @@ test('captures and validates one attachment-free snapshot atomically', async () 
   assert.equal((await stat(join(root, SNAPSHOT_ID))).mode & 0o777, 0o700);
   assert.equal((await stat(join(root, SNAPSHOT_ID, 'manifest.json'))).mode & 0o777, 0o600);
   assert.equal((await stat(join(root, SNAPSHOT_ID, 'session.json'))).mode & 0o777, 0o600);
+});
+
+test('capture reopens every durable snapshot file with write access before sync', async () => {
+  const flags = [];
+  const { store } = await fixture({
+    openFile: async (path, flag) => {
+      flags.push(flag);
+      return open(path, flag);
+    },
+  });
+
+  const saved = await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  await store.validate(saved.snapshotId);
+
+  assert.deepEqual(flags, ['r+', 'r+']);
 });
 
 test('inventory verifies published snapshots without returning attachment bytes', async () => {

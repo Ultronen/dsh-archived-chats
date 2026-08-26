@@ -30,3 +30,18 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm pack --dry-run --json
+
+  windows-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - run: npm ci
+      - run: npm test
+      - run: npm pack --dry-run --json
