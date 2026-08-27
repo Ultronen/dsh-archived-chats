@@ -398,3 +398,36 @@ test('projected-message cache evicts the least-recently-used entry', async () =>
 
   assert.deepEqual(Object.fromEntries(calls), { a: 1, b: 2, c: 1 });
 });
+
+/**
+ * NFKC can change a string's length (ﬁ → fi, ⑴ → (1), ㎡ → m2). A match offset
+ * measured in the normalized text is therefore not a valid offset into the
+ * original, and using it directly points the excerpt window at unrelated text —
+ * or past the end, producing an excerpt with no match in it at all.
+ */
+test('excerpts stay anchored on the match when normalization changes text length', async (t) => {
+  const message = (text) => [{
+    seq: 10,
+    time: 1,
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] },
+  }];
+  for (const [label, prefix] of [
+    ['ascii', 'x'.repeat(300)],
+    ['ligature', 'ﬁ'.repeat(300)],
+    ['parenthesized digit', '⑴'.repeat(300)],
+    ['squared unit', '㎡'.repeat(300)],
+    ['astral', '\u{1f600}'.repeat(300)],
+    ['cjk', '这是一段中文日志。'.repeat(40)],
+  ]) {
+    const projected = projectArchivedMessages(message(`${prefix} NEEDLE_TOKEN ${'y'.repeat(300)}`));
+    const matches = searchProjectedMessages(projected, 'needle_token');
+    assert.equal(matches.length, 1, `${label} matches`);
+    assert.ok(
+      matches[0].excerpt.includes('NEEDLE_TOKEN'),
+      `${label} excerpt contains the match, got ${JSON.stringify([...matches[0].excerpt].slice(0, 40).join(''))}`,
+    );
+  }
+  t.diagnostic('excerpt anchoring verified across length-changing normalizations');
+});
