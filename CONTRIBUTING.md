@@ -25,6 +25,10 @@ PR 应保持单一目的，并说明用户可见变化、兼容性影响、数�
 
 不得提交本地插件数据、数据库、聊天内容、附件、日志、访问令牌、`.DS_Store` 或测试临时文件。对导入、恢复、回收站和永久删除流程的改动必须包含失败与回滚场景测试。
 
+## 发布命名规则
+
+GitHub Release 标题必须与发布 tag 完全一致，例如 tag 为 `v1.0.2` 时标题只能是 `v1.0.2`，不要添加包名或其他前缀。产品名称和版本说明可以写在 Release body 中。
+
 ## Pull request checklist
 
 1. 从最新 `main` 创建短期分支。
@@ -36,3 +40,5 @@ PR 应保持单一目的，并说明用户可见变化、兼容性影响、数�
 ## English summary
 
 Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files. Versioning, npm publication, tags, releases, and marketplace updates are maintainer-only unless explicitly requested.
+
+GitHub Release titles must exactly match their tags (for example, `v1.0.2`); do not prefix them with the package name. Put product naming and release descriptions in the release body instead.
