@@ -103,6 +103,8 @@ The read-only relationship view uses durable Harness `parentSession` fields to s
 
 Search reveals matching paths inside collapsed branches. Project and status filters retain necessary ancestor context. Diagnostics report missing parents, cycles, and delegation-depth mismatches without changing relationships.
 
+A session header this version does not recognize — a newer Harness origin value, an absent timestamp — degrades that one node's detail and leaves the rest of the graph intact. The node limit applies to the graph actually shown, not to how many sessions Harness stores, so a large session history does not by itself disable this view.
+
 ## Local data and privacy
 
 All plugin-owned state stays under:
