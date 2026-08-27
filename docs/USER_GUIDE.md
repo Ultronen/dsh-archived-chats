@@ -41,7 +41,8 @@ The **History** view loads on first activation and groups validated local versio
 - Each healthy version shows timestamp, size, attachment count, and Recycle Bin protection state.
 - Preview is read-only and identifies the exact snapshot time.
 - **Restore as copy** asks the Host for a new session ID and creates a new archived chat. It never overwrites, unarchives, or deletes the source.
-- Ordinary versions can be deleted individually or cleared globally after confirmation. Versions protecting Recycle Bin recovery and unreadable degraded versions are skipped.
+- Ordinary versions can be deleted individually or cleared globally after confirmation. Only versions protecting Recycle Bin recovery are skipped.
+- An unreadable degraded version can no longer be restored from, but its bytes still occupy the snapshot store, so the same panel can reclaim it. A degraded version a recycle record still points at stays protected.
 
 ## Export, import, and restore
 
@@ -64,7 +65,7 @@ Import accepts this plugin's version-one ZIP format and always previews before w
 - Tags and notes restore through the same local limits.
 - Raw events and Markdown are never rendered in the import preview.
 - Confirmation tokens expire after 10 minutes and can be used once.
-- A Host without the public persistence writer returns `restore-unsupported` without writing anything.
+- Restore writes through a dedicated Host restore entry point when one exists, otherwise through the ordinary `create` / `append` / `locate` session-writer capability — the same path History **Restore as copy** already uses. Only a Host exposing neither returns `restore-unsupported`, and it writes nothing.
 
 ZIP import and History **Restore as copy** are separate workflows.
 
@@ -75,9 +76,11 @@ ZIP import and History **Restore as copy** are separate workflows.
 Restore has two levels:
 
 1. If the original session remains intact, restore removes only the recycle marker.
-2. If the original is missing, the plugin uses a validated snapshot through the public writer and never overwrites an existing ID.
+2. If the original is missing, the plugin uses a validated snapshot through the public `create` / `append` capability and never overwrites an existing ID.
 
-Only the Recycle Bin exposes **Delete permanently** and **Empty Recycle Bin**. Permanent purge records crash-recovery intent before deleting the original and every validated snapshot for that source. Interrupted purges retry on startup.
+Only the Recycle Bin exposes **Delete permanently** and **Empty Recycle Bin**. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from History. Interrupted purges retry on startup.
+
+If `trash.json` itself cannot be read, the Recycle Bin reports unavailable and every archive change — unarchive, tag and note edits, delete, and purge — is refused rather than guessed. The archived list stays browsable but is labelled as unverified, because a catalog it cannot read cannot prove which chats were already deleted.
 
 Removing snapshot attachment copies does not guarantee immediate cleanup of identical bytes in Harness's global attachment store; another session or Host garbage-collection policy may retain them.
 

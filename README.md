@@ -76,7 +76,7 @@ Features activate from the public capabilities exposed by the DeepSeek Harness H
 | --- | --- |
 | Archive and session reads | Browsing, search, preview, History inventory, storage accounting, and lineage. |
 | Attachment reads | Stored images appear in conversation and snapshot previews; without it, text remains readable. |
-| Public persistence writer | Required for ZIP import, **Restore as copy**, and snapshot fallback when an original is missing. |
+| Public session writer | ZIP import, **Restore as copy**, and snapshot fallback when an original is missing all write through the Host's public `create` / `append` / `locate` capability, or a dedicated restore entry point where one exists. |
 | Missing write capability | The operation returns `restore-unsupported` without writing or overwriting data. |
 
 Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading to a release that does not display History or understand recycle snapshots.

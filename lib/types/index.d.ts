@@ -16,10 +16,16 @@
  * attachment descriptors, and
  * degrades only image loading when the optional attachment service is absent.
  * Metadata mutation remains guarded through `/metadata`, and archive restore is
- * preview-first through the import routes. Import restore is capability detected
- * and returns `restore-unsupported` when the host has no writer. Ordinary
- * delete creates a verified local protection snapshot and moves the session
- * into the recycle catalog; only guarded trash purge physically deletes it.
+ * preview-first through the import routes. Import restore is capability
+ * detected: a dedicated host restore entry point is preferred, otherwise the
+ * ordinary create/append/locate surface is used, and `restore-unsupported` is
+ * returned only when neither exists. Archive mutations fail closed while the
+ * recycle catalog is unreadable, and `/state` reports `trashStatus` so the
+ * listing can be labelled as unverified. Ordinary delete creates a verified
+ * local protection snapshot and moves the session into the recycle catalog;
+ * only guarded trash purge physically deletes it, removing protection
+ * snapshots before the irreversible session delete so a failure never strands
+ * a record whose session is already gone.
  * Startup migrates legacy pending deletions into recoverable trash and retries
  * only records carrying durable `purge-pending` intent.
  */
@@ -62,6 +68,7 @@ export interface HistoryRestoreResult {
   warnings: Array<{ id: string; reason: string }>;
 }
 
+/** A degraded version carries no readable bytes but can still be reclaimed. */
 export interface HistoryDeleteResult {
   deleted: string[];
   freedBytes: number;

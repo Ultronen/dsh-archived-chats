@@ -76,7 +76,7 @@ dsh plugin --profile web update dsh-archived-chats
 | --- | --- |
 | 归档与会话读取 | 浏览、搜索、预览、历史清单、空间分账和会话血缘。 |
 | 附件读取 | 对话和快照预览可显示已存储图片；缺少时文本内容仍可阅读。 |
-| 公开持久层 writer | ZIP 导入、**恢复为副本**，以及原件丢失时的快照回退恢复需要此能力。 |
+| 公开会话 writer | ZIP 导入、**恢复为副本** 和原件丢失时的快照回退，都通过 Host 公开的 `create` / `append` / `locate` 能力写入；Host 提供专用恢复入口时优先使用。 |
 | 缺少写入能力 | 操作返回 `restore-unsupported`，不会写入或覆盖数据。 |
 
 降级到不显示历史版本或不识别回收快照的版本前，请备份 `$DSH_HOME/plugin-data/archived-chats/`。
