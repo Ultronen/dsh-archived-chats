@@ -74,8 +74,10 @@ test('retention store writes atomically with private modes and serializes saves'
   const second = { ...DEFAULT_RETENTION_POLICY, recycleMaxAgeDays: 30 };
   await Promise.all([store.save(first), store.save(second)]);
   assert.deepEqual(await store.load(), { status: 'ready', policy: second });
-  assert.equal((await stat(root)).mode & 0o777, 0o700);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(root)).mode & 0o777, 0o700);
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+  }
   assert.deepEqual(await readdir(root), ['retention.json']);
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { version: 1, policy: second });
 });

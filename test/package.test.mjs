@@ -42,6 +42,7 @@ test(`published ${packageVersion} package contains runtime, brand banner, fixed 
     cwd: root,
     encoding: 'utf8',
     env: { ...process.env, npm_config_cache: cache },
+    shell: process.platform === 'win32',
   });
   rmSync(cache, { recursive: true, force: true });
 

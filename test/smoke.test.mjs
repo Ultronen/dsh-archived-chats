@@ -314,7 +314,7 @@ services.attachments = {
   }),
 };
 
-const { apply, name } = await import(join(here, '../lib/index.js'));
+const { apply, name } = await import(new URL('../lib/index.js', import.meta.url));
 //#endregion
 
 console.log('\n[1] host half — lazy route registration');
@@ -1117,7 +1117,7 @@ console.log('\n[9] boot migration — deferred deletions become recoverable tras
     effect: (fn) => { fn(); },
     logger: { warn: () => {}, info: () => {} },
   };
-  const { apply: applyBoot } = await import(join(here, '../lib/index.js'));
+  const { apply: applyBoot } = await import(new URL('../lib/index.js', import.meta.url));
   const pendingPath = join(testHome, 'plugin-data', 'archived-chats', 'pending-deletions.json');
   writeFileSync(pendingPath, JSON.stringify({ ids: ['session-live'] }), 'utf8');
   applyBoot(ctx2);

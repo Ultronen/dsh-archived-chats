@@ -91,11 +91,13 @@ test('captures and validates one attachment-free snapshot atomically', async () 
   assert.equal(summary.attachmentCount, 0);
   assert.equal((await store.validate(summary.snapshotId)).record.source.events[0].seq, 0);
   assert.deepEqual((await readdir(root)).sort(), [SNAPSHOT_ID, '.staging'].sort());
-  assert.equal((await stat(root)).mode & 0o777, 0o700);
-  assert.equal((await stat(join(root, '.staging'))).mode & 0o777, 0o700);
-  assert.equal((await stat(join(root, SNAPSHOT_ID))).mode & 0o777, 0o700);
-  assert.equal((await stat(join(root, SNAPSHOT_ID, 'manifest.json'))).mode & 0o777, 0o600);
-  assert.equal((await stat(join(root, SNAPSHOT_ID, 'session.json'))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(root)).mode & 0o777, 0o700);
+    assert.equal((await stat(join(root, '.staging'))).mode & 0o777, 0o700);
+    assert.equal((await stat(join(root, SNAPSHOT_ID))).mode & 0o777, 0o700);
+    assert.equal((await stat(join(root, SNAPSHOT_ID, 'manifest.json'))).mode & 0o777, 0o600);
+    assert.equal((await stat(join(root, SNAPSHOT_ID, 'session.json'))).mode & 0o777, 0o600);
+  }
 });
 
 test('capture reopens every durable snapshot file with write access before sync', async () => {
@@ -302,8 +304,10 @@ test('validates a published attachment-bearing snapshot against its saved descri
   assert.equal(checked.attachments.length, 1);
   assert.deepEqual(checked.attachments[0].descriptor.attachmentId, 'image-a');
   assert.equal(checked.attachments[0].descriptor.file, 'attachments/001-9f64a747e1b97f13.png');
-  assert.equal((await stat(join(checked.attachments[0].path, '..'))).mode & 0o777, 0o700);
-  assert.equal((await stat(checked.attachments[0].path)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(checked.attachments[0].path, '..'))).mode & 0o777, 0o700);
+    assert.equal((await stat(checked.attachments[0].path)).mode & 0o777, 0o600);
+  }
 });
 
 test('rejects missing attachment capability, mismatched descriptors, missing source, and unstable sources', async () => {
