@@ -2667,7 +2667,7 @@ console.log('\n[11c] client half — bulk selection workflow');
         ? 'Alpha'
       : index === 12
           ? { title: '将选中的已归档聊天移至回收站？', body: '这将把选中的 1 个已归档聊天移至回收站', ids: ['session-a'] }
-          : index === 24
+          : index === 25
             ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
@@ -2810,12 +2810,15 @@ console.log('\n[11c] client half — archive insights UI');
   };
   const states = [];
   const effectRecords = [];
+  // Positional pins into ArchivedChatsSection's useState order: sessions,
+  // tagFilter, metadataStatus, archiveTrashStatus, stats, metadataEdit, metaBusy.
   states[0] = { value: archivedRows, setter: null };
   states[17] = { value: '', setter: null };
   states[18] = { value: 'ready', setter: null };
-  states[19] = { value: statsFixture, setter: null };
-  states[20] = { value: null, setter: null };
-  states[21] = { value: false, setter: null };
+  states[19] = { value: 'ready', setter: null };
+  states[20] = { value: statsFixture, setter: null };
+  states[21] = { value: null, setter: null };
+  states[22] = { value: false, setter: null };
   const setterAt = (index) => (next) => {
     states[index].value = typeof next === 'function' ? next(states[index].value) : next;
   };
@@ -2888,7 +2891,7 @@ console.log('\n[11c] client half — archive insights UI');
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-  states[22].value = {
+  states[23].value = {
     token: 'token-ui',
     nonce: 'nonce-ui',
     package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
@@ -2899,7 +2902,7 @@ console.log('\n[11c] client half — archive insights UI');
     selectedIds: ['new-session'],
     result: null,
   };
-  states[23].value = false;
+  states[24].value = false;
   tree = renderSection();
   elements = collectElements(tree);
   const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
@@ -2922,8 +2925,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoreRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import confirmation sends the guard header');
   assert(JSON.parse(restoreRequests[0]?.options.body ?? '{}').sessionIds.join(',') === 'new-session', 'import confirmation sends only selected non-conflicting IDs');
   globalThis.fetch = savedImportFetch;
-  states[22].value = null;
-  states[19].value = statsFixture;
+  states[23].value = null;
+  states[20].value = statsFixture;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3003,11 +3006,11 @@ console.log('\n[11c] client half — archive insights UI');
     stopPropagation: () => { stoppedEscape = true; },
   });
   assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
-  assert(states[20].value === null, 'metadata Escape cancels only the metadata editor state');
+  assert(states[21].value === null, 'metadata Escape cancels only the metadata editor state');
   cleanupMeta?.();
   assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
 
-  states[20].value = archivedRows[0];
+  states[21].value = archivedRows[0];
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3051,7 +3054,7 @@ console.log('\n[11c] client half — archive insights UI');
   // Exercise the real MetadataDialog with persistent hooks so token semantics,
   // IME input, and effect cleanup are verified across actual re-renders.
   const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
-  states[20].value = commaTagSession;
+  states[21].value = commaTagSession;
   const rawSectionTree = renderSection();
   const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
   assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
@@ -3138,7 +3141,7 @@ console.log('\n[11c] client half — archive insights UI');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
   states[18].value = 'unavailable';
-  states[20].value = null;
+  states[21].value = null;
   tree = renderSection();
   elements = collectElements(tree);
   const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
@@ -3146,8 +3149,23 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elements.find((el) => el.props?.className === 'dac-warn') !== undefined, 'unavailable metadata shows a warning');
   assert(elements.filter(isRow).length === 3, 'unavailable metadata keeps all rows listed');
 
+  // An unreadable recycle catalog means the listing cannot be trusted to exclude
+  // already-deleted chats, so it has to be labelled rather than shown as normal.
+  states[18].value = 'ready';
+  states[19].value = 'unavailable';
+  tree = renderSection();
+  elements = collectElements(tree);
+  const trashWarn = elements.filter((el) => el.props?.className === 'dac-warn');
+  assert(trashWarn.length === 1 && elementText(trashWarn[0]).includes('回收站目录无法读取'),
+    'an unreadable recycle catalog is surfaced on the archived list');
+  assert(elements.filter(isRow).length === 3, 'the warning never hides rows');
+  states[19].value = 'ready';
+  tree = renderSection();
+  assert(collectElements(tree).filter((el) => el.props?.className === 'dac-warn').length === 0,
+    'a readable recycle catalog shows no warning');
+
   // Statistics failure never removes rows or lifecycle actions.
-  states[19].value = { status: 'error', summary: null, sessions: {} };
+  states[20].value = { status: 'error', summary: null, sessions: {} };
   states[18].value = 'ready';
   tree = renderSection();
   elements = collectElements(tree);
