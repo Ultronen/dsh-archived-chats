@@ -557,11 +557,17 @@ test('recovery removes stale staging, preserves valid orphans, selects determini
   await store.remove(ids[0]);
   assert.deepEqual(await store.latestFor('session-a'), { snapshotId: ids[1], sessionId: 'session-a', createdAt: '2026-08-24T00:00:00.000Z' });
   await assert.rejects(store.remove('../outside'), (error) => error.code === 'snapshot-id-invalid');
-  await assert.rejects(store.removeForSession('other-session'), (error) => error.code === 'snapshot-json-invalid');
+  // An unrelated degraded snapshot must never abort the sweep: physical purge
+  // depends on it, so corruption elsewhere in the store cannot be allowed to
+  // block deleting a different session.
+  assert.deepEqual(await store.removeForSession('other-session'), []);
   assert.equal((await readdir(root)).includes(ids[1]), true);
-  await store.remove(ids[2]);
+  assert.equal((await readdir(root)).includes(ids[2]), true);
   await store.removeForSession('session-a');
   assert.equal((await readdir(root)).includes(ids[1]), false);
+  assert.equal((await readdir(root)).includes(ids[2]), true);
+  // A record whose own snapshot is damaged past attribution still names it.
+  await store.removeForSession('session-a', { knownIds: [ids[2]] });
   assert.equal((await readdir(root)).includes(ids[2]), false);
 });
 
