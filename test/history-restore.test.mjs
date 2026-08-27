@@ -76,9 +76,9 @@ async function fixture(options = {}) {
     locate(meta) { return { kind: 'jsonl', path: join(root, meta.id, 'session.jsonl.zstd') }; },
     async create(meta) {
       calls.push('create');
-      if (options.failCreate) throw Object.assign(new Error('create failed'), { code: 'create-failed' });
       ids.add(meta.id);
       this.created.push(structuredClone(meta));
+      if (options.failCreate) throw Object.assign(new Error('create failed'), { code: 'create-failed' });
     },
     async append(id, events) {
       calls.push('append');
@@ -89,14 +89,18 @@ async function fixture(options = {}) {
   };
   const workspace = {
     id: 'workspace-a', title: 'Workspace A', path: '/project', sessionIds: new Set([SOURCE_ID]),
-    async attachSession(id) { calls.push('workspace'); if (options.failWorkspace) throw Object.assign(new Error('workspace failed'), { code: 'workspace-failed' }); this.sessionIds.add(id); },
+    async attachSession(id) { calls.push('workspace'); this.sessionIds.add(id); if (options.failWorkspace) throw Object.assign(new Error('workspace failed'), { code: 'workspace-failed' }); },
     async detachSession(id) { calls.push('workspace-undo'); this.sessionIds.delete(id); },
   };
   const registry = {
     state: { archivedSessionIds: [SOURCE_ID], workspaceIds: ['workspace-a'] },
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => options.missingWorkspace ? [] : [workspace],
-    async setState(next) { calls.push('registry'); if (options.failRegistry) throw Object.assign(new Error('registry failed'), { code: 'registry-failed' }); this.state = structuredClone(next); },
+    async setState(next) {
+      calls.push('registry');
+      this.state = structuredClone(next);
+      if (options.failRegistry && next.archivedSessionIds.includes(DESTINATION_ID)) throw Object.assign(new Error('registry failed'), { code: 'registry-failed' });
+    },
   };
   const metadata = new Map([[SOURCE_ID, { tags: ['important'], note: 'keep context', updatedAt: NOW }]]);
   const metadataStore = {
@@ -105,7 +109,7 @@ async function fixture(options = {}) {
       for (const id of requested) if (metadata.has(id)) entries[id] = structuredClone(metadata.get(id));
       return { status: 'ready', entries };
     },
-    async set(id, value) { calls.push('metadata'); if (options.failMetadata) throw Object.assign(new Error('metadata failed'), { code: 'metadata-failed' }); metadata.set(id, { ...structuredClone(value), updatedAt: NOW }); },
+    async set(id, value) { calls.push('metadata'); metadata.set(id, { ...structuredClone(value), updatedAt: NOW }); if (options.failMetadata) throw Object.assign(new Error('metadata failed'), { code: 'metadata-failed' }); },
     async remove(requested) { calls.push('metadata-undo'); for (const id of requested) metadata.delete(id); },
   };
   const attachments = {

@@ -76,7 +76,7 @@ Preview accepts visible archived IDs by default and only recycle-catalog IDs wit
 
 The preview/image authorization sequence is fixed: first require POST and `x-dsh-archived-chats: 1`, then bounded-parse `sessionId` and `attachmentId`; next confirm that the session is still in the currently visible archive set, find an exact image-descriptor match in that session's canonical projection, and only then read bytes through the optional `attachments.readImage` service. Both preview and preview/image recheck visible archive state after asynchronous reads and immediately before sending a response, preventing an overlapping unarchive or delete from exposing stale content. Image bytes use `no-store` and `nosniff`; cross-session, non-archived, and unprojected references are rejected, and error responses never echo filesystem paths. A host without attachment-read capability returns `preview-image-unsupported`; this degrades images only and does not block text, Markdown, reasoning, tool, JSON, or code preview.
 
-Cross-session persistence inspection is limited to four concurrent reads. A broken session is reported in `skipped` while other hits still succeed. Canonical projections use a 30-second TTL, a 64-session LRU, and a per-session cached-code-point cap; oversized sessions remain searchable but do not stay resident. Unarchive, delete, and restore invalidate affected cache entries.
+Cross-session persistence inspection is limited to four concurrent reads, stops scheduling batches once the hit limit is satisfied, and aborts an older browser request when a newer search starts. A broken session is reported in `skipped` while other hits still succeed. Canonical projection limits each segment to 256 Ki code points, each message to 1 Mi code points and 1,000 segments, and each session to 10,000 projected messages; unknown structured values are bounded by depth, node, and character budgets before stringify. A 30-second TTL, 64-session LRU, and per-session cache cap keep bounded projections resident. Unarchive, delete, and restore invalidate affected cache entries.
 
 ## History versions and restore-as-copy
 
@@ -104,7 +104,7 @@ ZIP paths are sanitized and collision-safe. Batch export inspects and writes ses
 
 ## Import and restore flow
 
-import/inspect accepts only version-one ZIPs produced by this plugin. The Host streams bounded compressed chunks, preflights declared entry sizes, counts actual output, and caps entry count, per-entry bytes, manifest bytes, and total expansion. Iterative JSON validation then caps depth, node count, and total Unicode code points before path, version, session-record, and cross-file checks return a preview:
+import/inspect accepts only version-one ZIPs produced by this plugin. The Host streams bounded compressed chunks, preflights declared entry sizes, counts actual output, and caps entry count, per-entry bytes, manifest bytes, and total expansion. Iterative JSON validation then caps depth, node count, and total Unicode code points before checking paths, versions, generator, workspace, storage descriptors, timestamps, `source.meta.id`, the event array, and cross-file consistency:
 
 1. The browser uploads the ZIP and receives session summaries, versions, size, and warnings.
 2. Existing session IDs are marked as conflicts and deselected by default.
@@ -113,19 +113,19 @@ import/inspect accepts only version-one ZIPs produced by this plugin. The Host s
 5. restore.js uses a feature-detected adapter to write sessions, metadata, and archive state.
 6. Any failure rolls back staged data and never overwrites an existing session.
 
-The confirmation token expires quickly and can be used once. Hosts without the supported writer capability return restore-unsupported without writing.
+The confirmation token expires quickly, can be used once, and is bounded to eight retained plans and 128 MiB total per process. Confirmation-time conflict revalidation, staging, and commit all run inside the shared lifecycle queue. Import is enabled only when the Host exposes writer, removal rollback, archive, and metadata capabilities; workspace attach is used only with a matching detach, otherwise the item restores ungrouped with a warning. A boundary that throws after changing state is compensated in reverse order; failed compensation is reported explicitly rather than returning false success.
 
 ## Recycle and protection-snapshot lifecycle
 
 `trash.json` permits only `trashed`, `purge-pending`, and `degraded`. Legal transitions are `missing -> trashed`, `trashed/degraded -> purge-pending`, and removal of an existing state after a committed transaction. A `purge-pending` record cannot restore.
 
-Protection manifests use `dsh-archived-chats/snapshot` v1 and session payloads use `dsh-archived-chats/snapshot-session` v1. Each recycle record names one active snapshot; older valid snapshots from restore/recycle cycles remain history until explicit retention application or permanent purge. Exact limits remain 4 MiB manifest, 512 MiB session JSON, 10,000 attachments, 32 MiB each, and 8 GiB total.
+Protection manifests use `dsh-archived-chats/snapshot` v1 and session payloads use `dsh-archived-chats/snapshot-session` v1. Each recycle record names one active snapshot; older valid snapshots from restore/recycle cycles remain history until explicit retention application or permanent purge. Exact limits are 4 MiB manifest, 64 MiB session JSON, 1,000 attachments, 32 MiB each, and 512 MiB total. Restore validation streams attachment digests first and rereads one attachment at a time immediately before Host writes, never retaining all attachment bytes together. Snapshot publication/deletion and state-file renames sync file and parent-directory durability, with a safe fallback on Windows filesystems that do not expose directory fsync.
 
 Move ordering is: validate archive ownership → dispose or park a live session → capture and verify snapshot → recheck ownership → atomically commit `trashed` → invalidate caches. Ordinary move never removes the persistence artifact.
 
 Restore first rejects an existing-ID conflict. With an intact original it restores archive visibility and removes only the recycle record, without rewriting persistence; the snapshot remains history. With a missing original it completes validation and attachment-identity republishing before writing through public `create` / `append` / `saveImage` capabilities. A failure rolls back the new artifact and retains trash.
 
-Permanent purge persists `purge-pending` before physical writes, then removes the original, every validated snapshot for that source, and the recycle record. Startup recovery retries only `purge-pending`, never plain `trashed`. Legacy `pending-deletions.json` is strict read-only migration input: each still-archived ID becomes recoverable trash and is never boot-deleted merely because of the old marker.
+Permanent purge persists `purge-pending` before physical writes, then removes the original, every validated snapshot for that source, and the recycle record. Workspace, metadata, snapshot, or physical-delete failures retain `purge-pending`; snapshot deletion is rescanned before success can be returned. Startup recovery retries only `purge-pending`, never plain `trashed`. Legacy `pending-deletions.json` is strict read-only migration input: each still-archived ID becomes recoverable trash and is never boot-deleted merely because of the old marker.
 
 ## Browser client
 

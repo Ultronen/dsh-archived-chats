@@ -866,19 +866,20 @@ console.log('\n[2d] metadata write failures log only safe diagnostics');
   const id = 'session-a';
   const secretTag = 'customer-secret-tag';
   const secretNote = 'private incident details';
-  const tempPath = `${metadataFile}.${process.pid}.tmp`;
-  mkdirSync(tempPath);
+  const metadataBefore = readFileSync(metadataFile, 'utf8');
+  rmSync(metadataFile, { force: true });
+  mkdirSync(metadataFile);
   const warningCount = warnings.length;
   const saved = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
     'POST',
     { 'x-dsh-archived-chats': '1' },
     JSON.stringify({ sessionId: id, tags: [secretTag], note: secretNote }),
   ));
-  rmSync(tempPath, { recursive: true, force: true });
+  rmSync(metadataFile, { recursive: true, force: true });
+  writeFileSync(metadataFile, metadataBefore, 'utf8');
   const newWarnings = warnings.slice(warningCount).join('\n');
-  assert(saved.status === 500, `metadata filesystem failure answers 500 (got ${saved.status})`);
-  assert(newWarnings.includes(id) && newWarnings.includes('EISDIR'), 'metadata failure warning identifies the session and error code');
-  assert(!newWarnings.includes(secretTag) && !newWarnings.includes(secretNote), 'metadata failure warning excludes user-authored tags and notes');
+  assert(saved.status === 503, `unreadable metadata target fails closed (got ${saved.status})`);
+  assert(!newWarnings.includes(secretTag) && !newWarnings.includes(secretNote), 'metadata store failure logs no user-authored content');
 }
 
 console.log('\n[3] POST guard');
@@ -1838,11 +1839,13 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(previewRequest?.options.body === '{"sessionId":"session-a","offset":50,"limit":25}', 'preview helper sends the requested timeline window');
 
   assert(typeof clientExports.__test.fetchArchiveSearch === 'function', 'client exposes the archive full-text request boundary');
-  const searchBody = await clientExports.__test.fetchArchiveSearch?.('needle', 20);
+  const searchController = new AbortController();
+  const searchBody = await clientExports.__test.fetchArchiveSearch?.('needle', 20, searchController.signal);
   const searchRequest = inspectRequests.at(-1);
   assert(searchBody?.hits?.[0]?.sessionId === 'session-a', 'search helper returns full-text hits');
   assert(searchRequest?.url === '/plugins/dsh-archived-chats/search', 'search helper targets the guarded search route');
   assert(searchRequest?.options.method === 'POST' && searchRequest?.options.headers['x-dsh-archived-chats'] === '1', 'search helper uses a guarded POST');
+  assert(searchRequest?.options.signal === searchController.signal, 'search helper forwards cancellation');
   assert(searchRequest?.options.body === '{"query":"needle","limit":20}', 'search helper sends only the bounded query contract');
 
   const trashRows = [

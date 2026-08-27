@@ -230,6 +230,18 @@ test('transcript renders append-origin Harness messages without replacement copi
   assert.doesNotMatch(markdown, /Replacement copy must stay hidden/);
 });
 
+test('transcript omits finite numbers outside the JavaScript date range', () => {
+  const markdown = renderTranscript(transcriptItem(), [{
+    seq: 0,
+    time: 1e300,
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { id: 'user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'safe' }] },
+  }], '2026-08-19T12:00:00.000Z');
+  assert.match(markdown, /## User\n\nsafe/);
+  assert.doesNotMatch(markdown, /Invalid Date|1e\+300/);
+});
+
 function zipPlan(count = 2) {
   return planExport(Array.from({ length: count }, (_, index) => ({
     id: `session-${String.fromCharCode(97 + index)}`,

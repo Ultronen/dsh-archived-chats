@@ -27,10 +27,15 @@ async function fixture() {
   const writes = [];
   const removed = [];
   const metadata = new Map();
+  const workspaceIds = new Set();
   const registry = {
     state,
     get archivedSessionIds() { return state.archivedSessionIds; },
-    list: () => [{ id: 'ws-1', title: 'Workspace', sessionIds: [], attachSession: async (id) => { writes.push({ attach: id }); } }],
+    list: () => [{
+      id: 'ws-1', title: 'Workspace', sessionIds: workspaceIds,
+      attachSession: async (id) => { workspaceIds.add(id); writes.push({ attach: id }); },
+      detachSession: async (id) => { workspaceIds.delete(id); writes.push({ detach: id }); },
+    }],
     async setState(next) { state.archivedSessionIds = next.archivedSessionIds; },
   };
   const metadataStore = {
@@ -47,6 +52,7 @@ async function fixture() {
       writes.push(payload);
       return async () => { removed.push(payload.id); };
     },
+    async removeSession(id) { removed.push(id); },
     async inspect(id) { return { meta: { id }, events: [] }; },
   };
   return { root, state, writes, removed, metadata, registry, metadataStore, persistence };
@@ -77,6 +83,36 @@ test('unsupported host never writes', async () => {
   await rm(f.root, { recursive: true, force: true });
 });
 
+test('writer without a preflight rollback capability is rejected before writing', async () => {
+  const f = await fixture();
+  const persistence = { restoreSession: f.persistence.restoreSession, inspect: f.persistence.inspect };
+  const adapter = createRestoreAdapter({ persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  assert.deepEqual(adapter.capability, { supported: false, reason: 'rollback-missing' });
+  await assert.rejects(() => adapter.prepare([item('a')]), (error) => error.code === 'restore-unsupported');
+  assert.deepEqual(f.writes, []);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('unavailable metadata rejects preparation before staging or persistence writes', async () => {
+  const f = await fixture();
+  f.metadataStore.getMany = async () => ({ status: 'unavailable', entries: {} });
+  const adapter = createRestoreAdapter({ persistence: f.persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  await assert.rejects(() => adapter.prepare([item('a')]), (error) => error.code === 'metadata-store-unavailable' && error.status === 503);
+  assert.deepEqual(f.writes, []);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('staging capability failures clean temporary records before returning', async () => {
+  const f = await fixture();
+  f.persistence.inspect = async () => { throw Object.assign(new Error('inspect failed'), { code: 'inspect-failed' }); };
+  const adapter = createRestoreAdapter({ persistence: f.persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  const tx = await adapter.prepare([item('a')]);
+  await assert.rejects(() => tx.stage(item('a')), (error) => error.code === 'inspect-failed');
+  assert.deepEqual(await readdir(f.root), []);
+  assert.deepEqual(f.writes, []);
+  await rm(f.root, { recursive: true, force: true });
+});
+
 test('commit failure rolls back persistence, metadata, archive state, and staging files', async () => {
   const f = await fixture();
   let count = 0;
@@ -92,8 +128,38 @@ test('commit failure rolls back persistence, metadata, archive state, and stagin
   await tx.stage(item('b'));
   await assert.rejects(() => tx.commit(), /writer failed/);
   assert.deepEqual(f.state.archivedSessionIds, ['existing']);
-  assert.deepEqual(f.removed, ['a']);
+  assert.deepEqual(f.removed, ['b', 'a']);
   assert.deepEqual(await readdir(f.root), []);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('metadata failure after a Host write removes the session and detaches its workspace', async () => {
+  const f = await fixture();
+  f.metadataStore.set = async (id, value) => {
+    f.metadata.set(id, { ...value, updatedAt: 'now' });
+    throw Object.assign(new Error('metadata failed'), { code: 'metadata-failed' });
+  };
+  const adapter = createRestoreAdapter({ persistence: f.persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  const tx = await adapter.prepare([item('a')]);
+  await tx.stage(item('a'));
+  await assert.rejects(() => tx.commit(), /metadata failed/);
+  assert.deepEqual(f.removed, ['a']);
+  assert.equal(f.metadata.has('a'), false);
+  assert.ok(f.writes.some((entry) => entry.attach === 'a'));
+  assert.ok(f.writes.some((entry) => entry.detach === 'a'));
+  assert.deepEqual(f.state.archivedSessionIds, ['existing']);
+  await rm(f.root, { recursive: true, force: true });
+});
+
+test('workspace attachment is skipped with a warning unless detach is available', async () => {
+  const f = await fixture();
+  f.registry.list = () => [{ id: 'ws-1', sessionIds: [], attachSession: async (id) => { f.writes.push({ attach: id }); } }];
+  const adapter = createRestoreAdapter({ persistence: f.persistence, registry: f.registry, metadataStore: f.metadataStore, tempRoot: f.root });
+  const tx = await adapter.prepare([item('a')]);
+  await tx.stage(item('a'));
+  const result = await tx.commit();
+  assert.ok(result.warnings.some((entry) => entry.id === 'a' && entry.reason === 'workspace-unresolved'));
+  assert.equal(f.writes.some((entry) => entry.attach === 'a'), false);
   await rm(f.root, { recursive: true, force: true });
 });
 
