@@ -163,6 +163,28 @@ test('preview projection bounds native correlation strings and cache accounts fo
   assert.equal(inspections, 2);
 });
 
+test('projection bounds huge structured values and per-message segment counts before joining', () => {
+  const messages = projectArchivedMessages([{
+    seq: 1,
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      message: {
+        role: 'assistant',
+        source: { kind: 'model' },
+        content: [
+          { type: 'future', payload: { text: 'x'.repeat(2_000_000) } },
+          ...Array.from({ length: 2000 }, (_, index) => ({ type: 'text', text: String(index) })),
+        ],
+      },
+    },
+  }]);
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].segments.length <= searchModule.PREVIEW_LIMITS.maxSegmentsPerMessage);
+  assert.ok(messages[0].segments[0].text.length <= searchModule.PREVIEW_LIMITS.maxSegmentCodePoints + 1);
+  assert.ok(messages[0].searchable.length <= searchModule.PREVIEW_LIMITS.maxMessageCodePoints + 4096);
+});
+
 test('identity fields use code-point limits without truncation', () => {
   const exactId = '😀'.repeat(1024);
   const oversizedId = '😀'.repeat(1025);
@@ -288,6 +310,37 @@ test('archive search bounds concurrent persistence inspection', async () => {
   assert.equal(result.hits.length, 12);
   assert.equal(result.skipped.length, 0);
   assert.equal(maximum, 4);
+});
+
+test('archive search stops after the first ordered batch satisfying the hit limit', async () => {
+  let inspections = 0;
+  const result = await searchArchivedSessions({
+    ids: Array.from({ length: 100 }, (_, index) => `session-${index}`),
+    query: 'match',
+    limit: 1,
+    inspect: async () => {
+      inspections += 1;
+      return { events: [userEvent(1, 'match')] };
+    },
+  });
+  assert.equal(result.hits.length, 1);
+  assert.ok(inspections <= searchModule.SEARCH_LIMITS.concurrency);
+});
+
+test('archive search stops scheduling work after request cancellation', async () => {
+  const controller = new AbortController();
+  let inspections = 0;
+  await assert.rejects(searchArchivedSessions({
+    ids: Array.from({ length: 20 }, (_, index) => `session-${index}`),
+    query: 'missing',
+    signal: controller.signal,
+    inspect: async () => {
+      inspections += 1;
+      controller.abort(Object.assign(new Error('cancelled'), { code: 'request-aborted', status: 499 }));
+      return { events: [] };
+    },
+  }), (error) => error.code === 'request-aborted');
+  assert.ok(inspections <= searchModule.SEARCH_LIMITS.concurrency);
 });
 
 test('archive search rejects empty and oversized queries before inspection', async () => {

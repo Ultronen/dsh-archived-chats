@@ -74,6 +74,7 @@ function recycleFixture(options = {}) {
       this.ids.add(String(meta.id));
       mkdirSync(join(root, String(meta.id)), { recursive: true });
       writeFileSync(join(root, String(meta.id), 'session.jsonl.zstd'), 'created');
+      if (options.failCreateAfterWrite) throw Object.assign(new Error('create failed'), { code: 'create-failed' });
     },
     async append(sessionId, events) {
       this.writeCalls += 1;
@@ -87,15 +88,23 @@ function recycleFixture(options = {}) {
     },
   };
   const workspace = {
-    id: 'ws-1', title: 'Project', path: '/project', sessionIds: new Set([id]),
-    async attachSession(sessionId) { this.sessionIds.add(sessionId); },
+    id: 'ws-1', title: 'Project', path: '/project', sessionIds: new Set(options.workspaceDetached ? [] : [id]),
+    async attachSession(sessionId) {
+      this.sessionIds.add(sessionId);
+      if (options.restoreAttachError) throw Object.assign(new Error('attach failed'), { code: 'attach-failed' });
+    },
     async detachSession(sessionId) { this.sessionIds.delete(sessionId); },
   };
   const registry = {
     state: { archivedSessionIds: options.unarchived ? [] : [id], workspaceIds: ['ws-1'] },
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => [workspace],
-    async setState(next) { this.state = next; },
+    async setState(next) {
+      this.state = next;
+      if (options.restoreRegistryError && next.archivedSessionIds.includes(id)) {
+        throw Object.assign(new Error('registry failed'), { code: 'registry-failed' });
+      }
+    },
   };
   const metadata = new Map([[id, { tags: ['important'], note: 'keep context', updatedAt: NOW }]]);
   const metadataStore = {
@@ -104,7 +113,10 @@ function recycleFixture(options = {}) {
       for (const sessionId of ids) if (metadata.has(sessionId)) entries[sessionId] = structuredClone(metadata.get(sessionId));
       return { status: 'ready', entries };
     },
-    async set(sessionId, value) { metadata.set(sessionId, { ...structuredClone(value), updatedAt: NOW }); },
+    async set(sessionId, value) {
+      metadata.set(sessionId, { ...structuredClone(value), updatedAt: NOW });
+      if (options.restoreMetadataError) throw Object.assign(new Error('metadata failed'), { code: 'metadata-failed' });
+    },
     async remove(ids) { for (const sessionId of ids) metadata.delete(sessionId); },
   };
   const records = new Map();
@@ -187,6 +199,8 @@ function recycleFixture(options = {}) {
     },
     async removeForSession(sessionId) {
       calls.push(`snapshot:remove:${sessionId}`);
+      if (options.snapshotRemoveError) throw Object.assign(new Error('snapshot remove failed'), { code: 'snapshot-remove-failed' });
+      if (options.snapshotRemoveNoop) return [];
       snapshots.delete(sessionId);
       return [SNAPSHOT_ID];
     },
@@ -371,6 +385,48 @@ test('append failure rolls back the newly created artifact and preserves trash',
   assert.notEqual(await fixture.trashStore.get('session-a'), null);
 });
 
+test('snapshot fallback rolls back Host methods that throw after mutating state', async () => {
+  const createFailure = recycleFixture({ trashed: true, originalMissing: true, failCreateAfterWrite: true });
+  assert.deepEqual((await createFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'create-failed' }]);
+  assert.equal(createFailure.persistence.ids.has('session-a'), false);
+  assert.notEqual(await createFailure.trashStore.get('session-a'), null);
+
+  const attachFailure = recycleFixture({ trashed: true, originalMissing: true, workspaceDetached: true, restoreAttachError: true });
+  assert.deepEqual((await attachFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'attach-failed' }]);
+  assert.equal(attachFailure.workspace.sessionIds.has('session-a'), false);
+  assert.equal(attachFailure.persistence.ids.has('session-a'), false);
+
+  const metadataFailure = recycleFixture({ trashed: true, originalMissing: true, workspaceDetached: true, restoreMetadataError: true });
+  metadataFailure.metadata.delete('session-a');
+  assert.deepEqual((await metadataFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'metadata-failed' }]);
+  assert.equal(metadataFailure.metadata.has('session-a'), false);
+  assert.equal(metadataFailure.persistence.ids.has('session-a'), false);
+
+  const registryFailure = recycleFixture({ trashed: true, originalMissing: true, unarchived: true, restoreRegistryError: true });
+  assert.deepEqual((await registryFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'registry-failed' }]);
+  assert.deepEqual(registryFailure.registry.archivedSessionIds, []);
+  assert.equal(registryFailure.persistence.ids.has('session-a'), false);
+});
+
+test('intact-original restore keeps trash and rolls back partial registry, workspace, and metadata writes', async () => {
+  const registryFailure = recycleFixture({ trashed: true, unarchived: true, restoreRegistryError: true });
+  assert.deepEqual((await registryFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'registry-failed' }]);
+  assert.deepEqual(registryFailure.registry.archivedSessionIds, []);
+  assert.notEqual(await registryFailure.trashStore.get('session-a'), null);
+
+  const attachFailure = recycleFixture({ trashed: true, workspaceDetached: true, restoreAttachError: true });
+  assert.deepEqual((await attachFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'attach-failed' }]);
+  assert.equal(attachFailure.workspace.sessionIds.has('session-a'), false);
+  assert.notEqual(await attachFailure.trashStore.get('session-a'), null);
+
+  const metadataFailure = recycleFixture({ trashed: true, workspaceDetached: true, restoreMetadataError: true });
+  metadataFailure.metadata.delete('session-a');
+  assert.deepEqual((await metadataFailure.service.restore(['session-a'])).failed, [{ id: 'session-a', reason: 'metadata-failed' }]);
+  assert.equal(metadataFailure.workspace.sessionIds.has('session-a'), false);
+  assert.equal(metadataFailure.metadata.has('session-a'), false);
+  assert.notEqual(await metadataFailure.trashStore.get('session-a'), null);
+});
+
 test('records purge intent before physical deletion and removes trash last', async () => {
   const fixture = recycleFixture({ trashed: true });
   assert.deepEqual(await fixture.service.purge(['session-a']), { purged: ['session-a'], failed: [] });
@@ -406,6 +462,18 @@ test('purge failure retains durable purge-pending intent for startup retry', asy
   assert.deepEqual(await fixture.service.purge(['session-a']), { purged: [], failed: [{ id: 'session-a', reason: 'purge-failed' }] });
   assert.equal((await fixture.trashStore.get('session-a')).state, 'purge-pending');
   assert.notEqual(await fixture.snapshotStore.latestFor('session-a'), null);
+});
+
+test('purge never reports success when snapshot deletion fails or leaves a snapshot behind', async () => {
+  for (const options of [
+    { snapshotRemoveError: true, reason: 'snapshot-remove-failed' },
+    { snapshotRemoveNoop: true, reason: 'snapshot-delete-unconfirmed' },
+  ]) {
+    const fixture = recycleFixture({ trashed: true, ...options });
+    const result = await fixture.service.purge(['session-a']);
+    assert.deepEqual(result, { purged: [], failed: [{ id: 'session-a', reason: options.reason }] });
+    assert.equal((await fixture.trashStore.get('session-a')).state, 'purge-pending');
+  }
 });
 
 test('legacy migration removes only unarchived markers and preserves malformed or failed entries', async () => {

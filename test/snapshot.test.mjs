@@ -304,6 +304,9 @@ test('validates a published attachment-bearing snapshot against its saved descri
   assert.equal(checked.attachments.length, 1);
   assert.deepEqual(checked.attachments[0].descriptor.attachmentId, 'image-a');
   assert.equal(checked.attachments[0].descriptor.file, 'attachments/001-9f64a747e1b97f13.png');
+  assert.equal(Object.hasOwn(checked.attachments[0], 'data'), false);
+  assert.equal(typeof checked.attachments[0].read, 'function');
+  assert.deepEqual(await checked.attachments[0].read(), new Uint8Array([1, 2, 3, 4]));
   if (process.platform !== 'win32') {
     assert.equal((await stat(join(checked.attachments[0].path, '..'))).mode & 0o777, 0o700);
     assert.equal((await stat(checked.attachments[0].path)).mode & 0o777, 0o600);
@@ -554,11 +557,12 @@ test('recovery removes stale staging, preserves valid orphans, selects determini
   await store.remove(ids[0]);
   assert.deepEqual(await store.latestFor('session-a'), { snapshotId: ids[1], sessionId: 'session-a', createdAt: '2026-08-24T00:00:00.000Z' });
   await assert.rejects(store.remove('../outside'), (error) => error.code === 'snapshot-id-invalid');
-  await store.removeForSession('other-session');
+  await assert.rejects(store.removeForSession('other-session'), (error) => error.code === 'snapshot-json-invalid');
   assert.equal((await readdir(root)).includes(ids[1]), true);
+  await store.remove(ids[2]);
   await store.removeForSession('session-a');
   assert.equal((await readdir(root)).includes(ids[1]), false);
-  assert.equal((await readdir(root)).includes(ids[2]), true);
+  assert.equal((await readdir(root)).includes(ids[2]), false);
 });
 
 test('latest lookup preserves live staging and recovery removes only pre-start staging', async () => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { zipSync, strToU8 } from 'fflate';
 import { IMPORT_LIMITS, inspectImport, selectImportItems } from '../lib/import.js';
+import { createImportTokenStore } from '../lib/index.js';
 
 function makePackage(items, extra = {}) {
   const files = {};
@@ -28,7 +29,7 @@ function makePackage(items, extra = {}) {
       version: 1,
       exportedAt: '2026-08-20T00:00:00.000Z',
       archive,
-      source: {
+      source: input.source ?? {
         meta: { id, createdAt: archive.createdAt },
         events: input.events ?? [],
       },
@@ -201,7 +202,7 @@ test('rejects duplicate ZIP entries and prototype pollution keys', () => {
   const polluted = makePackage([{ id: 'a' }]);
   const withPollution = inspectImport({ bytes: polluted, compressedBytes: polluted.length });
   assert.equal(withPollution.ok, true);
-  const record = JSON.parse(new TextDecoder().decode(withPollution.plan.items[0].jsonBytes));
+  const record = withPollution.plan.items[0].record;
   assert.equal(record.format, 'dsh-archived-chats/session');
 });
 
@@ -217,6 +218,36 @@ test('reports attachment references and unresolved workspace warnings', () => {
   assert.deepEqual(result.plan.items[0].warnings, ['attachments-not-included', 'workspace-unresolved']);
 });
 
+test('rejects missing, mismatched, and malformed persistence source payloads', () => {
+  for (const [source, code] of [
+    [{}, 'source-invalid'],
+    [{ meta: { id: 'other-session' }, events: [] }, 'session-mismatch'],
+    [{ meta: { id: 'session-a' }, events: {} }, 'source-invalid'],
+    [{ meta: { id: 'session-a' }, events: [null] }, 'source-invalid'],
+    [{ meta: { id: 'session-a' }, events: [{ time: 1e300 }] }, 'field-invalid'],
+  ]) {
+    const result = inspectImport({ bytes: makePackage([{ id: 'session-a', source }]) });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((entry) => entry.code === code));
+  }
+});
+
+test('rejects malformed generator, workspace, storage, and unsafe session identities', () => {
+  const generator = inspectImport({ bytes: makePackage([{ id: 'a' }], { manifest: { generator: null } }) });
+  assert.equal(generator.ok, false);
+  assert.ok(generator.errors.some((entry) => entry.path === 'manifest.generator'));
+
+  for (const input of [
+    { id: '__proto__' },
+    { id: 'a', workspace: { id: 3, title: 'Workspace' } },
+    { id: 'a', storage: { status: 'ready', sizeBytes: -1, fileCount: 1 } },
+    { id: 'a', createdAt: 1e300 },
+  ]) {
+    const result = inspectImport({ bytes: makePackage([input]) });
+    assert.equal(result.ok, false);
+  }
+});
+
 test('selection keeps manifest order and skips conflicts without mutation', () => {
   const bytes = makePackage([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
   const result = inspectImport({ bytes });
@@ -227,4 +258,18 @@ test('selection keeps manifest order and skips conflicts without mutation', () =
     { id: 'a', reason: 'id-conflict' },
     { id: 'unknown', reason: 'selection-unknown' },
   ]);
+});
+
+test('import confirmation tokens enforce count and retained-byte capacity', () => {
+  let now = 0;
+  const store = createImportTokenStore({ now: () => now, ttlMs: 100, maxEntries: 2, maxBytes: 10 });
+  const first = store.create({ totalBytes: 4, id: 'first' });
+  store.create({ totalBytes: 6, id: 'second' });
+  assert.throws(() => store.create({ totalBytes: 1, id: 'third' }),
+    (error) => error.code === 'import-token-capacity' && error.status === 503);
+  assert.equal(store.consume(first.token, first.nonce).id, 'first');
+  assert.doesNotThrow(() => store.create({ totalBytes: 4, id: 'replacement' }));
+  now = 101;
+  store.cleanup();
+  assert.doesNotThrow(() => store.create({ totalBytes: 10, id: 'after-expiry' }));
 });
