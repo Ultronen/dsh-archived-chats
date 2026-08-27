@@ -327,7 +327,7 @@ test('single history deletion removes one healthy version and refuses recycle pr
   assert.deepEqual(item.calls.remove, [ordinary.snapshotId]);
 });
 
-test('clear history deletes every ordinary version and skips protected and degraded snapshots', async () => {
+test('clear history deletes every ordinary version, reclaims degraded ones, and skips protected snapshots', async () => {
   const first = version({
     snapshotId: '00000000-0000-4000-8000-000000000020',
     totalBytes: 120,
@@ -353,14 +353,30 @@ test('clear history deletes every ordinary version and skips protected and degra
 
   const result = await item.service.clear();
 
+  // A degraded snapshot can no longer be read, but its bytes are still on disk:
+  // clearing history has to reclaim them or nothing ever can.
   assert.deepEqual(result, {
-    deleted: [second.snapshotId, first.snapshotId],
+    deleted: [second.snapshotId, first.snapshotId, degradedId],
     freedBytes: 320,
-    skipped: [
-      { snapshotId: protectedVersion.snapshotId, reason: 'history-snapshot-protected' },
-      { snapshotId: degradedId, reason: 'history-snapshot-degraded' },
-    ],
+    skipped: [{ snapshotId: protectedVersion.snapshotId, reason: 'history-snapshot-protected' }],
     failed: [],
   });
-  assert.deepEqual(item.calls.remove, [second.snapshotId, first.snapshotId]);
+  assert.deepEqual(item.calls.remove, [second.snapshotId, first.snapshotId, degradedId]);
+});
+
+test('a degraded snapshot can be deleted on its own unless a recycle record protects it', async () => {
+  const degradedId = '00000000-0000-4000-8000-000000000031';
+  const reclaimable = fixture({ degraded: [{ snapshotId: degradedId, code: 'snapshot-hash-mismatch' }] });
+  assert.deepEqual(await reclaimable.service.deleteVersion(degradedId), { deleted: [degradedId], freedBytes: 0 });
+  assert.deepEqual(reclaimable.calls.remove, [degradedId]);
+
+  const claimed = fixture({
+    degraded: [{ snapshotId: degradedId, code: 'snapshot-hash-mismatch' }],
+    trashRecords: new Map([['session-a', { sessionId: 'session-a', snapshotId: degradedId }]]),
+  });
+  await assert.rejects(
+    () => claimed.service.deleteVersion(degradedId),
+    (error) => error instanceof HistoryError && error.code === 'history-snapshot-protected' && error.status === 409,
+  );
+  assert.deepEqual(claimed.calls.remove, []);
 });
