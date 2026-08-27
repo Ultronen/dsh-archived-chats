@@ -16,7 +16,16 @@ test('safeSegment removes traversal and Windows-reserved path syntax', () => {
   assert.equal(safeSegment('../CON:<bad>\\name', 'untitled', 80), 'CON-bad-name');
   assert.equal(safeSegment(' . ', 'untitled', 80), 'untitled');
   assert.equal(safeSegment('NUL', 'untitled', 80), 'NUL-file');
+  // Windows reserves the device for every extension, so the marker must land on
+  // the base name — 'nul.txt-file' would still resolve to the NUL device.
+  assert.equal(safeSegment('nul.txt', 'untitled', 80), 'nul-file.txt');
+  assert.equal(safeSegment('lpt9.log', 'untitled', 80), 'lpt9-file.log');
+  assert.equal(safeSegment('COM1', 'untitled', 80), 'COM1-file');
+  // The marker is applied once, never stacked across normalize and truncate.
+  assert.equal(safeSegment('aux', 'untitled', 80), 'aux-file');
   assert.equal(safeSegment('a'.repeat(81), 'untitled', 80), 'a'.repeat(80));
+  // Truncation itself can expose a reserved base name.
+  assert.equal(safeSegment('con', 'untitled', 3), 'con-file');
 });
 
 test('planExport keeps order and disambiguates hostile duplicate titles', () => {

@@ -427,13 +427,16 @@ test('intact-original restore keeps trash and rolls back partial registry, works
   assert.notEqual(await metadataFailure.trashStore.get('session-a'), null);
 });
 
-test('records purge intent before physical deletion and removes trash last', async () => {
+test('records purge intent first, deletes the session last of all, and removes trash after it', async () => {
   const fixture = recycleFixture({ trashed: true });
   assert.deepEqual(await fixture.service.purge(['session-a']), { purged: ['session-a'], failed: [] });
+  // The irreversible step goes last: snapshot removal runs before the session
+  // log is destroyed, so any failure still leaves the original restorable on a
+  // later attempt instead of stranding purge-pending with nothing to restore.
   assert.deepEqual(fixture.calls.filter((call) => /^(trash:transition|physical:purge|snapshot:remove|trash:remove|cache:invalidate)/.test(call)), [
     'trash:transition:session-a:purge-pending',
-    'physical:purge:session-a',
     'snapshot:remove:session-a',
+    'physical:purge:session-a',
     'trash:remove:session-a',
     'cache:invalidate:session-a',
   ]);
@@ -457,14 +460,16 @@ test('legacy pending migration snapshots archived ids and never purges them', as
   assert.equal(readFileSync(fixture.pendingPath, 'utf8'), '{\n  "ids": []\n}\n');
 });
 
-test('purge failure retains durable purge-pending intent for startup retry', async () => {
+test('purge failure retains durable purge-pending intent and keeps the original session', async () => {
   const fixture = recycleFixture({ trashed: true, purgeError: Object.assign(new Error('disk failed'), { code: 'purge-failed' }) });
   assert.deepEqual(await fixture.service.purge(['session-a']), { purged: [], failed: [{ id: 'session-a', reason: 'purge-failed' }] });
   assert.equal((await fixture.trashStore.get('session-a')).state, 'purge-pending');
-  assert.notEqual(await fixture.snapshotStore.latestFor('session-a'), null);
+  // The guarantee that matters after a failed purge is that the session itself
+  // still exists, so the next attempt can finish the job.
+  assert.equal(fixture.persistence.ids.has('session-a'), true);
 });
 
-test('purge never reports success when snapshot deletion fails or leaves a snapshot behind', async () => {
+test('purge never reports success when snapshot deletion fails, and never destroys the session first', async () => {
   for (const options of [
     { snapshotRemoveError: true, reason: 'snapshot-remove-failed' },
     { snapshotRemoveNoop: true, reason: 'snapshot-delete-unconfirmed' },
@@ -473,6 +478,8 @@ test('purge never reports success when snapshot deletion fails or leaves a snaps
     const result = await fixture.service.purge(['session-a']);
     assert.deepEqual(result, { purged: [], failed: [{ id: 'session-a', reason: options.reason }] });
     assert.equal((await fixture.trashStore.get('session-a')).state, 'purge-pending');
+    assert.equal(fixture.persistence.ids.has('session-a'), true);
+    assert.equal(fixture.calls.includes('physical:purge:session-a'), false);
   }
 });
 

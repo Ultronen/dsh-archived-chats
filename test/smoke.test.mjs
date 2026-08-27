@@ -2667,7 +2667,7 @@ console.log('\n[11c] client half — bulk selection workflow');
         ? 'Alpha'
       : index === 12
           ? { title: '将选中的已归档聊天移至回收站？', body: '这将把选中的 1 个已归档聊天移至回收站', ids: ['session-a'] }
-          : index === 24
+          : index === 25
             ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
@@ -2810,12 +2810,15 @@ console.log('\n[11c] client half — archive insights UI');
   };
   const states = [];
   const effectRecords = [];
+  // Positional pins into ArchivedChatsSection's useState order: sessions,
+  // tagFilter, metadataStatus, archiveTrashStatus, stats, metadataEdit, metaBusy.
   states[0] = { value: archivedRows, setter: null };
   states[17] = { value: '', setter: null };
   states[18] = { value: 'ready', setter: null };
-  states[19] = { value: statsFixture, setter: null };
-  states[20] = { value: null, setter: null };
-  states[21] = { value: false, setter: null };
+  states[19] = { value: 'ready', setter: null };
+  states[20] = { value: statsFixture, setter: null };
+  states[21] = { value: null, setter: null };
+  states[22] = { value: false, setter: null };
   const setterAt = (index) => (next) => {
     states[index].value = typeof next === 'function' ? next(states[index].value) : next;
   };
@@ -2888,7 +2891,7 @@ console.log('\n[11c] client half — archive insights UI');
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-  states[22].value = {
+  states[23].value = {
     token: 'token-ui',
     nonce: 'nonce-ui',
     package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
@@ -2899,7 +2902,7 @@ console.log('\n[11c] client half — archive insights UI');
     selectedIds: ['new-session'],
     result: null,
   };
-  states[23].value = false;
+  states[24].value = false;
   tree = renderSection();
   elements = collectElements(tree);
   const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
@@ -2922,8 +2925,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoreRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import confirmation sends the guard header');
   assert(JSON.parse(restoreRequests[0]?.options.body ?? '{}').sessionIds.join(',') === 'new-session', 'import confirmation sends only selected non-conflicting IDs');
   globalThis.fetch = savedImportFetch;
-  states[22].value = null;
-  states[19].value = statsFixture;
+  states[23].value = null;
+  states[20].value = statsFixture;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3003,11 +3006,11 @@ console.log('\n[11c] client half — archive insights UI');
     stopPropagation: () => { stoppedEscape = true; },
   });
   assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
-  assert(states[20].value === null, 'metadata Escape cancels only the metadata editor state');
+  assert(states[21].value === null, 'metadata Escape cancels only the metadata editor state');
   cleanupMeta?.();
   assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
 
-  states[20].value = archivedRows[0];
+  states[21].value = archivedRows[0];
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3051,7 +3054,7 @@ console.log('\n[11c] client half — archive insights UI');
   // Exercise the real MetadataDialog with persistent hooks so token semantics,
   // IME input, and effect cleanup are verified across actual re-renders.
   const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
-  states[20].value = commaTagSession;
+  states[21].value = commaTagSession;
   const rawSectionTree = renderSection();
   const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
   assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
@@ -3138,7 +3141,7 @@ console.log('\n[11c] client half — archive insights UI');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
   states[18].value = 'unavailable';
-  states[20].value = null;
+  states[21].value = null;
   tree = renderSection();
   elements = collectElements(tree);
   const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
@@ -3146,8 +3149,23 @@ console.log('\n[11c] client half — archive insights UI');
   assert(elements.find((el) => el.props?.className === 'dac-warn') !== undefined, 'unavailable metadata shows a warning');
   assert(elements.filter(isRow).length === 3, 'unavailable metadata keeps all rows listed');
 
+  // An unreadable recycle catalog means the listing cannot be trusted to exclude
+  // already-deleted chats, so it has to be labelled rather than shown as normal.
+  states[18].value = 'ready';
+  states[19].value = 'unavailable';
+  tree = renderSection();
+  elements = collectElements(tree);
+  const trashWarn = elements.filter((el) => el.props?.className === 'dac-warn');
+  assert(trashWarn.length === 1 && elementText(trashWarn[0]).includes('回收站目录无法读取'),
+    'an unreadable recycle catalog is surfaced on the archived list');
+  assert(elements.filter(isRow).length === 3, 'the warning never hides rows');
+  states[19].value = 'ready';
+  tree = renderSection();
+  assert(collectElements(tree).filter((el) => el.props?.className === 'dac-warn').length === 0,
+    'a readable recycle catalog shows no warning');
+
   // Statistics failure never removes rows or lifecycle actions.
-  states[19].value = { status: 'error', summary: null, sessions: {} };
+  states[20].value = { status: 'error', summary: null, sessions: {} };
   states[18].value = 'ready';
   tree = renderSection();
   elements = collectElements(tree);
@@ -4377,6 +4395,165 @@ console.log('\n[13b] client half — nav icon patch degrades safely on an unknow
     threw = true;
   }
   assert(!threw, 'host DOM or observer changes cannot prevent the plugin section from loading');
+}
+
+console.log('\n[13c] client half — locale tables stay complete and unambiguous');
+{
+  const zhStart = clientSource.indexOf('"locale.intl": "zh-CN"');
+  const enStart = clientSource.indexOf('"locale.intl": "en-US"');
+  const regionEnd = clientSource.indexOf('//#endregion', enStart);
+  assert(zhStart > 0 && enStart > zhStart && regionEnd > enStart, 'both locale tables are present');
+  const keysOf = (block) => [...block.matchAll(/^\s*"([a-zA-Z0-9_.-]+)":/gm)].map((match) => match[1]);
+  const tables = {
+    zh: keysOf(clientSource.slice(zhStart, enStart)),
+    en: keysOf(clientSource.slice(enStart, regionEnd)),
+  };
+  for (const [language, keys] of Object.entries(tables)) {
+    // A repeated key silently takes its LAST value, so a new string can be
+    // shadowed by an unrelated older one and the UI shows the wrong text.
+    const seen = new Set();
+    const duplicates = keys.filter((key) => seen.has(key) || (seen.add(key), false));
+    assert(duplicates.length === 0, `${language} locale defines every key once (duplicates: ${duplicates.join(', ') || 'none'})`);
+  }
+  const zhKeys = new Set(tables.zh);
+  const enKeys = new Set(tables.en);
+  const missingEn = [...zhKeys].filter((key) => !enKeys.has(key));
+  const missingZh = [...enKeys].filter((key) => !zhKeys.has(key));
+  assert(missingEn.length === 0, `every zh key has an en translation (missing: ${missingEn.join(', ') || 'none'})`);
+  assert(missingZh.length === 0, `every en key has a zh translation (missing: ${missingZh.join(', ') || 'none'})`);
+  const referenced = new Set([...clientSource.matchAll(/\bt\(\s*"([a-zA-Z0-9_.-]+)"/g)].map((match) => match[1]));
+  const undefinedKeys = [...referenced].filter((key) => !zhKeys.has(key));
+  assert(undefinedKeys.length === 0, `every literal t() key is defined (undefined: ${undefinedKeys.join(', ') || 'none'})`);
+}
+
+console.log('\n[13d] client half — every array-children element uses the static jsx runtime');
+{
+  // React validates keys for children it believes are a dynamic list. `jsxs` is
+  // the runtime for a literal children array and skips that check; `jsx` with an
+  // array makes React warn "Each child in a list should have a unique key" in the
+  // browser console. The test harness's plain `{type, props}` factory cannot see
+  // this, so the shape is checked statically instead.
+  const QUOTES = new Set(['"', "'", '`']);
+  const OPEN = new Set(['(', '[', '{']);
+  const CLOSE = new Set([')', ']', '}']);
+  const balancedArgs = (text, start) => {
+    let index = start;
+    let depth = 1;
+    let quote = null;
+    while (index < text.length && depth > 0) {
+      const character = text[index];
+      if (quote !== null) {
+        if (character === '\\') index += 1;
+        else if (character === quote) quote = null;
+      } else if (QUOTES.has(character)) quote = character;
+      else if (OPEN.has(character)) depth += 1;
+      else if (CLOSE.has(character)) depth -= 1;
+      index += 1;
+    }
+    return { args: text.slice(start, index - 1), end: index };
+  };
+  const childrenIsArray = (args) => {
+    let depth = 0;
+    let quote = null;
+    for (let index = 0; index < args.length; index += 1) {
+      const character = args[index];
+      if (quote !== null) {
+        if (character === '\\') index += 1;
+        else if (character === quote) quote = null;
+        continue;
+      }
+      if (QUOTES.has(character)) { quote = character; continue; }
+      if (OPEN.has(character)) { depth += 1; continue; }
+      if (CLOSE.has(character)) { depth -= 1; continue; }
+      if (depth === 1 && args.startsWith('children:', index)) {
+        return args.slice(index + 'children:'.length).replace(/^\s+/, '').startsWith('[');
+      }
+    }
+    return false;
+  };
+  const needle = '(0, jsx.jsx)(';
+  const offenders = [];
+  let at = 0;
+  while ((at = clientSource.indexOf(needle, at)) !== -1) {
+    const { args, end } = balancedArgs(clientSource, at + needle.length);
+    if (childrenIsArray(args)) {
+      offenders.push(`line ${clientSource.slice(0, at).split('\n').length}: ${args.replace(/\s+/g, ' ').slice(0, 70)}`);
+    }
+    at = end;
+  }
+  assert(offenders.length === 0, `array children always use jsxs (offenders: ${offenders.join(' | ') || 'none'})`);
+}
+
+console.log('\n[14] host half — an unreadable recycle catalog fails mutations closed');
+{
+  const trashFile = join(testHome, 'plugin-data', 'archived-chats', 'trash.json');
+  const before = existsSync(trashFile) ? readFileSync(trashFile, 'utf8') : null;
+  const archivedBefore = [...workspaceState.archivedSessionIds];
+  const target = archivedBefore[0];
+  assert(typeof target === 'string', 'a visible archived session is available for the corruption check');
+  writeFileSync(trashFile, '{"version":1,"records":{ TRUNCATED', 'utf8');
+
+  const state = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(state.status === 200, `state stays readable while the recycle catalog is corrupt (got ${state.status})`);
+  assert(state.json().trashStatus === 'unavailable', 'state reports the unreadable recycle catalog so the UI can warn');
+
+  // An unreadable catalog cannot prove a session is NOT recycled. Unarchiving one
+  // that is would resurrect it into the sidebar while its recycle record survives,
+  // and the next purge would then delete a chat the user had put back in service.
+  const unarchive = await call(routes, '/plugins/dsh-archived-chats/unarchive', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: target }),
+  ));
+  assert(unarchive.status === 503 && unarchive.json().error === 'trash-store-unavailable',
+    `single unarchive fails closed on an unreadable recycle catalog (got ${unarchive.status})`);
+  const metadata = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: target, tags: ['nope'], note: '' }),
+  ));
+  assert(metadata.status === 503, `metadata save fails closed on an unreadable recycle catalog (got ${metadata.status})`);
+  const batch = await call(routes, '/plugins/dsh-archived-chats/unarchive-all', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [target] }),
+  ));
+  assert(batch.status === 503, `batch unarchive fails closed the same way (got ${batch.status})`);
+  assert(JSON.stringify(workspaceState.archivedSessionIds) === JSON.stringify(archivedBefore),
+    'no rejected mutation changed the archive set');
+
+  if (before === null) rmSync(trashFile, { force: true });
+  else writeFileSync(trashFile, before, 'utf8');
+}
+
+console.log('\n[15] host half — physical deletion refuses a location that is not session-scoped');
+{
+  const flatRoot = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-flat-'));
+  const sibling = join(flatRoot, 'unrelated-session.jsonl');
+  writeFileSync(sibling, 'keep me', 'utf8');
+  const savedLocate = persistence.locate;
+  // A host layout that keeps each log as a flat file gives dirname() the shared
+  // session root: deleting it would take every other session with it.
+  persistence.locate = (header) => ({ kind: 'jsonl', path: join(flatRoot, `${header.id}.jsonl`) });
+  const target = workspaceState.archivedSessionIds.find((id) => id !== 'session-live');
+  writeFileSync(join(flatRoot, `${target}.jsonl`), 'target', 'utf8');
+  const moved = await call(routes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: target }),
+  ));
+  assert(moved.status === 200, `the session moves to the recycle bin first (got ${moved.status})`);
+  const purged = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [target] }),
+  ));
+  assert(purged.json().failed?.[0]?.reason === 'session-location-unsafe',
+    `purge refuses a non session-scoped location (got ${JSON.stringify(purged.json().failed)})`);
+  assert(existsSync(sibling), 'the unrelated session log next to it is untouched');
+  assert(existsSync(flatRoot), 'the shared session root is untouched');
+  // The refusal lands before the irreversible step, so the durable purge intent
+  // survives and a retry on a session-scoped layout still completes the job.
+  persistence.locate = savedLocate;
+  const retried = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [target] }),
+  ));
+  assert(retried.status === 200 && retried.json().purged.includes(target),
+    `retrying the purge afterwards completes it (got ${retried.status} ${retried.text})`);
+  const remaining = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  assert(!remaining.json().sessions.some((row) => row.sessionId === target),
+    'the completed purge leaves no stranded purge-pending record');
+  rmSync(flatRoot, { recursive: true, force: true });
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.

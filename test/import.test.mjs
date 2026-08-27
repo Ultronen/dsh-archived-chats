@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { zipSync, strToU8 } from 'fflate';
 import { IMPORT_LIMITS, inspectImport, selectImportItems } from '../lib/import.js';
+import { createExportZip, planExport } from '../lib/export.js';
+import { createRestoreAdapter } from '../lib/restore.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createImportTokenStore } from '../lib/index.js';
 
 function makePackage(items, extra = {}) {
@@ -272,4 +277,91 @@ test('import confirmation tokens enforce count and retained-byte capacity', () =
   now = 101;
   store.cleanup();
   assert.doesNotThrow(() => store.create({ totalBytes: 10, id: 'after-expiry' }));
+});
+
+/**
+ * The backup loop end to end: a ZIP produced by the real exporter has to pass
+ * the real importer and then actually land through a host writer. Hand-built
+ * fixtures cannot catch a drift between the two halves, or a writer contract
+ * the running host never satisfies.
+ */
+test('a real export ZIP validates and restores through an ordinary create/append host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-roundtrip-'));
+  const events = [
+    { type: 'session/title', data: { title: 'Round trip 会话' } },
+    {
+      seq: 10,
+      time: Date.parse('2026-08-19T10:00:00.000Z'),
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] },
+    },
+  ];
+  const plan = planExport([{
+    id: 'session-x',
+    title: 'Round trip 会话',
+    createdAt: 1786726311605,
+    origin: null,
+    workspaceId: 'ws-1',
+    workspaceTitle: 'Project',
+    tags: ['keep'],
+    note: 'a note',
+    metadataUpdatedAt: '2026-08-18T12:00:00.000Z',
+    storage: { status: 'ready', sizeBytes: 10, fileCount: 1 },
+  }], new Date('2026-08-28T00:00:00.000Z'));
+  const zip = await createExportZip({
+    plan,
+    inspect: async (id) => ({ meta: { id, createdAt: 1786726311605 }, events }),
+    generatorVersion: '9.9.9',
+  });
+  const chunks = [];
+  zip.stream.on('data', (chunk) => chunks.push(chunk));
+  await zip.completion;
+  const bytes = new Uint8Array(Buffer.concat(chunks));
+
+  const inspected = inspectImport({ bytes, compressedBytes: bytes.byteLength });
+  assert.deepEqual(inspected.errors, undefined);
+  assert.equal(inspected.ok, true);
+  assert.deepEqual(inspected.plan.items.map((item) => item.id), ['session-x']);
+
+  const created = [];
+  const appended = [];
+  const archiveState = { archivedSessionIds: [] };
+  const persistence = {
+    list: async () => [],
+    // A session log that does not exist yet reads as missing; that must not
+    // abort the restore.
+    inspect: async (id) => { throw Object.assign(new Error('no log yet'), { code: 'ENOENT', id }); },
+    create: async (meta) => { created.push(meta.id); },
+    append: async (id, batch) => { appended.push([id, batch.length]); },
+    locate: (meta) => ({ kind: 'jsonl', path: join(root, 'sessions', String(meta.id), 'session.jsonl.zstd') }),
+    removeSession: async () => {},
+  };
+  const registry = {
+    state: archiveState,
+    get archivedSessionIds() { return archiveState.archivedSessionIds; },
+    setState: async (next) => { archiveState.archivedSessionIds = next.archivedSessionIds; },
+    list: () => [{ id: 'ws-1', title: 'Project', sessionIds: [], attachSession: async () => {}, detachSession: async () => {} }],
+  };
+  const saved = new Map();
+  const metadataStore = {
+    getMany: async () => ({ status: 'ready', entries: {} }),
+    set: async (id, value) => { saved.set(id, value); return { ...value, updatedAt: 'now' }; },
+    remove: async () => {},
+  };
+  const adapter = createRestoreAdapter({ persistence, registry, metadataStore, tempRoot: root });
+  assert.deepEqual(adapter.capability, { supported: true });
+
+  const selected = selectImportItems(inspected.plan, ['session-x'], new Set());
+  assert.deepEqual(selected.skipped, []);
+  const transaction = await adapter.prepare(selected.records, { knownIds: new Set() });
+  for (const item of selected.records) await transaction.stage(item);
+  const result = await transaction.commit();
+
+  assert.deepEqual(result.restored, ['session-x']);
+  assert.deepEqual(created, ['session-x']);
+  assert.deepEqual(appended, [['session-x', events.length]]);
+  assert.deepEqual(archiveState.archivedSessionIds, ['session-x']);
+  assert.deepEqual(saved.get('session-x'), { tags: ['keep'], note: 'a note' });
+  await rm(root, { recursive: true, force: true });
 });
