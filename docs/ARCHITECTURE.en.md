@@ -104,7 +104,7 @@ ZIP paths are sanitized and collision-safe. Batch export inspects and writes ses
 
 ## Import and restore flow
 
-import/inspect accepts only version-one ZIPs produced by this plugin. Host validation is bounded and checks the manifest, paths, versions, session records, and cross-file consistency before returning a preview:
+import/inspect accepts only version-one ZIPs produced by this plugin. The Host streams bounded compressed chunks, preflights declared entry sizes, counts actual output, and caps entry count, per-entry bytes, manifest bytes, and total expansion. Iterative JSON validation then caps depth, node count, and total Unicode code points before path, version, session-record, and cross-file checks return a preview:
 
 1. The browser uploads the ZIP and receives session summaries, versions, size, and warnings.
 2. Existing session IDs are marked as conflicts and deselected by default.
@@ -152,7 +152,7 @@ The browser never mutates files directly. After an operation, the Host response 
 - History responses exclude workspace/snapshot/attachment paths, raw events, notes, and confirmation tokens; logs contain only IDs and stable codes.
 - Import limits ZIP size, entries, paths, versions, and JSON structure, rejecting traversal, duplicates, and prototype-pollution keys.
 - Ordinary delete never invokes physical purge; only a committed recycle record can enter purge.
-- Snapshot and recycle documents use `0600`, directories use `0700`, and publication is temporary write, sync, atomic rename.
+- Snapshot and recycle documents use `0600`, directories use `0700`, and snapshot files are reopened with write access before sync; publication remains temporary write, sync, atomic rename with matching durability semantics on Windows, macOS, and Linux.
 - Purge removes snapshot attachment copies but does not promise immediate cleanup of identical bytes still retained by Harness's global attachment store.
 - Unknown host capabilities must degrade or return a clear error; they must not be inferred.
 

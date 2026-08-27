@@ -158,7 +158,7 @@ test('serializes concurrent writes across store instances and cleans failed temp
   const second = createTrashStore({ path });
   await Promise.all([first.put(readyRecord('a')), second.put(readyRecord('b'))]);
   assert.deepEqual((await first.list()).map((record) => record.sessionId), ['a', 'b']);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal((await stat(path)).mode & 0o777, 0o600);
   const blockedPath = join(root, 'blocked.json');
   await mkdir(blockedPath);
   await assert.rejects(createTrashStore({ path: blockedPath }).put(readyRecord('c')));

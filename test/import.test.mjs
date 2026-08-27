@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { zipSync, strToU8 } from 'fflate';
-import { inspectImport, selectImportItems } from '../lib/import.js';
+import { IMPORT_LIMITS, inspectImport, selectImportItems } from '../lib/import.js';
 
 function makePackage(items, extra = {}) {
   const files = {};
@@ -52,6 +52,24 @@ function makePackage(items, extra = {}) {
   return zipSync(files);
 }
 
+function rewriteZipUncompressedSize(bytes, size) {
+  const rewritten = bytes.slice();
+  const view = new DataView(rewritten.buffer, rewritten.byteOffset, rewritten.byteLength);
+  const findSignature = (signature) => {
+    for (let index = 0; index <= rewritten.length - signature.length; index += 1) {
+      if (signature.every((value, offset) => rewritten[index + offset] === value)) return index;
+    }
+    return -1;
+  };
+  const local = findSignature([0x50, 0x4b, 0x03, 0x04]);
+  const central = findSignature([0x50, 0x4b, 0x01, 0x02]);
+  assert.notEqual(local, -1);
+  assert.notEqual(central, -1);
+  view.setUint32(local + 22, size, true);
+  view.setUint32(central + 24, size, true);
+  return rewritten;
+}
+
 test('valid v1 package produces a preview without raw transcript data', () => {
   const bytes = makePackage([{ id: 'session-a', title: 'Alpha', tags: ['one'], note: 'keep' }]);
   const result = inspectImport({ bytes, compressedBytes: bytes.length });
@@ -61,6 +79,89 @@ test('valid v1 package produces a preview without raw transcript data', () => {
   assert.equal(result.plan.items[0].note, 'keep');
   assert.equal('events' in result.plan.items[0], false);
   assert.equal(result.plan.items[0].hasAttachmentReferences, false);
+});
+
+test('stops ZIP expansion at the configured actual-byte limit', () => {
+  const bytes = rewriteZipUncompressedSize(
+    zipSync({ 'manifest.json': new Uint8Array(2048) }, { level: 9 }),
+    512,
+  );
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxUncompressedBytes: 1024, maxEntryBytes: 1024 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'limit-exceeded');
+});
+
+test('keeps empty input classified as an invalid ZIP', () => {
+  const result = inspectImport({ bytes: new Uint8Array(), compressedBytes: 0 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'zip-invalid');
+});
+
+test('rejects JSON depth beyond the configured budget', () => {
+  let nested = 'leaf';
+  for (let depth = 0; depth < 6; depth += 1) nested = { child: nested };
+  const bytes = makePackage([{ id: 'deep', events: [nested] }]);
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxJsonDepth: 4 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'json-limit-exceeded');
+});
+
+test('rejects JSON nodes beyond the configured budget', () => {
+  const bytes = zipSync({ 'manifest.json': strToU8(JSON.stringify(Array.from({ length: 25 }, (_, index) => index))) });
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxJsonNodes: 20 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'json-limit-exceeded');
+});
+
+test('rejects JSON strings beyond the configured budget', () => {
+  const bytes = zipSync({ 'manifest.json': strToU8(JSON.stringify({ probe: '界'.repeat(65) })) });
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxJsonStringCodePoints: 64 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'json-limit-exceeded');
+});
+
+test('rejects a manifest beyond the configured byte budget', () => {
+  const bytes = makePackage([{ id: 'manifest-budget' }]);
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxManifestBytes: 64 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'limit-exceeded');
+  assert.equal(result.errors[0].path, 'manifest.json');
+});
+
+test('rejects ZIP entries beyond the configured budget', () => {
+  const bytes = zipSync({
+    'one.txt': strToU8('1'),
+    'two.txt': strToU8('2'),
+    'three.txt': strToU8('3'),
+  });
+  const result = inspectImport(
+    { bytes, compressedBytes: bytes.byteLength },
+    { limits: { ...IMPORT_LIMITS, maxEntries: 2 } },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'limit-exceeded');
 });
 
 test('rejects unsupported, incomplete, duplicate, unsafe, and mismatched packages', () => {
