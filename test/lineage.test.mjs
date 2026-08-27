@@ -160,3 +160,103 @@ test('lineage projects a valid five-thousand-node chain without recursion overfl
   for (let index = 1; index < 5000; index += 1) node = node.children[0];
   assert.equal(node.id, 's-4999');
 });
+
+/**
+ * Headers are the Host's data. This projection used to reject the entire graph
+ * for any header it did not anticipate, which made a Host-side change — a new
+ * `origin` value, say — able to break the panel with no plugin change at all.
+ * It is the only surface that failed whole-graph on one unrecognized row.
+ */
+test('one unrecognized header degrades its own node instead of the whole graph', () => {
+  const base = (id, patch = {}) => ({ id, createdAt: 1000, ...patch });
+  const cases = [
+    ['an origin value added by a later Host', base('s-2', { origin: 'schedule' }), { origin: null }],
+    ['no createdAt at all', { id: 's-2' }, { createdAt: null }],
+    ['createdAt as an ISO string', base('s-2', { createdAt: '2026-08-19T10:00:00.000Z' }), { createdAt: null }],
+    ['createdAt negative', base('s-2', { createdAt: -1 }), { createdAt: null }],
+    ['delegationDepth null', base('s-2', { origin: 'subagent', delegationDepth: null }), { delegationDepth: 0 }],
+    ['seedLength as a float', base('s-2', { seedLength: 1.5 }), { seedLength: null }],
+    ['parentSession as an empty string', base('s-2', { parentSession: '' }), { parentSession: null }],
+  ];
+  for (const [label, header, expected] of cases) {
+    const graph = projectLineage({
+      headers: [base('s-1'), header],
+      archivedIds: ['s-1', 's-2'],
+      trashRecords: new Map(),
+      workspaces: [],
+      titles: new Map(),
+    });
+    assert.equal(graph.nodeCount, 2, `${label}: both sessions still project`);
+    const node = graph.roots.find((item) => item.id === 's-2');
+    assert.ok(node !== undefined, `${label}: the unrecognized session still appears`);
+    for (const [field, value] of Object.entries(expected)) {
+      assert.deepEqual(node[field], value, `${label}: ${field} degrades to a documented value`);
+    }
+  }
+});
+
+test('an unusable identity is dropped and a repeated id keeps the first header', () => {
+  const graph = projectLineage({
+    headers: [
+      { id: 's-1', createdAt: 1000, title: 'first' },
+      { id: 's-1', createdAt: 2000, title: 'duplicate' },
+      { id: '', createdAt: 3000 },
+      null,
+      [],
+      { createdAt: 4000 },
+    ],
+    archivedIds: ['s-1'],
+    trashRecords: new Map(),
+    workspaces: [],
+    titles: new Map(),
+  });
+  assert.equal(graph.nodeCount, 1);
+  assert.equal(graph.roots.length, 1);
+  assert.equal(graph.roots[0].id, 's-1');
+  assert.equal(graph.roots[0].title, 'first');
+  assert.equal(graph.roots[0].createdAt, 1000);
+});
+
+test('a malformed workspace or recycle record never fails the graph', () => {
+  const graph = projectLineage({
+    headers: [{ id: 's-1', createdAt: 1000 }],
+    archivedIds: ['s-1'],
+    trashRecords: new Map([
+      ['s-2', { sessionId: 's-2', title: 'recycled', createdAt: 2000 }],
+      ['s-3', { sessionId: 'does-not-match', title: 'bogus' }],
+      ['s-4', null],
+    ]),
+    workspaces: [null, 'not-an-object', { id: 'ws-1', title: 'Project', sessionIds: ['s-1'] }],
+    titles: new Map(),
+  });
+  assert.deepEqual(graph.roots.map((node) => node.id).sort(), ['s-1', 's-2']);
+  assert.deepEqual(graph.roots.find((node) => node.id === 's-1').workspace, { id: 'ws-1', title: 'Project' });
+});
+
+/**
+ * The limit bounds the graph that is RETURNED. `focusIds` narrows the output to
+ * the archived and recycled chats plus their explaining context, so the size of
+ * the Host's store is not what decides whether the panel works.
+ */
+test('the node limit counts the projected graph, not how many sessions the Host stores', () => {
+  const headers = Array.from({ length: 20000 }, (_, index) => ({ id: `s-${index}`, createdAt: 1000 + index }));
+  const focus = ['s-0', 's-1', 's-2'];
+  const graph = projectLineage({
+    headers, archivedIds: focus, trashRecords: new Map(), workspaces: [], titles: new Map(), focusIds: focus,
+  });
+  assert.equal(graph.nodeCount, 3);
+  assert.deepEqual(graph.roots.map((node) => node.id), focus);
+
+  // A focus set whose own ancestry exceeds the limit is still refused.
+  const chain = Array.from({ length: 5001 }, (_, index) => ({
+    id: `c-${index}`,
+    createdAt: 1000 + index,
+    ...(index === 0 ? {} : { parentSession: `c-${index - 1}` }),
+  }));
+  assert.throws(
+    () => projectLineage({
+      headers: chain, archivedIds: ['c-5000'], trashRecords: new Map(), workspaces: [], titles: new Map(), focusIds: ['c-5000'],
+    }),
+    (error) => error instanceof LineageError && error.code === 'lineage-limit-exceeded' && error.status === 413,
+  );
+});
