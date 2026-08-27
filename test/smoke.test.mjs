@@ -4556,6 +4556,68 @@ console.log('\n[15] host half — physical deletion refuses a location that is n
   rmSync(flatRoot, { recursive: true, force: true });
 }
 
+console.log('\n[16] host half — one unrecognized session header never costs a whole panel');
+{
+  const savedList = persistence.list;
+  const probes = [
+    ['an origin value added by a later Host', { origin: 'schedule' }],
+    ['no createdAt at all', { createdAt: undefined }],
+    ['createdAt as an ISO string', { createdAt: '2026-08-19T10:00:00.000Z' }],
+    ['delegationDepth as null', { origin: 'subagent', delegationDepth: null }],
+    ['a field this version has never seen', { agentPreset: 'coder' }],
+  ];
+  for (const [label, patch] of probes) {
+    persistence.list = async () => {
+      const rows = (await savedList()).map((header) => ({ ...header }));
+      Object.assign(rows[0], patch);
+      if (patch.createdAt === undefined) delete rows[0].createdAt;
+      return rows;
+    };
+    const statuses = {};
+    for (const route of ['state', 'lineage', 'insights', 'history']) {
+      statuses[route] = (await call(routes, `/plugins/dsh-archived-chats/${route}`, mockReq('GET', {}))).status;
+    }
+    assert(Object.values(statuses).every((status) => status === 200),
+      `${label}: every panel still answers (${JSON.stringify(statuses)})`);
+  }
+  // A repeated id in the Host's archive set is meaningless to every reader here.
+  const savedArchive = [...workspaceState.archivedSessionIds];
+  workspaceState.archivedSessionIds = [...savedArchive, savedArchive[0]];
+  persistence.list = savedList;
+  const duplicated = {};
+  for (const route of ['state', 'lineage', 'insights', 'history']) {
+    duplicated[route] = (await call(routes, `/plugins/dsh-archived-chats/${route}`, mockReq('GET', {}))).status;
+  }
+  assert(Object.values(duplicated).every((status) => status === 200),
+    `a repeated archived id keeps every panel answering (${JSON.stringify(duplicated)})`);
+  const rows = (await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}))).json().sessions;
+  assert(new Set(rows.map((row) => row.id)).size === rows.length, 'a repeated archived id is not listed twice');
+  workspaceState.archivedSessionIds = savedArchive;
+}
+
+console.log('\n[17] host half — export distinguishes a bad request from a bug here');
+{
+  const path = '/plugins/dsh-archived-chats/export';
+  const form = (body) => mockReq('POST', { 'content-type': 'application/x-www-form-urlencoded' }, body);
+  const bad = await call(routes, path, form('sessionIds=not-json'));
+  assert(bad.status === 400 && bad.body === 'invalid-export-request',
+    `a malformed selection is still the caller's fault (got ${bad.status})`);
+
+  // An internal invariant failure is not a client error, and must be logged.
+  const visible = (await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}))).json().sessions[0]?.id;
+  assert(typeof visible === 'string', 'a visible archived session is available for the export check');
+  const savedInspect = persistence.inspect;
+  const warningCount = warnings.length;
+  persistence.inspect = () => { throw new TypeError('internal invariant broken'); };
+  const broken = await call(routes, path, form(`sessionIds=${encodeURIComponent(JSON.stringify([visible]))}`));
+  persistence.inspect = savedInspect;
+  assert(broken.status === 500 && broken.body === 'export-failed',
+    `an internal failure reports a server error, not invalid-export-request (got ${broken.status} ${broken.body})`);
+  assert(warnings.length > warningCount, 'the internal failure left a diagnosable warning');
+  assert(!warnings.slice(warningCount).join('\n').includes('internal invariant broken'),
+    'the warning carries a stable code, not the raw message');
+}
+
 // Tear down the isolated DSH_HOME and session fixture dirs.
 rmSync(testHome, { recursive: true, force: true });
 rmSync(tmp, { recursive: true, force: true });
