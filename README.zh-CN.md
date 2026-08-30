@@ -116,7 +116,11 @@ dsh plugin --profile web update dsh-archived-chats
 | 架构说明 | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
 | 版本历史 | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
 
-另见 [安全说明](SECURITY.md)、[贡献指南](CONTRIBUTING.md)和[问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions)。
+另见 [支持说明](SUPPORT.md)、[安全说明](SECURITY.md)、[贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)和[问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions)。
+
+## 项目状态
+
+Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
 
 ## 开发
 
