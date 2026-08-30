@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+const packageManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const packageVersion = packageManifest.version;
 const expectedScreenshots = [
   'assets/screenshots/preview-01.png',
   'assets/screenshots/preview-02.png',
@@ -18,6 +19,10 @@ const expectedScreenshots = [
   'assets/screenshots/preview-07.png',
   'assets/screenshots/preview-08.png',
 ];
+
+test('package declares the verified minimum DeepSeek Harness version', () => {
+  assert.equal(packageManifest.dsh?.engines?.dsh, '>=0.1.0-rc.7');
+});
 
 test('author-owned screenshot manifest keeps the eight stable market slots valid', () => {
   const declared = JSON.parse(readFileSync(join(root, 'screenshots.json'), 'utf8'));
