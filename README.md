@@ -116,7 +116,11 @@ The eight fixed screenshots below come from an isolated Simplified Chinese light
 | Architecture | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
 | Release history | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
 
-See also [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), and [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions).
+See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), and [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions).
+
+## Project status
+
+Session Archive is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
 
 ## Development
 

@@ -1,6 +1,8 @@
 name: 缺陷报告 / Bug report
 description: 报告能够复现的 dsh-archived-chats 缺陷
 title: "[Bug]: "
+labels:
+  - bug
 body:
   - type: markdown
     attributes:

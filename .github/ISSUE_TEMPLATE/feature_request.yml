@@ -1,6 +1,8 @@
 name: 功能建议 / Feature request
 description: 建议一个面向已归档聊天管理的改进
 title: "[Feature]: "
+labels:
+  - enhancement
 body:
   - type: markdown
     attributes:
