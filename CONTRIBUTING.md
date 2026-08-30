@@ -11,6 +11,20 @@
 
 提交前请搜索已有 Issue 和 Discussion，并只提供经过脱敏的最小复现信息。
 
+## 社区需求与认领
+
+任何人都可以提出需求，但新 Issue 只是待评审的建议，不代表功能已进入路线图。维护者负责最终的产品方向、数据安全边界、需求范围、合并与发布决定。社区讨论会影响这些决定，但不会自动替代维护者确认。
+
+需求按以下流程推进：
+
+1. **提议：** 使用 Feature request 表单说明用户问题、验收标准、范围边界和数据影响。此时的 `enhancement` 标签只表示建议类型，不表示已经接受。
+2. **可认领：** 维护者在 Issue 中确认范围和验收标准，并添加 `help wanted`。只有获得该确认的需求才面向社区开放实现；`good first issue` 表示任务边界清晰且适合首次贡献。
+3. **认领：** 在 Issue 留言说明计划采用的方法、准备补充的测试，以及预计何时提供第一次进展。维护者回复确认后会添加 `claimed` 并移除 `help wanted`。默认同一时间只确认一位认领者；未获确认前请勿开始大规模实现。
+4. **进行中：** 尽早提交 Draft PR，并关联原 Issue。至少每 14 天更新一次进展；需要更多时间时可以直接说明。连续 14 天没有进展或延期说明时，维护者可以释放认领并重新添加 `help wanted`，不会因此惩罚贡献者。
+5. **交付：** PR 使用 `Closes #编号`，逐项满足已确认的验收标准、测试、双语文档和安全要求。只有 PR 合并才表示需求完成；维护者可以在评审中缩小范围或要求拆分后续 Issue。
+
+拼写修正、小型文档修正、维护者直接请求的改动可以跳过正式认领。其他用户可见行为、持久化数据、导入恢复、回收站或永久删除相关改动，必须先有 Issue 和维护者确认。
+
 ## 本地开发
 
 要求 Node.js 18 或 24。克隆仓库后运行：
@@ -40,5 +54,17 @@ GitHub Release 标题必须与发布 tag 完全一致，例如 tag 为 `v1.0.2` 
 ## English summary
 
 Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files. Versioning, npm publication, tags, releases, and marketplace updates are maintainer-only unless explicitly requested.
+
+### Community proposals and claims
+
+Anyone may propose a feature, but opening an issue starts review; it does not add the feature to the roadmap. The maintainer retains the final decision on product direction, data-safety boundaries, scope, merge, and release.
+
+1. **Proposal:** describe the user problem, observable acceptance criteria, scope boundaries, and data impact. The automatic `enhancement` label classifies the proposal but does not mean it is accepted.
+2. **Ready to claim:** the maintainer confirms the scope and acceptance criteria in writing and adds `help wanted`. Only then is implementation open to community contributors. `good first issue` marks a bounded newcomer-friendly task.
+3. **Claim:** comment with the intended approach, planned tests, and an expected first progress update. After confirming the claim, the maintainer adds `claimed` and removes `help wanted`. One contributor is confirmed at a time by default; avoid substantial implementation before confirmation.
+4. **In progress:** open a linked Draft PR early and post an update at least every 14 days. Ask for more time when needed. After 14 days without an update or extension request, the maintainer may release the claim and restore `help wanted`, with no penalty to the contributor.
+5. **Delivery:** use `Closes #number` and meet the confirmed acceptance criteria, tests, bilingual documentation, and safety requirements. An issue is complete only when its PR is merged; review may narrow the scope or move follow-up work into separate issues.
+
+Typos, small documentation fixes, and changes directly requested by the maintainer may skip formal claiming. Other user-visible behavior and all changes involving persisted data, import or restore, the Recycle Bin, or permanent deletion require an issue and maintainer confirmation first.
 
 GitHub Release titles must exactly match their tags (for example, `v1.0.2`); do not prefix them with the package name. Put product naming and release descriptions in the release body instead.

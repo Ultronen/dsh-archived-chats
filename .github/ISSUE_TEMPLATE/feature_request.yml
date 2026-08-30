@@ -6,7 +6,10 @@ labels:
 body:
   - type: markdown
     attributes:
-      value: 开放式讨论和使用建议也可以先发到 Discussions。请聚焦用户问题，不要提交敏感数据。
+      value: |
+        开放式讨论和使用建议也可以先发到 Discussions。请聚焦用户问题，不要提交敏感数据。
+
+        提交建议表示开始评审，不代表功能已进入路线图。维护者确认范围并添加 `help wanted` 后，社区贡献者才可按贡献指南认领实现。
   - type: textarea
     id: problem
     attributes:
@@ -22,6 +25,22 @@ body:
     validations:
       required: true
   - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准 / Acceptance criteria
+      description: 用可观察的结果说明何时可以认为需求已经完成；可以列出示例场景。
+      placeholder: |
+        - 当……时，用户可以……
+        - 刷新或重启后……
+        - 失败时不会……
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: 范围与边界 / Scope and boundaries
+      description: 列出本需求明确不处理的内容、兼容性限制或必须保持的现有行为。
+  - type: textarea
     id: alternatives
     attributes:
       label: 考虑过的替代方案 / Alternatives considered
@@ -36,6 +55,17 @@ body:
         - 导入、恢复或永久删除数据
     validations:
       required: true
+  - type: dropdown
+    id: participation
+    attributes:
+      label: 参与方式 / Participation
+      description: 这不会自动完成认领；实现工作仍需等待维护者确认范围和认领。
+      options:
+        - 仅提出建议 / Proposal only
+        - 愿意帮助验证或完善文档 / I can test or document it
+        - 愿意在需求获准后尝试实现 / I may implement it after approval
+    validations:
+      required: true
   - type: checkboxes
     id: checks
     attributes:
@@ -44,4 +74,6 @@ body:
         - label: 我已搜索现有 Issue 和 Discussion。
           required: true
         - label: 我没有提交真实聊天内容、附件、凭据或其他个人数据。
+          required: true
+        - label: 我理解提交建议不代表已获准开发；可认领需求会由维护者标记为 `help wanted`。
           required: true

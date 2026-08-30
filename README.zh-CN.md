@@ -120,7 +120,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 项目状态
 
-Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
+Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。已开放认领的社区任务会标记为 [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)；开始较大改动前，请先阅读[需求认领流程](CONTRIBUTING.md#社区需求与认领)。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
 
 ## 开发
 

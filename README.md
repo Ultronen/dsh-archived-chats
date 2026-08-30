@@ -120,7 +120,7 @@ See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBU
 
 ## Project status
 
-Session Archive is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
+Session Archive is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Accepted community tasks are marked [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22); read the [claim workflow](CONTRIBUTING.md#community-proposals-and-claims) before starting substantial work. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
 
 ## Development
 
