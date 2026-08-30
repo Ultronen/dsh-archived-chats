@@ -24,6 +24,22 @@ test('package declares the verified minimum DeepSeek Harness version', () => {
   assert.equal(packageManifest.dsh?.engines?.dsh, '>=0.1.0-rc.7');
 });
 
+test('client bootstrap stays compatible with stable and alpha.2 through the locale dependency closure', () => {
+  assert.deepEqual(
+    packageManifest.dsh?.client?.inject,
+    ['@deepseek-ai/dsh-client-locale'],
+  );
+});
+
+test('host session API follows the DSH-provided stable or alpha package instead of bundling an old core', () => {
+  assert.equal(packageManifest.dependencies?.['@deepseek-ai/dsh-session'], undefined);
+  assert.equal(
+    packageManifest.peerDependencies?.['@deepseek-ai/dsh-session'],
+    '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0',
+  );
+  assert.equal(packageManifest.peerDependenciesMeta?.['@deepseek-ai/dsh-session']?.optional, true);
+});
+
 test('author-owned screenshot manifest keeps the eight stable market slots valid', () => {
   const declared = JSON.parse(readFileSync(join(root, 'screenshots.json'), 'utf8'));
 
