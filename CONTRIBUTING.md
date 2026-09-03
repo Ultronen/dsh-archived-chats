@@ -23,8 +23,8 @@
 
 1. **提议：** 使用 Feature request 表单说明用户问题、验收标准、范围边界和数据影响。此时的 `enhancement` 标签只表示建议类型，不表示已经接受。
 2. **可认领：** 维护者在 Issue 中确认范围和验收标准，并添加 `help wanted`。只有获得该确认的需求才面向社区开放实现；`good first issue` 表示任务边界清晰且适合首次贡献。
-3. **认领：** 在 Issue 留言说明计划采用的方法、准备补充的测试，以及预计何时提供第一次进展。维护者回复确认后会添加 `claimed` 并移除 `help wanted`。默认同一时间只确认一位认领者；未获确认前请勿开始大规模实现。
-4. **进行中：** 外部贡献者先 Fork 本仓库，将 Fork 同步到上游最新 `main`，再在 Fork 中创建单一目的的短期分支。尽早从该分支向 `Ultronen/dsh-archived-chats:main` 提交 Draft PR，并关联原 Issue。这一流程不需要仓库写权限，也不会自动获得协作者权限。至少每 14 天更新一次进展；需要更多时间时可以直接说明。连续 14 天没有进展或延期说明时，维护者可以释放认领并重新添加 `help wanted`，不会因此惩罚贡献者。
+3. **认领：** 在带有 `help wanted` 且尚未标记 `claimed` 的 Issue 下明确留言“我想认领”。第一位明确认领的贡献者即可按已确认范围开始开发，维护者随后添加 `claimed` 并移除 `help wanted`。认领时不需要承诺实现方案、测试计划或进展时间。
+4. **进行中：** 外部贡献者先 Fork 本仓库，将 Fork 同步到上游最新 `main`，再在 Fork 中创建单一目的的短期分支。尽早从该分支向 `Ultronen/dsh-archived-chats:main` 提交 Draft PR，并关联原 Issue。这一流程不需要仓库写权限，也不会自动获得协作者权限。如果暂时无法继续，可以在 Issue 中说明或主动释放认领。认领长期没有活动时，维护者会先留言询问；没有回复后可以释放认领并重新添加 `help wanted`。
 5. **交付：** PR 使用 `Closes #编号`，逐项满足已确认的验收标准、测试、双语文档和安全要求。只有 PR 合并才表示需求完成；维护者可以在评审中缩小范围或要求拆分后续 Issue。
 
 拼写修正、小型文档修正、维护者直接请求的改动可以跳过正式认领。其他用户可见行为、持久化数据、导入恢复、回收站或永久删除相关改动，必须先有 Issue 和维护者确认。
@@ -103,8 +103,8 @@ Anyone may propose a feature, but opening an issue starts review; it does not ad
 
 1. **Proposal:** describe the user problem, observable acceptance criteria, scope boundaries, and data impact. The automatic `enhancement` label classifies the proposal but does not mean it is accepted.
 2. **Ready to claim:** the maintainer confirms the scope and acceptance criteria in writing and adds `help wanted`. Only then is implementation open to community contributors. `good first issue` marks a bounded newcomer-friendly task.
-3. **Claim:** comment with the intended approach, planned tests, and an expected first progress update. After confirming the claim, the maintainer adds `claimed` and removes `help wanted`. One contributor is confirmed at a time by default; avoid substantial implementation before confirmation.
-4. **In progress:** external contributors first fork the repository, sync the fork with the latest upstream `main`, and create a focused short-lived branch in the fork. Open a linked Draft PR from that branch to `Ultronen/dsh-archived-chats:main` early. This workflow does not require repository write access and does not automatically grant collaborator access. Post an update at least every 14 days. Ask for more time when needed. After 14 days without an update or extension request, the maintainer may release the claim and restore `help wanted`, with no penalty to the contributor.
+3. **Claim:** on an Issue labeled `help wanted` and not yet labeled `claimed`, leave a clear comment that you want to claim it. The first contributor to make a clear claim may start work within the confirmed scope; the maintainer then adds `claimed` and removes `help wanted`. Claiming does not require a promised implementation approach, test plan, or progress date.
+4. **In progress:** external contributors first fork the repository, sync the fork with the latest upstream `main`, and create a focused short-lived branch in the fork. Open a linked Draft PR from that branch to `Ultronen/dsh-archived-chats:main` early. This workflow does not require repository write access and does not automatically grant collaborator access. If you cannot continue, comment on the Issue or release the claim. After prolonged inactivity, the maintainer will ask for an update and may release an unanswered claim by restoring `help wanted`.
 5. **Delivery:** use `Closes #number` and meet the confirmed acceptance criteria, tests, bilingual documentation, and safety requirements. An issue is complete only when its PR is merged; review may narrow the scope or move follow-up work into separate issues.
 
 Typos, small documentation fixes, and changes directly requested by the maintainer may skip formal claiming. Other user-visible behavior and all changes involving persisted data, import or restore, the Recycle Bin, or permanent deletion require an issue and maintainer confirmation first.

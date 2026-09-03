@@ -59,7 +59,7 @@ body:
     id: participation
     attributes:
       label: 参与方式 / Participation
-      description: 这不会自动完成认领；实现工作仍需等待维护者确认范围和认领。
+      description: 这不会自动完成认领；请先等待维护者确认范围并添加 `help wanted`，之后留言认领即可开始。
       options:
         - 仅提出建议 / Proposal only
         - 愿意帮助验证或完善文档 / I can test or document it
