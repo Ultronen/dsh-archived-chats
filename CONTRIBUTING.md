@@ -2,6 +2,10 @@
 
 感谢你帮助改进 dsh-archived-chats。
 
+> 认领任务或提交 Pull Request 前，务必完整阅读本指南。提交贡献即表示你愿意遵守这里的流程、命名、测试和安全要求。
+>
+> Before claiming work or opening a pull request, read this guide in full. By contributing, you agree to follow its workflow, naming, testing, and safety requirements.
+
 ## 选择正确入口
 
 - 使用问题、安装帮助和开放式想法：前往 [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions)。
@@ -25,6 +29,14 @@
 
 拼写修正、小型文档修正、维护者直接请求的改动可以跳过正式认领。其他用户可见行为、持久化数据、导入恢复、回收站或永久删除相关改动，必须先有 Issue 和维护者确认。
 
+## 分支、提交与 PR 命名
+
+- 分支使用 `<type>/<short-description>`；`type` 可为 `feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`chore` 或 `ci`。
+- `short-description` 使用简短、小写的英文，单词之间用连字符，例如 `feat/archive-filter` 或 `fix/import-timeout`。分支名不必重复 Issue 编号。
+- 提交信息和 PR 标题使用 Conventional Commits 格式 `<type>(<optional-scope>): <description>`，描述使用现在时命令语气并保持在 72 个字符内，例如 `fix(import): prevent restore timeout`。
+- 一个分支和 PR 只处理一项逻辑改动；Issue 关联写在 PR 描述中，例如 `Closes #42`。
+- `release/*` 分支、版本号、Tag、npm 发布和插件市场更新仅由维护者处理。安全漏洞不得使用公开分支或 PR，请按 [SECURITY.md](SECURITY.md) 私密报告。
+
 ## 本地开发
 
 要求 Node.js 18 或 24。克隆仓库后运行：
@@ -45,15 +57,24 @@ GitHub Release 标题必须与发布 tag 完全一致，例如 tag 为 `v1.0.2` 
 
 ## Pull request checklist
 
-1. 外部贡献者在自己的 Fork 中，从上游最新 `main` 创建单一目的的短期分支，并向上游 `main` 提交 PR。
-2. 添加或更新能够证明行为的测试。
-3. 同时维护中文和英文用户文档。
-4. 运行完整测试和 npm 包内容检查。
-5. 等待 GitHub CI 通过，并处理所有评审意见。
+1. 完整阅读并遵守本贡献指南。
+2. 外部贡献者在自己的 Fork 中，从上游最新 `main` 创建符合命名规则的单一目的短期分支，并向上游 `main` 提交 PR。
+3. 添加或更新能够证明行为的测试。
+4. 同时维护中文和英文用户文档。
+5. 运行完整测试和 npm 包内容检查。
+6. 等待 GitHub CI 通过，并处理所有评审意见。
 
 ## English summary
 
 Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files. Versioning, npm publication, tags, releases, and marketplace updates are maintainer-only unless explicitly requested.
+
+### Branch, commit, and pull request naming
+
+- Name branches `<type>/<short-description>`, where `type` is `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, or `ci`.
+- Write the short description in concise lowercase English with hyphens, such as `feat/archive-filter` or `fix/import-timeout`. The issue number does not need to be repeated in the branch name.
+- Use Conventional Commits for commit messages and PR titles: `<type>(<optional-scope>): <description>`. Use imperative present tense and keep the title within 72 characters, for example `fix(import): prevent restore timeout`.
+- Keep one logical change per branch and PR. Link the issue in the PR description, for example `Closes #42`.
+- `release/*` branches, versions, tags, npm publication, and marketplace updates are maintainer-only. Never disclose a vulnerability in a public branch or PR; follow [SECURITY.md](SECURITY.md) instead.
 
 ### Community proposals and claims
 

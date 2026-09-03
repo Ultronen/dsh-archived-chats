@@ -1,3 +1,10 @@
+> 提交前务必完整阅读 [贡献指南 / Contributing Guide](https://github.com/Ultronen/dsh-archived-chats/blob/main/CONTRIBUTING.md)。
+>
+> Before submitting, you must read the guide in full.
+
+- [ ] 我已完整阅读并遵守贡献指南 / I have read and followed the Contributing Guide
+- [ ] 分支名、提交信息和 PR 标题符合贡献指南 / Branch, commit, and PR naming follows the guide
+
 ## 关联 Issue / Linked issue
 
 <!-- 使用 `Closes #123`。较大的功能与行为变更应先完成需求评审和认领；维护者直接请求的改动或小型维护可说明例外。 -->
