@@ -63,10 +63,6 @@ PR 应保持单一目的，并说明用户可见变化、兼容性影响、数�
 
 不得提交本地插件数据、数据库、聊天内容、附件、日志、访问令牌、`.DS_Store` 或测试临时文件。对导入、恢复、回收站和永久删除流程的改动必须包含失败与回滚场景测试。
 
-## 发布命名规则
-
-GitHub Release 标题必须与发布 tag 完全一致，例如 tag 为 `v1.0.2` 时标题只能是 `v1.0.2`，不要添加包名或其他前缀。产品名称和版本说明可以写在 Release body 中。
-
 ## Pull request checklist
 
 1. 完整阅读并遵守本贡献指南。
@@ -112,5 +108,3 @@ Anyone may propose a feature, but opening an issue starts review; it does not ad
 5. **Delivery:** use `Closes #number` and meet the confirmed acceptance criteria, tests, bilingual documentation, and safety requirements. An issue is complete only when its PR is merged; review may narrow the scope or move follow-up work into separate issues.
 
 Typos, small documentation fixes, and changes directly requested by the maintainer may skip formal claiming. Other user-visible behavior and all changes involving persisted data, import or restore, the Recycle Bin, or permanent deletion require an issue and maintainer confirmation first.
-
-GitHub Release titles must exactly match their tags (for example, `v1.0.2`); do not prefix them with the package name. Put product naming and release descriptions in the release body instead.
