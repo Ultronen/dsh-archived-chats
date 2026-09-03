@@ -9,7 +9,7 @@ body:
       value: |
         开放式讨论和使用建议也可以先发到 Discussions。请聚焦用户问题，不要提交敏感数据。
 
-        提交建议表示开始评审，不代表功能已进入路线图。维护者确认范围并添加 `help wanted` 后，社区贡献者才可按贡献指南认领实现。
+        提交建议表示开始评审，不代表功能已进入路线图。维护者确认范围并添加 `help wanted` 后，社区贡献者才可按[贡献指南](https://github.com/Ultronen/dsh-archived-chats/blob/main/CONTRIBUTING.md)认领实现。认领前务必完整阅读该指南。
   - type: textarea
     id: problem
     attributes:

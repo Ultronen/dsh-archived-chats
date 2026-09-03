@@ -116,7 +116,7 @@ The eight fixed screenshots below come from an isolated Simplified Chinese light
 | Architecture | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
 | Release history | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
 
-See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), and [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions).
+See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), and [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions). Before claiming work or opening a pull request, contributors must read the [Contributing Guide](CONTRIBUTING.md) in full.
 
 ## Project status
 

@@ -116,7 +116,7 @@ dsh plugin --profile web update dsh-archived-chats
 | 架构说明 | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
 | 版本历史 | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
 
-另见 [支持说明](SUPPORT.md)、[安全说明](SECURITY.md)、[贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)和[问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions)。
+另见 [支持说明](SUPPORT.md)、[安全说明](SECURITY.md)、[贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)和[问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions)。认领任务或提交 Pull Request 前，贡献者务必完整阅读[贡献指南](CONTRIBUTING.md)。
 
 ## 项目状态
 
