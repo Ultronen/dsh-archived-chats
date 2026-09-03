@@ -37,6 +37,18 @@
 - 一个分支和 PR 只处理一项逻辑改动；Issue 关联写在 PR 描述中，例如 `Closes #42`。
 - `release/*` 分支、版本号、Tag、npm 发布和插件市场更新仅由维护者处理。安全漏洞不得使用公开分支或 PR，请按 [SECURITY.md](SECURITY.md) 私密报告。
 
+## 贡献范围与维护者控制文件
+
+外部贡献者可以修改已确认 Issue 的验收标准所必需的产品代码、自动化测试，以及与该行为直接相关的 README 和用户指南。与认领范围无关的改动应拆分到另一个先经确认的 Issue 和 PR。
+
+除非关联 Issue 中有维护者的明确书面要求，外部 PR 不得修改：
+
+- 项目治理、法律与安全文件：`LICENSE`、`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md` 和 `SUPPORT.md`。
+- 所有权、社区入口与自动化配置：`.github/CODEOWNERS`、`.github/ISSUE_TEMPLATE/**`、`.github/PULL_REQUEST_TEMPLATE.md` 和 `.github/workflows/**`。
+- 发布与市场资产：包版本号、Tag、GitHub Release、npm 发布、插件市场条目、`screenshots.json`、`assets/brand/**` 和 `assets/screenshots/**`。
+
+贡献者在 Fork 中可以提出任何改动，但只有通过 `@Ultronen` Code Owner 审核并合并的内容才代表项目决定。超出上述边界的外部 PR 会被要求移除越界改动，或直接关闭。
+
 ## 本地开发
 
 要求 Node.js 18 或 24。克隆仓库后运行：
@@ -59,10 +71,11 @@ GitHub Release 标题必须与发布 tag 完全一致，例如 tag 为 `v1.0.2` 
 
 1. 完整阅读并遵守本贡献指南。
 2. 外部贡献者在自己的 Fork 中，从上游最新 `main` 创建符合命名规则的单一目的短期分支，并向上游 `main` 提交 PR。
-3. 添加或更新能够证明行为的测试。
-4. 同时维护中文和英文用户文档。
-5. 运行完整测试和 npm 包内容检查。
-6. 等待 GitHub CI 通过，并处理所有评审意见。
+3. 只修改已确认范围所必需的文件；未经书面要求不修改维护者控制文件。
+4. 添加或更新能够证明行为的测试。
+5. 同时维护中文和英文用户文档。
+6. 运行完整测试和 npm 包内容检查。
+7. 等待 GitHub CI 和 Code Owner 审核通过，并处理所有评审意见。
 
 ## English summary
 
@@ -75,6 +88,18 @@ Use Discussions for questions, Issues for reproducible bugs, and private vulnera
 - Use Conventional Commits for commit messages and PR titles: `<type>(<optional-scope>): <description>`. Use imperative present tense and keep the title within 72 characters, for example `fix(import): prevent restore timeout`.
 - Keep one logical change per branch and PR. Link the issue in the PR description, for example `Closes #42`.
 - `release/*` branches, versions, tags, npm publication, and marketplace updates are maintainer-only. Never disclose a vulnerability in a public branch or PR; follow [SECURITY.md](SECURITY.md) instead.
+
+### Contribution scope and maintainer-controlled files
+
+External contributors may modify the product code, automated tests, and directly related README or user-guide content required by the confirmed acceptance criteria. Unrelated changes belong in a separate Issue and PR that the maintainer has confirmed first.
+
+Unless the linked Issue contains an explicit written request from the maintainer, external pull requests must not modify:
+
+- Project governance, legal, and security files: `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and `SUPPORT.md`.
+- Ownership, community-entry, and automation configuration: `.github/CODEOWNERS`, `.github/ISSUE_TEMPLATE/**`, `.github/PULL_REQUEST_TEMPLATE.md`, and `.github/workflows/**`.
+- Release and marketplace assets: the package version, tags, GitHub Releases, npm publication, marketplace entries, `screenshots.json`, `assets/brand/**`, and `assets/screenshots/**`.
+
+Contributors can propose any change in their forks, but only content reviewed and merged by the `@Ultronen` Code Owner represents a project decision. An external PR outside these boundaries will be asked to remove the out-of-scope changes or may be closed.
 
 ### Community proposals and claims
 
