@@ -35,7 +35,7 @@
 - `short-description` 使用简短、小写的英文，单词之间用连字符，例如 `feat/archive-filter` 或 `fix/import-timeout`。分支名不必重复 Issue 编号。
 - 提交信息和 PR 标题使用 Conventional Commits 格式 `<type>(<optional-scope>): <description>`，描述使用现在时命令语气并保持在 72 个字符内，例如 `fix(import): prevent restore timeout`。
 - 一个分支和 PR 只处理一项逻辑改动；Issue 关联写在 PR 描述中，例如 `Closes #42`。
-- `release/*` 分支、版本号、Tag、npm 发布和插件市场更新仅由维护者处理。安全漏洞不得使用公开分支或 PR，请按 [SECURITY.md](SECURITY.md) 私密报告。
+- `release/*` 分支仅由维护者使用。安全漏洞不得使用公开分支或 PR，请按 [SECURITY.md](SECURITY.md) 私密报告。
 
 ## 贡献范围与维护者控制文件
 
@@ -59,7 +59,7 @@ npm test
 npm pack --dry-run --json
 ```
 
-PR 应保持单一目的，并说明用户可见变化、兼容性影响、数据安全影响和验证结果。界面变化应附截图。除非维护者明确要求，不要修改版本号、创建标签、发布 npm 包或更新插件市场。
+PR 应保持单一目的，并说明用户可见变化、兼容性影响、数据安全影响和验证结果。界面变化应附截图。
 
 不得提交本地插件数据、数据库、聊天内容、附件、日志、访问令牌、`.DS_Store` 或测试临时文件。对导入、恢复、回收站和永久删除流程的改动必须包含失败与回滚场景测试。
 
@@ -75,7 +75,7 @@ PR 应保持单一目的，并说明用户可见变化、兼容性影响、数�
 
 ## English summary
 
-Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files. Versioning, npm publication, tags, releases, and marketplace updates are maintainer-only unless explicitly requested.
+Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files.
 
 ### Branch, commit, and pull request naming
 
@@ -83,7 +83,7 @@ Use Discussions for questions, Issues for reproducible bugs, and private vulnera
 - Write the short description in concise lowercase English with hyphens, such as `feat/archive-filter` or `fix/import-timeout`. The issue number does not need to be repeated in the branch name.
 - Use Conventional Commits for commit messages and PR titles: `<type>(<optional-scope>): <description>`. Use imperative present tense and keep the title within 72 characters, for example `fix(import): prevent restore timeout`.
 - Keep one logical change per branch and PR. Link the issue in the PR description, for example `Closes #42`.
-- `release/*` branches, versions, tags, npm publication, and marketplace updates are maintainer-only. Never disclose a vulnerability in a public branch or PR; follow [SECURITY.md](SECURITY.md) instead.
+- `release/*` branches are maintainer-only. Never disclose a vulnerability in a public branch or PR; follow [SECURITY.md](SECURITY.md) instead.
 
 ### Contribution scope and maintainer-controlled files
 
