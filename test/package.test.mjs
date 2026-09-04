@@ -40,6 +40,18 @@ test('host session API follows the DSH-provided stable or alpha package instead 
   assert.equal(packageManifest.peerDependenciesMeta?.['@deepseek-ai/dsh-session']?.optional, true);
 });
 
+test('public runtime exports stay paired with their TypeScript declarations', () => {
+  for (const [specifier, runtime, declarations] of [
+    ['.', './lib/index.js', './lib/types/index.d.ts'],
+    ['./client', './lib/client.js', './lib/types/client/index.d.ts'],
+  ]) {
+    assert.deepEqual(packageManifest.exports?.[specifier], {
+      types: declarations,
+      default: runtime,
+    });
+  }
+});
+
 test('author-owned screenshot manifest keeps the eight stable market slots valid', () => {
   const declared = JSON.parse(readFileSync(join(root, 'screenshots.json'), 'utf8'));
 
