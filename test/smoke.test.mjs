@@ -401,19 +401,34 @@ console.log('\n[1a] workspace bulk archive routes');
   }
   workspace.sessionIds.push(...concurrencyIds);
   const inspect = persistence.inspect;
+  const failedInspectionId = concurrencyIds[7];
+  const inspectedIds = [];
   let activeInspections = 0;
   let maxConcurrentInspections = 0;
   persistence.inspect = async (sessionId) => {
+    inspectedIds.push(sessionId);
     activeInspections += 1;
     maxConcurrentInspections = Math.max(maxConcurrentInspections, activeInspections);
     await new Promise((resolve) => setTimeout(resolve, 2));
-    try { return await inspect(sessionId); }
+    try {
+      if (sessionId === failedInspectionId) throw new Error('fixture inspection failure');
+      return await inspect(sessionId);
+    }
     finally { activeInspections -= 1; }
   };
   const concurrentPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
   persistence.inspect = inspect;
   assert(concurrentPreview.status === 200 && concurrentPreview.json().sessions.map((item) => item.id).join(',') === concurrencyIds.join(','),
     'workspace preview retains candidate order while enriching titles');
+  const concurrentRows = concurrentPreview.json().sessions;
+  const failedInspectionIndex = concurrencyIds.indexOf(failedInspectionId);
+  assert(inspectedIds.length === concurrencyIds.length && new Set(inspectedIds).size === concurrencyIds.length,
+    'workspace preview inspects every candidate exactly once while enriching titles');
+  assert(concurrentRows[failedInspectionIndex]?.id === failedInspectionId && concurrentRows[failedInspectionIndex]?.title === null,
+    'workspace preview retains a failed inspection in place with a null title');
+  assert(concurrentRows[failedInspectionIndex - 1]?.title === `Concurrent ${concurrencyIds[failedInspectionIndex - 1]}`
+    && concurrentRows[failedInspectionIndex + 1]?.title === `Concurrent ${concurrencyIds[failedInspectionIndex + 1]}`,
+  'workspace preview preserves neighboring successful titles around an inspection fallback');
   assert(maxConcurrentInspections <= 8, `workspace preview bounds persistence inspections (got ${maxConcurrentInspections})`);
 
   workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId && !concurrencyIds.includes(sessionId));
