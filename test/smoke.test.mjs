@@ -4539,7 +4539,7 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   await applyButton?.props.onClick();
   tree = harness.render(props);
   assert(requests.some((request) => request.path.endsWith('/workspace-archive/apply') && request.options.body === '{"token":"token-1","nonce":"nonce-1"}'), 'workspace archive apply sends only preview token and nonce after confirmation');
-  assert(applied === 1 && elementText(tree).includes('session-failed') && elementText(tree).includes('snapshot-failed'), 'workspace archive retains final archived, skipped, failed, and snapshot results while refreshing consumers');
+  assert(applied === 1 && elementText(tree).includes('session-failed') && elementText(tree).includes('历史快照未保存') && !elementText(tree).includes('archive-failed'), 'workspace archive retains localized final failed and snapshot results while refreshing consumers');
   const dictionaries = clientCalls.localeRegister.find((entry) => entry.ns === 'settings.archived-chats')?.dicts;
   assert(typeof dictionaries?.zh?.['workspaceArchive.title'] === 'string' && typeof dictionaries?.en?.['workspaceArchive.title'] === 'string', 'workspace archive has matched Chinese and English locale keys');
   harness.unmount();
@@ -4570,6 +4570,42 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert(elementText(legacyHarness.render(props)).includes('当前 DSH 版本不支持按项目批量归档。'), 'old Hosts show a clear workspace archive compatibility message');
   legacyHarness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11i] client half — workspace archive recovery and completed conflicts');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  let listCalls = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/workspace-archive/workspaces')) {
+      listCalls += 1;
+      if (listCalls === 1) return { ok: false, status: 501, json: async () => ({ error: 'workspace-archive-unsupported' }) };
+      return { ok: true, status: 200, json: async () => ({ workspaces: [{ id: 'recover', title: 'Recovered', eligibleCount: 3, liveCount: 2 }] }) };
+    }
+    if (path.endsWith('/workspace-archive/apply')) return { ok: false, status: 409, json: async () => ({ workspace: { id: 'recover', title: 'Recovered' }, archived: [], skipped: [{ id: 'late-live', reason: 'session-live' }], failed: [{ id: 'failed', reason: 'archive-failed' }], snapshots: [{ id: 'snapshot', status: 'snapshot-failed' }] }) };
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  let conflictResult = null;
+  try { conflictResult = await clientExports.__test.applyWorkspaceArchive('token', 'nonce'); } catch { /* red: intentional 409 is currently treated as an error */ }
+  assert(Array.isArray(conflictResult?.skipped) && Array.isArray(conflictResult?.failed) && Array.isArray(conflictResult?.snapshots), 'completed 409 workspace apply returns its safe final result');
+  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+  const harness = createHookHarness(Dialog);
+  const props = { t, onClose: () => {}, onApplied: async () => {}, returnFocus: null, fallbackFocusRef: { current: null } };
+  harness.render(props); harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render(props);
+  let retry = collectElements(tree).find((element) => element.type === 'button' && elementText(element) === '重试');
+  retry?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render(props);
+  const select = collectElements(tree).find((element) => element.props?.['data-workspace-archive-select'] === '1');
+  assert(listCalls === 2 && select?.props.children?.[1]?.props?.children.includes('可归档 3') && select?.props.children?.[1]?.props?.children.includes('活跃 2'), 'workspace Retry reloads summaries and renders localized eligible and live counts');
+  harness.unmount();
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
