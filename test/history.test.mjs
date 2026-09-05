@@ -140,6 +140,27 @@ test('capture publishes a new version and never returns workspace paths or priva
   assert.equal(JSON.stringify(result).includes('private note'), false);
 });
 
+test('capture runs inside an already-held lifecycle lock when requested by the Host', async () => {
+  let queue = Promise.resolve();
+  const lifecycle = {
+    run(operation) {
+      const result = queue.then(operation);
+      queue = result.catch(() => undefined);
+      return result;
+    },
+  };
+  const { service } = fixture({ existing: null, deps: { lifecycle } });
+  let timer;
+  const result = await Promise.race([
+    lifecycle.run(() => service.captureArchived('session-a', { lockHeld: true })),
+    new Promise((resolve) => { timer = setTimeout(() => resolve('timed out'), 25); }),
+  ]);
+  clearTimeout(timer);
+
+  assert.notEqual(result, 'timed out');
+  assert.equal(result.snapshot.sessionId, 'session-a');
+});
+
 test('capture refuses non-archived and recycled sources before persistence inspection', async () => {
   const notArchived = fixture({ archivedIds: [] });
   await assert.rejects(

@@ -254,6 +254,9 @@ const registry = {
   state: workspaceState,
   get archivedSessionIds() { return workspaceState.archivedSessionIds; },
   list: () => workspaces,
+  async archiveSession(id) {
+    if (!workspaceState.archivedSessionIds.includes(id)) workspaceState.archivedSessionIds.push(id);
+  },
   async setState(next) {
     workspaceState.archivedSessionIds = next.archivedSessionIds;
     workspaceState.workspaceIds = next.workspaceIds;
@@ -323,12 +326,81 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 30, `thirty archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all']) {
+assert(routes.size === 33, `thirty-three archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
 assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
+
+console.log('\n[1a] workspace bulk archive routes');
+{
+  const id = 'session-workspace-cold';
+  const staleId = 'session-workspace-stale';
+  const workspace = workspaces[0];
+  const headers = [
+    { id, createdAt: 1786726700000, cwd: '/workspace/private' },
+    { id: staleId, createdAt: 1786726800000, cwd: '/workspace/private' },
+  ];
+  headerRows.push(...headers);
+  registry.headers.set(id, headers[0]);
+  registry.headers.set(staleId, headers[1]);
+  events[id] = [
+    { type: 'session/title', data: { title: '批量归档预览标题' } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: 'workspace-body-secret' }] } },
+  ];
+  events[staleId] = [];
+  workspace.sessionIds.push(id);
+
+  const summaries = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(summaries.status === 200 && summaries.json().workspaces.some((item) => item.id === 'ws-1' && item.eligibleCount === 1),
+    `workspace summaries expose eligible cold sessions (got ${summaries.status}: ${summaries.body})`);
+  assert(!JSON.stringify(summaries.json()).includes('/ws/') && !JSON.stringify(summaries.json()).includes('workspace-body-secret'),
+    'workspace summaries expose no paths or session content');
+  const wrongSummaryMethod = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('POST', {}));
+  assert(wrongSummaryMethod.status === 405, 'workspace summaries reject non-GET methods');
+
+  const missingGuard = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', {}, '{"workspaceId":"ws-1"}'));
+  assert(missingGuard.status === 403, 'workspace preview requires the POST guard');
+  const invalidPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1","extra":true}'));
+  assert(invalidPreview.status === 400, 'workspace preview requires an exact request body');
+  const oversizedPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ workspaceId: 'x'.repeat(64 * 1024) })));
+  assert(oversizedPreview.status === 413, 'workspace preview enforces the 64 KiB body limit');
+  const missingWorkspace = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"missing"}'));
+  assert(missingWorkspace.status === 404 && missingWorkspace.json().error === 'workspace-not-found', 'workspace preview preserves stable service errors');
+
+  const preview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  assert(preview.status === 200 && preview.json().sessions.some((item) => item.id === id && item.title === '批量归档预览标题' && item.createdAt === 1786726700000),
+    `workspace preview enriches safe title and timestamp fields (got ${preview.status}: ${preview.body})`);
+  assert(!JSON.stringify(preview.json()).includes('/workspace/private') && !JSON.stringify(preview.json()).includes('workspace-body-secret'),
+    'workspace preview never returns persistence paths or session content');
+  const missingApplyGuard = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', {}, '{"token":"x","nonce":"y"}'));
+  assert(missingApplyGuard.status === 403, 'workspace apply requires the POST guard');
+  const invalidApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"token":"x"}'));
+  assert(invalidApply.status === 400, 'workspace apply requires token and nonce exactly');
+  const oversizedApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: 'x'.repeat(64 * 1024), nonce: 'y' })));
+  assert(oversizedApply.status === 413, 'workspace apply enforces the 64 KiB body limit');
+  const applied = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: preview.json().token, nonce: preview.json().nonce })));
+  assert(applied.status === 200 && applied.json().archived.includes(id) && applied.json().snapshots.some((item) => item.id === id && item.status === 'captured'),
+    `workspace apply archives and snapshots every confirmed cold session (got ${applied.status}: ${applied.body})`);
+  assert(workspaceState.archivedSessionIds.includes(id), 'workspace apply mutates Host archive membership');
+
+  workspace.sessionIds.push(staleId);
+  const stalePreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  workspaceState.archivedSessionIds.push(staleId);
+  const staleApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: stalePreview.json().token, nonce: stalePreview.json().nonce })));
+  assert(staleApply.status === 409 && staleApply.json().archived.length === 0 && staleApply.json().skipped.some((item) => item.id === staleId && item.reason === 'session-archived'),
+    'workspace apply returns 409 when revalidation leaves no archival success');
+
+  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
+  for (const header of headers) {
+    headerRows.splice(headerRows.indexOf(header), 1);
+    registry.headers.delete(header.id);
+  }
+  delete events[id];
+  delete events[staleId];
+}
 
 console.log('\n[1a0] storage insights, retention, and lineage routes');
 {

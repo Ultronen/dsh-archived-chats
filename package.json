@@ -67,6 +67,7 @@
     "lib/lineage.js",
     "lib/history.js",
     "lib/history-restore.js",
+    "lib/workspace-bulk-archive.js",
     "lib/search.js",
     "lib/stats.js",
     "lib/types",

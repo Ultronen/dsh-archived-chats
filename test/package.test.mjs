@@ -96,6 +96,7 @@ test(`published ${packageVersion} package contains runtime, brand banner, fixed 
     'lib/lineage.js',
     'lib/history.js',
     'lib/history-restore.js',
+    'lib/workspace-bulk-archive.js',
     'docs/ARCHITECTURE.md',
     'docs/ARCHITECTURE.en.md',
   ]) assert(paths.has(required), `missing ${required}`);
