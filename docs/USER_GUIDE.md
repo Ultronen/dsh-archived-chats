@@ -16,7 +16,7 @@ Groups remember their collapsed state in the browser. Filter by regular or subag
 
 ## Archive a workspace
 
-Open an existing workspace row's ellipsis menu and choose **Archive workspace chats**. The plugin automatically prepares that workspace and opens one confirmation naming the workspace and eligible-chat count. There is no workspace selector, session preview list, or second confirmation.
+Open an existing workspace row's ellipsis menu and choose **Archive chats**. The plugin automatically prepares that workspace and opens one confirmation naming the workspace and eligible-chat count. There is no workspace selector, session preview list, or second confirmation.
 
 Choose **Archive all** to proceed, or **Cancel** to leave everything unchanged. Eligible means a chat is currently unarchived and is not resident in the Host `sessions` store. The automatic preparation is limited to 2,000 eligible chats and creates a five-minute, single-use token and nonce for that exact ordered set, so the apply request cannot add IDs and chats created afterward are excluded.
 

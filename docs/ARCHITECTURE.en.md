@@ -137,7 +137,7 @@ Permanent purge persists `purge-pending` before physical writes, then removes ev
 client.js registers an order-30 settings.section and uses the public Harness workspace-action slot, overlay, declared store, and design tokens. The page state includes:
 
 - A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps public `workspaces.archiveSession` and starts history capture only after the original succeeds. Capture pauses the three-second dismissal; success resumes it, while failure retains retry-save without rolling back archive. View and Undo remain available.
-- An **Archive workspace chats** action in each workspace row's ellipsis menu: it prepares that workspace automatically, shows one confirmation with the exact eligible count and no visible session preview, and retains the per-item apply result until dismissed.
+- An **Archive chats** action in each workspace row's ellipsis menu: it prepares that workspace automatically, shows one confirmation with the exact eligible count and no visible session preview, and retains the per-item apply result until dismissed.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.

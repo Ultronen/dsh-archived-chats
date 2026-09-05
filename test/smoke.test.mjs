@@ -4569,6 +4569,8 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   const dictionaries = clientCalls.localeRegister.find((entry) => entry.ns === 'settings.archived-chats')?.dicts;
   assert(dictionaries?.zh?.['workspaceArchive.confirmTitle'] === '归档 {count} 个会话？'
     && dictionaries?.en?.['workspaceArchive.confirmTitle'] === 'Archive {count} chats?', 'workspace archive has matched direct-confirmation titles');
+  assert(dictionaries?.zh?.['workspaceArchive.action'] === '归档会话'
+    && dictionaries?.en?.['workspaceArchive.action'] === 'Archive chats', 'workspace archive has matched approved menu action labels');
   harness.unmount();
   globalThis.fetch = async () => ({ ok: false, status: 501, json: async () => ({ error: 'workspace-archive-unsupported' }) });
   const legacyHarness = createHookHarness(Dialog);
@@ -4866,6 +4868,7 @@ console.log('\n[11j] client half — workspace archive final coverage');
     actions: archiveStore.actions,
     ...actionRegistration.meta.inject(),
   });
+  assert(elementText(actionTree) === '归档会话', 'workspace row menu uses the approved concise archive action label');
   collectElements(actionTree).find((element) => element.props?.role === 'menuitem')?.props.onClick();
   assert(archiveStore.getSnapshot().workspaceArchive === null && typeof deferredAction === 'function', 'workspace menu selection defers opening until the owner closes its menu');
   deferredAction(() => { restoredMenuFocus += 1; });
