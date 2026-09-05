@@ -4477,6 +4477,103 @@ console.log('\n[11g] client half — archive move exposes immediate undo');
   Object.assign(moduleTable.react, savedHooks);
 }
 
+console.log('\n[11h] client half — workspace bulk archive dialog');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  let applied = 0;
+  let closed = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    requests.push({ path, options });
+    const payload = path.endsWith('/workspace-archive/workspaces')
+      ? { ok: true, workspaces: [{ id: 'workspace-1', title: 'Project One', eligibleCount: 2, liveCount: 1 }] }
+      : path.endsWith('/workspace-archive/preview')
+        ? { ok: true, token: 'token-1', nonce: 'nonce-1', workspace: { id: 'workspace-1', title: 'Project One' }, sessions: [{ id: 'session-title', title: 'Safe title' }, { id: 'session-fallback', title: null }], skipped: [{ id: 'session-live', reason: 'session-live' }] }
+        : path.endsWith('/workspace-archive/apply')
+          ? { ok: true, workspace: { id: 'workspace-1', title: 'Project One' }, archived: ['session-title'], skipped: [{ id: 'session-fallback', reason: 'session-live' }], failed: [{ id: 'session-failed', reason: 'archive-failed' }], snapshots: [{ id: 'session-title', status: 'snapshot-failed' }] }
+          : {};
+    return { ok: true, status: 200, json: async () => payload };
+  };
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+  assert(typeof Dialog === 'function', 'workspace bulk archive exposes its dialog component for focused verification');
+  assert(typeof clientExports.__test.fetchWorkspaceArchiveWorkspaces === 'function'
+    && typeof clientExports.__test.previewWorkspaceArchive === 'function'
+    && typeof clientExports.__test.applyWorkspaceArchive === 'function', 'workspace bulk archive exposes guarded request helpers');
+  const harness = createHookHarness(Dialog);
+  const props = { t, onClose: () => { closed += 1; }, onApplied: async () => { applied += 1; }, returnFocus: null, fallbackFocusRef: { current: null } };
+  harness.render(props);
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render(props);
+  let elements = collectElements(tree);
+  const dialog = elements.find((element) => element.props?.role === 'dialog');
+  assert(dialog?.props['aria-modal'] === 'true' && dialog?.props['aria-labelledby'], 'workspace bulk archive opens an accessible labelled modal dialog');
+  assert(requests.some((request) => request.path.endsWith('/workspace-archive/workspaces') && request.options.cache === 'no-store'), 'workspace bulk archive loads safe workspace summaries with GET');
+  const firstFocus = { focus: () => { documentMock.activeElement = firstFocus; } };
+  const lastFocus = { focus: () => { documentMock.activeElement = lastFocus; } };
+  if (dialog?.props.ref) dialog.props.ref.current = { contains: (node) => node === firstFocus || node === lastFocus, querySelectorAll: () => [firstFocus, lastFocus] };
+  documentMock.activeElement = lastFocus;
+  let trapped = false;
+  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { trapped = true; } });
+  documentListeners.get('keydown')?.({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => {} });
+  assert(trapped && documentMock.activeElement === firstFocus && closed === 1, 'workspace bulk archive traps Tab and contains Escape inside its dialog');
+  const workspaceSelect = elements.find((element) => element.props?.['data-workspace-archive-select'] === '1');
+  workspaceSelect?.props.onChange({ target: { value: 'workspace-1' } });
+  tree = harness.render(props);
+  elements = collectElements(tree);
+  const previewButton = elements.find((element) => element.props?.['data-workspace-archive-preview'] === '1');
+  await previewButton?.props.onClick();
+  tree = harness.render(props);
+  elements = collectElements(tree);
+  assert(requests.some((request) => request.path.endsWith('/workspace-archive/preview') && request.options.body === '{"workspaceId":"workspace-1"}'), 'workspace preview sends only the selected workspace identity');
+  assert(elementText(tree).includes('Safe title') && elementText(tree).includes('session-fallback') && elementText(tree).includes('session-live'), 'workspace preview renders safe titles, id fallback, and skipped live summary');
+  assert(!requests.some((request) => request.path.endsWith('/workspace-archive/apply')), 'workspace archive never applies before explicit confirmation');
+  const confirmButton = elements.find((element) => element.props?.['data-workspace-archive-confirm'] === '1');
+  confirmButton?.props.onClick();
+  tree = harness.render(props);
+  elements = collectElements(tree);
+  const applyButton = elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1');
+  await applyButton?.props.onClick();
+  tree = harness.render(props);
+  assert(requests.some((request) => request.path.endsWith('/workspace-archive/apply') && request.options.body === '{"token":"token-1","nonce":"nonce-1"}'), 'workspace archive apply sends only preview token and nonce after confirmation');
+  assert(applied === 1 && elementText(tree).includes('session-failed') && elementText(tree).includes('snapshot-failed'), 'workspace archive retains final archived, skipped, failed, and snapshot results while refreshing consumers');
+  const dictionaries = clientCalls.localeRegister.find((entry) => entry.ns === 'settings.archived-chats')?.dicts;
+  assert(typeof dictionaries?.zh?.['workspaceArchive.title'] === 'string' && typeof dictionaries?.en?.['workspaceArchive.title'] === 'string', 'workspace archive has matched Chinese and English locale keys');
+  harness.unmount();
+  const pageHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  let workspaceArchiveSidebarRefreshes = 0;
+  const pageProps = { t, refreshSidebar: () => { workspaceArchiveSidebarRefreshes += 1; } };
+  pageHarness.render(pageProps);
+  pageHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = pageHarness.render(pageProps);
+  elements = collectElements(tree);
+  const workspaceAction = elements.find((element) => element.type === 'button' && elementText(element) === '按项目批量归档');
+  workspaceAction?.props.onClick({ currentTarget: { focus: () => {} } });
+  tree = pageHarness.render(pageProps);
+  const mountedDialog = findComponentElement(tree, 'WorkspaceArchiveDialog');
+  const stateRequestsBefore = requests.filter((request) => request.path.endsWith('/state')).length;
+  const sidebarRefreshesBefore = workspaceArchiveSidebarRefreshes;
+  const workspaceRefreshesBefore = clientCalls.workspaceRefresh;
+  await mountedDialog?.props.onApplied();
+  assert(requests.filter((request) => request.path.endsWith('/state')).length > stateRequestsBefore
+    && workspaceArchiveSidebarRefreshes > sidebarRefreshesBefore && clientCalls.workspaceRefresh > workspaceRefreshesBefore,
+  'completed workspace archive refreshes plugin state, sidebar, and Host workspace state');
+  pageHarness.unmount();
+  globalThis.fetch = async () => ({ ok: false, status: 501, json: async () => ({ error: 'workspace-archive-unsupported' }) });
+  const legacyHarness = createHookHarness(Dialog);
+  legacyHarness.render(props);
+  legacyHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(elementText(legacyHarness.render(props)).includes('当前 DSH 版本不支持按项目批量归档。'), 'old Hosts show a clear workspace archive compatibility message');
+  legacyHarness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
 console.log('\n[12] client half — sidebar refresh inject face');
 {
   const meta = clientCalls.slotRegister[0].meta;
