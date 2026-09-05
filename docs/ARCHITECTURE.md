@@ -10,7 +10,7 @@
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
 - 浏览器客户端位于 lib/client.js，通过 settings.section 注册「会话档案」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js 和 lib/lineage.js 中。lib/history.js 负责历史抓取、安全清单和预览授权，lib/history-restore.js 负责单次确认的恢复为副本事务。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合回收生命周期。
+- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js、lib/lineage.js 和 lib/workspace-bulk-archive.js 中。lib/history.js 负责历史抓取、安全清单和预览授权，lib/history-restore.js 负责单次确认的恢复为副本事务。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合回收生命周期。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
 
@@ -22,6 +22,9 @@
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 GET  /plugins/dsh-archived-chats/insights
+GET  /plugins/dsh-archived-chats/workspace-archive/workspaces
+POST /plugins/dsh-archived-chats/workspace-archive/preview
+POST /plugins/dsh-archived-chats/workspace-archive/apply
 POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/preview
 POST /plugins/dsh-archived-chats/retention/apply
@@ -52,6 +55,8 @@ POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
 所有修改路由以及会返回对话内容的 preview、preview/image、search、history/preview 和 history/preview/image 路由都要求 `x-dsh-archived-chats: 1` 请求头。`GET /history` 只返回有界安全清单；历史图片只在快照身份与完整描述符同时匹配时返回。
+
+工作区归档只列出安全的工作区摘要。preview 只接受一个工作区 ID，并为最多 2,000 条符合条件且有序的会话 ID 签发 5 分钟有效、只能使用一次的 token/nonce；apply 只接受该 token 和 nonce，绝不接受调用方指定的会话 ID。符合条件是指会话仍属于现有工作区、尚未归档，且不在 Host `sessions` 存储中。每一项都会在共享生命周期队列内重新检查归属、归档状态和驻留状态，然后以 registry 为 receiver 调用公开的 `workspaceRegistry.archiveSession()`。预览后新增的聊天不会纳入；已变为运行中、已归档或脱离工作区的项目会明确跳过。成功归档后会在持有生命周期锁时尝试保存历史版本；抓取失败会报告但不撤销归档，后续项目仍继续。此功能不改变工作区成员关系、路径或目录，也不会在工作区之间移动聊天。Host 没有公开 `archiveSession` 时返回 `workspace-archive-unsupported`，且不作修改。
 
 ## 状态和本地数据
 
@@ -132,6 +137,7 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 以有界压缩�
 client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮层、状态和设计令牌。页面状态包括：
 
 - `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发起历史抓取。抓取进行时暂停 3 秒关闭计时，成功后恢复，失败时显示不回滚归档的重试保存；查看与撤销继续可用。
+- 「归档」页的 **归档工作区** 操作：从安全工作区摘要中选择一个项目，展示精确预览，要求确认，并在关闭前保留逐项执行结果。
 - 归档列表和工作区分组。
 - 搜索、类型/项目/标签筛选和排序。
 - 标签备注编辑器。
@@ -150,6 +156,7 @@ client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮�
 
 - 所有状态变更路由都要求 POST 和 guard header。
 - 历史响应不包含工作区/快照/附件路径、原始事件、备注或确认 token；日志只记 ID 和稳定代码。
+- 工作区归档响应只公开安全的工作区 ID/标题、符合条件数量、已确认预览中的会话 ID/标题/时间和稳定的逐项结果；工作区路径、事件正文、备注、附件路径与确认凭据不会进入日志或渲染结果。
 - 导入限制 ZIP 大小、条目数量、路径格式、版本和 JSON 结构，拒绝遍历、重复和原型污染字段。
 - 普通删除从不调用物理清除；仅已提交回收记录可进入 purge。
 - 快照和回收文件使用 `0600`，目录使用 `0700`；快照文件在 sync 前以可写句柄重新打开，发布顺序为临时写入、sync、原子 rename，以保持 Windows、macOS 和 Linux 的持久化语义一致。

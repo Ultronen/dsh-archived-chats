@@ -14,6 +14,14 @@ This guide covers the complete user workflow, data boundaries, and recovery beha
 
 Groups remember their collapsed state in the browser. Filter by regular or subagent session, project, and tag, then sort by newest, oldest, or title.
 
+## Archive a workspace
+
+From the **Archived** page, choose **Archive workspace** to load a safe list of existing workspaces. It shows only each workspace's ID, title, eligible count, and running-chat count; it never exposes workspace paths or chat contents.
+
+Choose one workspace, review its preview, then confirm. Eligible means a chat is currently unarchived and is not resident in the Host `sessions` store. A preview is limited to 2,000 eligible chats. It creates a five-minute, single-use token and nonce that own the exact ordered preview set, so the apply request cannot add IDs and chats created after the preview are excluded.
+
+At apply time, each previewed chat is rechecked for workspace membership, archive state, and residency. The Host continues after per-chat skips or failures and keeps the result visible. Each successful archive then attempts a local History snapshot; a snapshot failure is reported but does not undo the archive. The operation never moves chats between workspaces, changes the selected workspace, or changes its directory. On an older Host without public `archiveSession`, it reports `workspace-archive-unsupported` and changes nothing.
+
 ## Read-only conversation preview
 
 Preview does not require unarchiving. It follows the Harness conversation layout and supports:

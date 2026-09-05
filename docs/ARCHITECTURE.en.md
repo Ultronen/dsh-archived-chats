@@ -10,7 +10,7 @@ The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
 - The browser client in lib/client.js registers the Session Archive settings.section and renders state and actions.
-- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, lib/stats.js, lib/insights.js, lib/retention.js, lib/retention-service.js, and lib/lineage.js. lib/history.js owns capture, safe inventory, and preview authorization; lib/history-restore.js owns single-use restore-as-copy transactions. lib/trash.js owns the recycle catalog, lib/snapshot.js owns verified snapshots, and lib/recycle.js composes recycle lifecycle operations.
+- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, lib/stats.js, lib/insights.js, lib/retention.js, lib/retention-service.js, lib/lineage.js, and lib/workspace-bulk-archive.js. lib/history.js owns capture, safe inventory, and preview authorization; lib/history-restore.js owns single-use restore-as-copy transactions. lib/trash.js owns the recycle catalog, lib/snapshot.js owns verified snapshots, and lib/recycle.js composes recycle lifecycle operations.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
 
@@ -22,6 +22,9 @@ Current routes:
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 GET  /plugins/dsh-archived-chats/insights
+GET  /plugins/dsh-archived-chats/workspace-archive/workspaces
+POST /plugins/dsh-archived-chats/workspace-archive/preview
+POST /plugins/dsh-archived-chats/workspace-archive/apply
 POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/preview
 POST /plugins/dsh-archived-chats/retention/apply
@@ -52,6 +55,8 @@ POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
 Every mutating route, plus preview, preview/image, search, history/preview, and history/preview/image, requires the `x-dsh-archived-chats: 1` header. `GET /history` returns only bounded safe inventory. History images require both the snapshot identity and the complete projected descriptor to match.
+
+Workspace archive lists only safe workspace summaries. Preview accepts exactly one workspace ID and creates a five-minute, single-use token/nonce for at most 2,000 ordered eligible IDs. Apply accepts only that token and nonce, never caller-selected IDs. Eligibility is unarchived membership in the existing workspace while absent from the Host `sessions` store. Each item revalidates membership, archive state, and residency inside the shared lifecycle queue, then invokes the public `workspaceRegistry.archiveSession()` receiver-bound to the registry. New chats after preview are excluded; an item that became live, archived, or detached is reported and skipped. Successful archives attempt History capture under the held lifecycle lock; a capture failure is reported without rolling back the archive, and later items continue. This feature changes neither workspace membership nor a workspace path or directory, and never moves a chat across workspaces. A Host without public `archiveSession` returns `workspace-archive-unsupported` without mutation.
 
 ## State and local data
 
@@ -132,6 +137,7 @@ Permanent purge persists `purge-pending` before physical writes, then removes ev
 client.js registers an order-30 settings.section and uses the public Harness overlay, state, and design tokens. The page state includes:
 
 - A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps public `workspaces.archiveSession` and starts history capture only after the original succeeds. Capture pauses the three-second dismissal; success resumes it, while failure retains retry-save without rolling back archive. View and Undo remain available.
+- An **Archive workspace** action on the Archived page: it selects from safe workspace summaries, shows an exact preview, requires confirmation, and retains the per-item apply result until dismissed.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
@@ -150,6 +156,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 - All state-changing routes require POST and the guard header.
 - History responses exclude workspace/snapshot/attachment paths, raw events, notes, and confirmation tokens; logs contain only IDs and stable codes.
+- Workspace archive responses expose only safe workspace IDs/titles, eligible counts, session IDs/titles/timestamps in a confirmed preview, and stable per-item outcomes; workspace paths, event bodies, notes, attachment paths, and confirmation credentials stay out of logs and rendered results.
 - Import limits ZIP size, entries, paths, versions, and JSON structure, rejecting traversal, duplicates, and prototype-pollution keys.
 - Ordinary delete never invokes physical purge; only a committed recycle record can enter purge.
 - Snapshot and recycle documents use `0600`, directories use `0700`, and snapshot files are reopened with write access before sync; publication remains temporary write, sync, atomic rename with matching durability semantics on Windows, macOS, and Linux.
