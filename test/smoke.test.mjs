@@ -392,14 +392,71 @@ console.log('\n[1a] workspace bulk archive routes');
   assert(staleApply.status === 409 && staleApply.json().archived.length === 0 && staleApply.json().skipped.some((item) => item.id === staleId && item.reason === 'session-archived'),
     'workspace apply returns 409 when revalidation leaves no archival success');
 
-  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
+  const concurrencyIds = Array.from({ length: 20 }, (_, index) => `session-workspace-concurrent-${index}`);
+  const concurrencyHeaders = concurrencyIds.map((sessionId, index) => ({ id: sessionId, createdAt: 1786726900000 + index, cwd: '/workspace/private' }));
+  headerRows.push(...concurrencyHeaders);
+  for (const header of concurrencyHeaders) {
+    registry.headers.set(header.id, header);
+    events[header.id] = [{ type: 'session/title', data: { title: `Concurrent ${header.id}` } }];
+  }
+  workspace.sessionIds.push(...concurrencyIds);
+  const inspect = persistence.inspect;
+  let activeInspections = 0;
+  let maxConcurrentInspections = 0;
+  persistence.inspect = async (sessionId) => {
+    activeInspections += 1;
+    maxConcurrentInspections = Math.max(maxConcurrentInspections, activeInspections);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    try { return await inspect(sessionId); }
+    finally { activeInspections -= 1; }
+  };
+  const concurrentPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  persistence.inspect = inspect;
+  assert(concurrentPreview.status === 200 && concurrentPreview.json().sessions.map((item) => item.id).join(',') === concurrencyIds.join(','),
+    'workspace preview retains candidate order while enriching titles');
+  assert(maxConcurrentInspections <= 8, `workspace preview bounds persistence inspections (got ${maxConcurrentInspections})`);
+
+  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId && !concurrencyIds.includes(sessionId));
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
-  for (const header of headers) {
+  for (const header of [...headers, ...concurrencyHeaders]) {
     headerRows.splice(headerRows.indexOf(header), 1);
     registry.headers.delete(header.id);
+    delete events[header.id];
   }
-  delete events[id];
-  delete events[staleId];
+}
+
+console.log('\n[1a1] workspace archive late session binding');
+{
+  const lateState = { initialized: true, workspaceIds: ['late-ws'], archivedSessionIds: [] };
+  const lateRegistry = {
+    get archivedSessionIds() { return lateState.archivedSessionIds; },
+    list: () => [{ id: 'late-ws', title: 'Late workspace', sessionIds: [] }],
+    archiveSession: async () => {},
+    setState: async () => {},
+  };
+  const latePersistence = {
+    list: async () => [],
+    inspect: async () => ({ meta: { id: 'unused' }, events: [] }),
+    listSnapshots: async () => [],
+    locate: () => undefined,
+  };
+  const lateServices = { webServer: undefined, workspaceRegistry: lateRegistry, sessionPersistence: latePersistence };
+  const lateRoutes = new Map();
+  const lateListeners = [];
+  const lateCtx = {
+    get: (key) => lateServices[key],
+    on: (event, callback) => { lateListeners.push([event, callback]); },
+    effect: (callback) => { callback(); },
+    logger: { warn: () => {}, info: () => {} },
+  };
+  apply(lateCtx);
+  lateServices.webServer = { register: (route) => { lateRoutes.set(route.path, route.handler); return () => lateRoutes.delete(route.path); } };
+  lateListeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
+  const unavailable = await call(lateRoutes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(unavailable.status === 501, 'workspace archive stays fail-closed while sessions are missing');
+  lateServices.sessions = { get: () => undefined };
+  const available = await call(lateRoutes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(available.status === 200 && available.json().workspaces[0]?.id === 'late-ws', 'workspace archive retries capability binding after sessions becomes available');
 }
 
 console.log('\n[1a0] storage insights, retention, and lineage routes');
