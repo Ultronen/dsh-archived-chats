@@ -43,33 +43,56 @@ function fixture(options = {}) {
   const lifecycle = {
     async run(operation) {
       calls.lifecycle.push('run');
-      return operation();
+      const result = await operation();
+      if (options.lifecycleRejectsAfter === true) throw new Error('queue rejected after operation');
+      return result;
     },
   };
-  const service = createWorkspaceBulkArchiveService({
+  const dependencies = {
     registry,
     sessions,
     historyService,
     lifecycle,
     now: () => new Date(currentTime),
     secret: 'test-only-secret',
-  });
+  };
+  const service = createWorkspaceBulkArchiveService(dependencies);
   return {
-    service, registry, workspace, archived, live, calls,
+    service, registry, workspace, archived, live, calls, dependencies,
     advance(ms) { currentTime += ms; },
   };
 }
 
 test('rejects hosts without every required public capability', () => {
-  const required = fixture();
-  assert.throws(
-    () => createWorkspaceBulkArchiveService({ ...required, registry: { list() {}, archivedSessionIds: [] } }),
-    (error) => error?.code === 'workspace-archive-unsupported',
-  );
-  assert.throws(
-    () => createWorkspaceBulkArchiveService({ ...required, historyService: {} }),
-    (error) => error?.code === 'workspace-archive-unsupported',
-  );
+  const { dependencies } = fixture();
+  const mutations = [
+    { registry: { ...dependencies.registry, list: undefined } },
+    { registry: { ...dependencies.registry, archiveSession: undefined } },
+    { sessions: {} },
+    { historyService: {} },
+    { lifecycle: {} },
+    { now: null },
+    { secret: '' },
+  ];
+  for (const mutation of mutations) {
+    assert.throws(
+      () => createWorkspaceBulkArchiveService({ ...dependencies, ...mutation }),
+      (error) => error?.code === 'workspace-archive-unsupported',
+    );
+  }
+});
+
+test('rejects malformed archivedSessionIds capability shapes before any operation', () => {
+  const { dependencies } = fixture();
+  for (const archivedSessionIds of [null, {}, 'session-a', new Map(), (function* values() { yield 'session-a'; })()]) {
+    assert.throws(
+      () => createWorkspaceBulkArchiveService({
+        ...dependencies,
+        registry: { ...dependencies.registry, archivedSessionIds },
+      }),
+      (error) => error?.code === 'workspace-archive-unsupported',
+    );
+  }
 });
 
 test('lists and previews only safe workspace and cold-session fields in stable deduplicated order', async () => {
@@ -103,16 +126,26 @@ test('rejects unknown workspaces before issuing a confirmation', async () => {
   );
 });
 
-test('confirmation is nonce-bound, expires after five minutes, and cannot be replayed', async () => {
+test('confirmation is nonce-bound, expires after five minutes, and releases consumed records', async () => {
   const item = fixture({ sessionIds: ['cold-a'] });
   const expired = await item.service.preview('workspace-a');
   await assert.rejects(item.service.execute(expired.token, 'wrong-nonce'), (error) => error?.code === 'workspace-archive-confirmation-invalid');
   item.advance(5 * 60_000);
   await assert.rejects(item.service.execute(expired.token, expired.nonce), (error) => error?.code === 'workspace-archive-confirmation-expired');
+  await assert.rejects(item.service.execute(expired.token, expired.nonce), (error) => error?.code === 'workspace-archive-confirmation-invalid');
 
   const current = await item.service.preview('workspace-a');
   assert.deepEqual((await item.service.execute(current.token, current.nonce)).archived, ['cold-a']);
-  await assert.rejects(item.service.execute(current.token, current.nonce), (error) => error?.code === 'workspace-archive-confirmation-replayed');
+  await assert.rejects(item.service.execute(current.token, current.nonce), (error) => error?.code === 'workspace-archive-confirmation-invalid');
+});
+
+test('a fresh preview sweeps expired confirmations before retaining another one', async () => {
+  const item = fixture({ sessionIds: ['cold-a'] });
+  const expired = await item.service.preview('workspace-a');
+  item.advance(5 * 60_000);
+  await item.service.preview('workspace-a');
+
+  await assert.rejects(item.service.execute(expired.token, expired.nonce), (error) => error?.code === 'workspace-archive-confirmation-invalid');
 });
 
 test('execution revalidates stale membership, archive state, and live sessions without touching them', async () => {
@@ -179,4 +212,15 @@ test('continues after archive and snapshot failures while retaining successful a
   ]);
   assert.deepEqual(item.calls.archive.map((call) => call.id), ['good-first', 'archive-fails', 'snapshot-fails', 'good-last']);
   assert.equal(item.calls.lifecycle.length, 4);
+});
+
+test('a lifecycle rejection after its callback reports one failure without committed item results', async () => {
+  const item = fixture({ sessionIds: ['queue-rejected'], lifecycleRejectsAfter: true });
+  const preview = await item.service.preview('workspace-a');
+
+  const result = await item.service.execute(preview.token, preview.nonce);
+
+  assert.deepEqual(result.archived, []);
+  assert.deepEqual(result.snapshots, []);
+  assert.deepEqual(result.failed, [{ id: 'queue-rejected', reason: 'lifecycle-failed' }]);
 });
