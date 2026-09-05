@@ -7,7 +7,7 @@ const HEADER = Object.freeze({
   version: 2,
   cwd: '/workspace',
   createdAt: 42,
-  origin: 'chat',
+  isSeeded: false,
 });
 
 test('preserves a legacy inspection surface and its method receiver', async () => {
@@ -152,6 +152,69 @@ test('refuses malformed or ambiguous modern persistence responses', async () => 
     },
   });
   await assert.rejects(malformedEvents.inspect(HEADER.id), { code: 'persistence-response-invalid' });
+});
+
+test('refuses incomplete or invalid current Host headers from both list and inspect', async () => {
+  const malformedHeaders = [
+    { id: HEADER.id },
+    { ...HEADER, version: 1 },
+    { ...HEADER, version: '2' },
+    { ...HEADER, createdAt: -1 },
+    { ...HEADER, createdAt: 1.5 },
+    { ...HEADER, createdAt: '42' },
+    { ...HEADER, isSeeded: 'false' },
+    { ...HEADER, cwd: 42 },
+    { ...HEADER, cwd: 'relative/path' },
+    { ...HEADER, parentSession: 42 },
+    { ...HEADER, origin: 'chat' },
+    { ...HEADER, delegationDepth: -1 },
+    { ...HEADER, delegationDepth: 1.5 },
+    { ...HEADER, agentPreset: 42 },
+    { ...HEADER, seedLength: 0 },
+  ];
+
+  for (const header of malformedHeaders) {
+    const listing = resolvePersistenceCompat({
+      async list() { return [{ header, revision: 'rev-invalid' }]; },
+      async open() { throw new Error('not used'); },
+    });
+    await assert.rejects(listing.listSnapshots(), { code: 'persistence-response-invalid' });
+
+    let closes = 0;
+    const inspection = resolvePersistenceCompat({
+      async list() { return [{ header: HEADER, revision: 'rev-valid' }]; },
+      async open() {
+        return {
+          header,
+          inheritedEventCount: 0,
+          async read() { return []; },
+          async close() { closes += 1; },
+        };
+      },
+    });
+    await assert.rejects(inspection.inspect(HEADER.id), { code: 'persistence-response-invalid' });
+    assert.equal(closes, 1);
+  }
+});
+
+test('accepts valid current Host optional fields and preserves unknown header extensions', async () => {
+  const header = Object.freeze({
+    ...HEADER,
+    parentSession: 'parent-session',
+    isSeeded: true,
+    origin: 'subagent',
+    delegationDepth: 1,
+    agentPreset: 'coder',
+    extension: { retained: true },
+  });
+  const snapshot = Object.freeze({ header, revision: 'opaque-revision' });
+  const view = resolvePersistenceCompat({
+    async list() { return [snapshot]; },
+    async open() { throw new Error('not used'); },
+  });
+
+  assert.equal((await view.list())[0], header);
+  assert.equal((await view.listSnapshots())[0], snapshot);
 });
 
 test('refuses inherited sessions before reading away lineage evidence and closes the handle', async () => {

@@ -5100,7 +5100,7 @@ console.log('\n[18] host half — modern persistence reads work while unsupporte
   const modernHome = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-modern-home-'));
   process.env.DSH_HOME = modernHome;
   const id = 'session-modern-read';
-  const header = { id, version: 2, cwd: '/modern', createdAt: 1786727000000, origin: 'chat' };
+  const header = { id, version: 2, cwd: '/modern', createdAt: 1786727000000, isSeeded: false };
   const revision = 'modern-revision-1';
   const modernEvents = [
     { seq: 0, type: 'session/start', data: {} },
