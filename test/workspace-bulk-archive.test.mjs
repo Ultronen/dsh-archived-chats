@@ -126,6 +126,17 @@ test('rejects unknown workspaces before issuing a confirmation', async () => {
   );
 });
 
+test('preview accepts at most two thousand eligible sessions', async () => {
+  const ids = (count) => Array.from({ length: count }, (_, index) => `cold-${index}`);
+  const accepted = await fixture({ sessionIds: ids(2_000) }).service.preview('workspace-a');
+  assert.equal(accepted.sessions.length, 2_000);
+
+  await assert.rejects(
+    fixture({ sessionIds: ids(2_001) }).service.preview('workspace-a'),
+    (error) => error?.code === 'workspace-archive-too-many' && error?.status === 400,
+  );
+});
+
 test('confirmation is nonce-bound, expires after five minutes, and releases consumed records', async () => {
   const item = fixture({ sessionIds: ['cold-a'] });
   const expired = await item.service.preview('workspace-a');
