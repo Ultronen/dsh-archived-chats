@@ -68,6 +68,7 @@
     "lib/history.js",
     "lib/history-restore.js",
     "lib/workspace-bulk-archive.js",
+    "lib/persistence-compat.js",
     "lib/search.js",
     "lib/stats.js",
     "lib/types",

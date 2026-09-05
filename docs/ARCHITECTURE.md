@@ -10,7 +10,7 @@
 
 - Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
 - 浏览器客户端位于 lib/client.js，通过 settings.section 注册「会话档案」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js、lib/lineage.js 和 lib/workspace-bulk-archive.js 中。lib/history.js 负责历史抓取、安全清单和预览授权，lib/history-restore.js 负责单次确认的恢复为副本事务。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合回收生命周期。
+- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js、lib/lineage.js 和 lib/workspace-bulk-archive.js 中。lib/persistence-compat.js 将新版 Host 的句柄读取面收敛为插件内部只读视图；lib/history.js 负责历史抓取、安全清单和预览授权，lib/history-restore.js 负责单次确认的恢复为副本事务。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合回收生命周期。
 
 浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
 
@@ -165,7 +165,11 @@ client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮�
 
 ## 兼容性和测试
 
-插件通过能力检测适配 Host：归档读取、附件读取、持久层写入和运行中会话生命周期能力分别判断，缺失能力必须安全降级或返回明确错误。导入、历史版本恢复为副本和原件丢失时的快照回退都通过公开的 `create` / `append` / `locate` 能力写入，Host 提供专用恢复入口时优先使用；只有两者都不存在才返回 `restore-unsupported` 且不写入数据。要求一组没有任何已发布 Host 能满足的能力不是合格的守卫——那会让功能永久失效，而不是优雅降级。旧版若不显示历史页或不识别回收快照，降级前应备份整个插件数据目录。
+插件通过能力检测适配 Host：归档读取、附件读取、持久层写入、物理定位和运行中会话生命周期能力分别判断，缺失能力必须安全降级或返回明确错误。带原生 `inspect` 的旧版持久层对象保持原样；新版 Host 的 `list()` 快照和 `open(id, 'read')` 句柄被适配为内部 `list` / `listSnapshots` / `inspect` 只读视图，读取始终从偏移 0 开始并在成功或失败后关闭句柄。这个视图不虚构 `create`、`append` 或 `locate`。因此普通会话可以继续浏览、导出和抓取快照，但会话目录空间显示不可用，这个只读视图上的恢复写入与永久清除也不可用；缺少物理定位时，永久清除会在修改回收状态、快照、待处理标记或运行中会话之前以 `purge-unsupported` 拒绝。
+
+当前 v1 快照和 ZIP schema 不能保存 `inheritedEventCount`。新版读取句柄报告大于 0 的继承前缀时，适配器会在读取事件前以 `session-inspection-unsupported` 拒绝并关闭句柄，避免把分支历史静默展平。工作区归档本身仍按 Host 结果成功，关联的历史抓取则通过现有逐项结果显示失败。这个 UI 变更不扩展快照/恢复协议。
+
+兼容旧写入面的 Host 仍可让导入、历史版本恢复为副本和原件丢失时的快照回退通过公开的 `create` / `append` / `locate` 能力写入，Host 提供专用恢复入口时优先使用；只有两者都不存在才返回 `restore-unsupported` 且不写入数据。要求一组没有任何已发布 Host 能满足的能力不是合格的守卫——那会让功能永久失效，而不是优雅降级。旧版若不显示历史页或不识别回收快照，降级前应备份整个插件数据目录。
 
 测试覆盖：
 

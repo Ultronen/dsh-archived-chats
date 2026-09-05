@@ -5095,6 +5095,96 @@ console.log('\n[17] host half — export distinguishes a bad request from a bug 
     'the warning carries a stable code, not the raw message');
 }
 
+console.log('\n[18] host half — modern persistence reads work while unsupported purge preserves evidence');
+{
+  const modernHome = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-modern-home-'));
+  process.env.DSH_HOME = modernHome;
+  const id = 'session-modern-read';
+  const header = { id, version: 2, cwd: '/modern', createdAt: 1786727000000, origin: 'chat' };
+  const revision = 'modern-revision-1';
+  const modernEvents = [
+    { seq: 0, type: 'session/start', data: {} },
+    { seq: 1, type: 'session/title', data: { title: 'Modern persisted title' } },
+  ];
+  let closes = 0;
+  let reads = 0;
+  let disposeCalls = 0;
+  const modernPersistence = {
+    async list() { return [{ header, revision, eventCount: modernEvents.length, sizeBytes: 321 }]; },
+    async open(sessionId, access) {
+      assert(sessionId === id && access === 'read', 'modern adapter requests an exact read handle');
+      return {
+        header,
+        inheritedEventCount: 0,
+        async read(offset, length) {
+          reads += 1;
+          assert(offset === 0 && length === undefined, 'modern adapter reads the complete log from offset zero');
+          return modernEvents;
+        },
+        async close() { closes += 1; },
+      };
+    },
+  };
+  const modernState = { initialized: true, workspaceIds: ['modern-workspace'], archivedSessionIds: [id] };
+  const modernWorkspace = {
+    id: 'modern-workspace', title: 'Modern workspace', path: '/modern', sessionIds: new Set([id]),
+    async detachSession(sessionId) { this.sessionIds.delete(sessionId); },
+  };
+  const modernRegistry = {
+    state: modernState,
+    get archivedSessionIds() { return modernState.archivedSessionIds; },
+    list: () => [modernWorkspace],
+    async setState(next) { modernState.archivedSessionIds = next.archivedSessionIds; },
+    headers: new Map([[id, header]]),
+    sessionPaths: new Map(),
+    invalidSessionPaths: new Map(),
+  };
+  const modernRoutes = new Map();
+  const modernServices = {
+    webServer: { register: (route) => { modernRoutes.set(route.path, route.handler); return () => modernRoutes.delete(route.path); } },
+    workspaceRegistry: modernRegistry,
+    sessionPersistence: modernPersistence,
+    sessions: { get: () => undefined },
+    agents: { get: () => { disposeCalls += 1; return undefined; } },
+  };
+  apply({
+    get: (key) => modernServices[key],
+    on: () => {},
+    effect: (fn) => { fn(); },
+    logger: { warn: () => {}, info: () => {} },
+  });
+
+  const state = await call(modernRoutes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(state.status === 200 && state.json().sessions[0]?.title === 'Modern persisted title',
+    `modern handle inspection powers archive reads (got ${state.status})`);
+  const stats = await call(modernRoutes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
+  assert(stats.status === 200 && stats.json().sessions[id]?.status === 'unavailable',
+    'modern read-only persistence reports physical storage measurement unavailable');
+  const moved = await call(modernRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  assert(moved.status === 200 && moved.json().trashed.includes(id), 'modern read-only session can enter the recycle bin with a protection snapshot');
+  const historyBefore = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  const purge = await call(modernRoutes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [id] }),
+  ));
+  const trashAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  const historyAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  assert(purge.status === 409 && purge.json().failed?.[0]?.reason === 'purge-unsupported',
+    `modern read-only purge refuses with the stable capability code (got ${purge.status})`);
+  assert(trashAfter.json().sessions[0]?.state === 'trashed', 'unsupported purge preserves the original recycle state');
+  const versionsBefore = historyBefore.json().sessions.flatMap((session) => session.versions);
+  const versionsAfter = historyAfter.json().sessions.flatMap((session) => session.versions);
+  assert(versionsBefore.length === 1 && versionsAfter.length === 1,
+    'unsupported purge preserves the protection snapshot');
+  assert(modernState.archivedSessionIds.includes(id) && modernWorkspace.sessionIds.has(id),
+    'unsupported purge preserves the original session and workspace ownership');
+  assert(disposeCalls === 0, 'unsupported purge never reaches live-session disposal');
+  assert(reads > 0 && closes === reads, 'every modern inspection closes its read handle');
+  rmSync(modernHome, { recursive: true, force: true });
+  process.env.DSH_HOME = testHome;
+}
+
 // Tear down the isolated DSH_HOME and session fixture dirs.
 rmSync(testHome, { recursive: true, force: true });
 rmSync(tmp, { recursive: true, force: true });
