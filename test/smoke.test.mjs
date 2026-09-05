@@ -4517,7 +4517,7 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
     const payload = path.endsWith('/workspace-archive/workspaces')
       ? { ok: true, workspaces: [{ id: 'workspace-1', title: 'Project One', eligibleCount: 2, liveCount: 1 }] }
       : path.endsWith('/workspace-archive/preview')
-        ? { ok: true, token: 'token-1', nonce: 'nonce-1', workspace: { id: 'workspace-1', title: 'Project One' }, sessions: [{ id: 'session-title', title: 'Safe title' }, { id: 'session-fallback', title: null }], skipped: [{ id: 'session-live', reason: 'session-live' }] }
+        ? { ok: true, token: 'token-1', nonce: 'nonce-1', workspace: { id: 'workspace-1', title: 'Project One' }, sessions: [{ id: 'session-title', title: 'Safe title' }, { id: 'session-fallback', title: null }], skipped: [{ id: 'session-live', reason: 'session-live' }, { id: 'session-archived', reason: 'session-archived' }] }
         : path.endsWith('/workspace-archive/apply')
           ? { ok: true, workspace: { id: 'workspace-1', title: 'Project One' }, archived: ['session-title'], skipped: [{ id: 'session-fallback', reason: 'session-live' }], failed: [{ id: 'session-failed', reason: 'archive-failed' }], snapshots: [{ id: 'session-title', status: 'snapshot-failed' }] }
           : {};
@@ -4545,8 +4545,25 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   let elements = collectElements(tree);
   const dialog = elements.find((element) => element.props?.role === 'dialog');
   assert(dialog?.props['aria-modal'] === 'true' && dialog?.props['aria-labelledby'], 'workspace bulk archive opens an accessible labelled modal dialog');
+  const workspaceStyle = headChildren.find((child) => child.id === 'dsh-archived-chats-css')?.textContent ?? '';
+  assert(/\.dac-workspace-dialog\{[^}]*width:min\(540px,calc\(100vw - 32px\)\)[^}]*border-radius:24px[^}]*padding:26px/u.test(workspaceStyle)
+    && workspaceStyle.includes('.dac-workspace-dialog .dac-preview-head{border-bottom:0;padding:0}')
+    && workspaceStyle.includes('.dac-workspace-dialog .dac-preview-head strong{font-size:24px;line-height:32px}')
+    && workspaceStyle.includes('.dac-workspace-copy{margin:0;color:var(--dsw-alias-label-secondary);font-size:16px;line-height:26px'),
+  'workspace confirmation uses the approved spacious scoped card typography');
+  assert(workspaceStyle.includes('.dac-workspace-actions .dac-btn{border:0;')
+    && workspaceStyle.includes('.dac-workspace-actions .dac-btn-danger{border:0;background:var(--dsw-alias-interactive-bg-hover-danger)')
+    && workspaceStyle.includes('@media (max-width:480px){.dac-workspace-dialog{width:calc(100vw - 32px)')
+    && workspaceStyle.includes('.dac-workspace-actions{flex-direction:row;justify-content:flex-end;flex-wrap:wrap}'),
+  'workspace confirmation keeps filled scoped actions horizontal on mobile');
   assert(requests.some((request) => request.path.endsWith('/workspace-archive/preview') && request.options.body === '{"workspaceId":"workspace-1"}'), 'workspace confirmation automatically prepares only the supplied workspace');
   assert(elementText(tree).includes('归档 2 个会话？') && elementText(tree).includes('Project One'), 'workspace confirmation shows the prepared count and supplied workspace title');
+  assert(elementText(tree).includes('这会将「Project One」中的会话归档。之后你可以在会话档案的“已归档”中找到它们。')
+    && !elementText(tree).includes('项目本身不会改变'), 'workspace confirmation names the destination without unrequested contrast copy');
+  const skippedLive = elements.find((element) => element.props?.['data-workspace-archive-skipped-live'] === '1');
+  assert(elementText(skippedLive) === '将跳过 1 个正在使用的会话。'
+    && !elementText(tree).includes('session-live') && !elementText(tree).includes('session-archived'),
+  'workspace confirmation summarizes only nonzero live skips without exposing ids or other reasons');
   assert(!elements.some((element) => element.type === 'select')
     && !elements.some((element) => element.props?.['data-workspace-archive-preview'] === '1')
     && !elements.some((element) => element.props?.['data-workspace-archive-confirm'] === '1'),
@@ -4678,8 +4695,9 @@ console.log('\n[11i] client half — workspace archive recovery and completed co
   emptyHarness.render(emptyProps); emptyHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
   tree = emptyHarness.render(emptyProps); elements = collectElements(tree);
   assert(elementText(tree).includes(t('workspaceArchive.empty'))
-    && elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.disabled === true,
-  'empty preparation explains the state and cannot apply');
+    && elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.disabled === true
+    && !elements.some((element) => element.props?.['data-workspace-archive-skipped-live'] === '1'),
+  'empty preparation explains the state, cannot apply, and omits a zero live-skip count');
   emptyHarness.unmount();
 
   let doubleApplyCalls = 0;
@@ -4765,7 +4783,7 @@ console.log('\n[11j] client half — workspace archive final coverage');
   }
   const t = clientCtx.locale.bind('settings.archived-chats');
   const Dialog = clientExports.__test.WorkspaceArchiveDialog;
-  const renderFinalResult = async (applyResult) => {
+  const renderFinalResult = async (applyResult, overrides = {}) => {
     globalThis.fetch = async (url) => {
       const path = String(url);
       if (path.endsWith('/workspace-archive/preview')) return { ok: true, status: 200, json: async () => ({ token: 'final-token', nonce: 'final-nonce', workspace: { id: 'ws-final', title: 'Final workspace' }, sessions: [{ id: 'candidate' }], skipped: [] }) };
@@ -4773,7 +4791,7 @@ console.log('\n[11j] client half — workspace archive final coverage');
       return { ok: true, status: 200, json: async () => ({}) };
     };
     const harness = createHookHarness(Dialog);
-    const props = { t, workspaceId: 'ws-final', workspaceTitle: 'Final workspace', onClose: () => {}, onApplied: async () => {}, restoreFocus: () => {} };
+    const props = { t, workspaceId: 'ws-final', workspaceTitle: 'Final workspace', onClose: overrides.onClose ?? (() => {}), onApplied: overrides.onApplied ?? (async () => {}), restoreFocus: () => {} };
     harness.render(props); harness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
     let tree = harness.render(props); let elements = collectElements(tree);
     await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
@@ -4811,6 +4829,20 @@ console.log('\n[11j] client half — workspace archive final coverage');
     && completedText.includes(t('workspaceArchive.snapshotFailed')) && completedText.includes('completed-snapshot-failed') && completedText.includes(t('workspaceArchive.status.snapshot-failed')),
   'completed 409 final result renders every localized result group and row');
   completed.harness.unmount();
+
+  let fullSuccessRefreshes = 0;
+  let fullSuccessCloses = 0;
+  const fullSuccess = await renderFinalResult({
+    workspace: { id: 'ws-final', title: 'Final workspace' }, archived: ['archived-id'], skipped: [], failed: [],
+    snapshots: [{ id: 'archived-id', status: 'captured' }],
+  }, {
+    onApplied: async () => { fullSuccessRefreshes += 1; throw new Error('consumer refresh failed'); },
+    onClose: () => { fullSuccessCloses += 1; },
+  });
+  assert(fullSuccessRefreshes === 1 && fullSuccessCloses === 1
+    && !collectElements(fullSuccess.tree).some((element) => element.props?.['data-workspace-archive-result'] === '1'),
+  'full workspace success closes after refresh even when a consumer refresh rejects');
+  fullSuccess.harness.unmount();
 
   let closeCalls = 0;
   let restoredFocus = 0;
