@@ -4817,6 +4817,17 @@ console.log('\n[11j] client half — workspace archive final coverage');
     && !happySnapshotGroup.includes('saved') && !happySnapshotGroup.includes(t('workspaceArchive.status.captured')),
   'captured snapshots are excluded from the snapshot-failed result group');
   happy.harness.unmount();
+  const partial = await renderFinalResult({
+    workspace: { id: 'ws-final', title: 'Final workspace' }, archived: ['moved-id'],
+    skipped: [{ id: 'already-archived', reason: 'session-archived' }], failed: [],
+    snapshots: [{ id: 'moved-id', status: 'captured' }],
+  });
+  const partialGroupHeadings = collectElements(partial.tree)
+    .filter((element) => element.props?.className === 'dac-workspace-result-group')
+    .map((group) => elementText(group.props?.children?.[0]));
+  assert(partialGroupHeadings.join('|') === `${t('workspaceArchive.archived')}|${t('workspaceArchive.skipped')}`,
+    'partial workspace result omits empty failure and snapshot-warning groups');
+  partial.harness.unmount();
   const completed = await renderFinalResult({
     status: 409, workspace: { id: 'ws-final', title: 'Final workspace' }, archived: [],
     skipped: [{ id: 'completed-skipped', reason: 'session-live' }],
