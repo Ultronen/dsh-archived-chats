@@ -134,10 +134,10 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 以有界压缩�
 
 ## 浏览器客户端
 
-client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮层、状态和设计令牌。页面状态包括：
+client.js 注册 order 30 的 settings.section，并使用 Harness 公开的工作区操作 slot、浮层、声明式 store 和设计令牌。页面状态包括：
 
 - `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发起历史抓取。抓取进行时暂停 3 秒关闭计时，成功后恢复，失败时显示不回滚归档的重试保存；查看与撤销继续可用。
-- 「归档」页的 **归档工作区** 操作：从安全工作区摘要中选择一个项目，展示精确预览，要求确认，并在关闭前保留逐项执行结果。
+- 每个工作区行省略号菜单中的 **归档项目会话** 操作：自动准备该工作区，显示一次包含精确符合条件数量且没有可见会话预览的确认，并在关闭前保留逐项执行结果。
 - 归档列表和工作区分组。
 - 搜索、类型/项目/标签筛选和排序。
 - 标签备注编辑器。
@@ -145,6 +145,8 @@ client.js 注册 order 30 的 settings.section，并使用 Harness 公开的浮�
 - 归档、历史版本、回收站、空间与策略、来源与分支五标签。历史首次激活才请求安全清单，会话组默认折叠；预览复用对话弹窗并显示快照时间，恢复确认的初始焦点位于取消，token/nonce 不进入渲染树。其他空间与关系视图保留按需加载、有界弹窗和只读关系投影。
 - 导入预览、冲突禁用和恢复结果。
 - 响应式设置页标记和侧边栏刷新注入面。
+
+当 `MenuAction`、`defineStore` 和 `sidebar.workspaces.workspace.action` 可用时，每次插件 apply 声明一个 handle，并由工作区操作、`shell.overlay` 与 `settings.section` 共用。Host 菜单所有者先关闭菜单，再调用贡献者回调并提供 `restoreFocus`；插件只在 apply 闭包中保存该回调，组件则从 slot 渲染器接收 actions 与 selector hook。贡献者卸载由插件负责：apply 清理会同步标记已卸载，延迟回调必须先检查该 guard，随后才能保存焦点或打开状态。Host 另行负责工作区行或浏览器卸载时的取消。缺少这些可选能力时只省略这个操作与对话框。
 
 预览优先使用 Harness 公开导出的 `MarkdownText`、`DisclosureRow` 和 `JsonBlock`；某个公开原语不可用时，只把对应内容降级为转义的纯文本、原生 `details`/`summary` 或 `pre`，不调用私有聊天渲染器。工具结果仅在其 `toolCallId` 与更早工具调用的 `callId` 精确匹配时折叠进该调用，匹配按时间顺序消费；未匹配结果保留为独立条目，错误状态使用语义错误令牌。图片由受保护路由读取为 Blob URL，离开视口前可按需加载，预览关闭或图片节点卸载时会中止读取并调用 `URL.revokeObjectURL`。
 

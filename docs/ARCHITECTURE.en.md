@@ -134,10 +134,10 @@ Permanent purge persists `purge-pending` before physical writes, then removes ev
 
 ## Browser client
 
-client.js registers an order-30 settings.section and uses the public Harness overlay, state, and design tokens. The page state includes:
+client.js registers an order-30 settings.section and uses the public Harness workspace-action slot, overlay, declared store, and design tokens. The page state includes:
 
 - A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps public `workspaces.archiveSession` and starts history capture only after the original succeeds. Capture pauses the three-second dismissal; success resumes it, while failure retains retry-save without rolling back archive. View and Undo remain available.
-- An **Archive workspace** action on the Archived page: it selects from safe workspace summaries, shows an exact preview, requires confirmation, and retains the per-item apply result until dismissed.
+- An **Archive workspace chats** action in each workspace row's ellipsis menu: it prepares that workspace automatically, shows one confirmation with the exact eligible count and no visible session preview, and retains the per-item apply result until dismissed.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
@@ -145,6 +145,8 @@ client.js registers an order-30 settings.section and uses the public Harness ove
 - Archived, History, Recycle Bin, Storage & Retention, and Origins & Branches tabs. History requests safe inventory only on first activation and starts with groups collapsed. Snapshot preview reuses the conversation dialog with a visible snapshot timestamp. Restore confirmation focuses Cancel first and never places token/nonce in the render tree. Storage and relationship views retain on-demand loads, bounded dialogs, and read-only relationship projection.
 - Import preview, disabled conflicts, and restore results.
 - Responsive settings-page markers and sidebar refresh injection.
+
+When `MenuAction`, `defineStore`, and `sidebar.workspaces.workspace.action` are available, one handle declared per plugin apply is shared by the workspace action, `shell.overlay`, and `settings.section`. The Host menu owner closes its menu before invoking the contributed callback and supplies `restoreFocus`; the plugin keeps that callback only in its apply closure, while components receive actions and selector hooks from the slot renderer. Contributor disposal is the plugin's responsibility: apply cleanup marks the contribution disposed synchronously and the deferred callback checks that guard before retaining focus or opening state. The Host separately owns cancellation when its row/browser unmounts. Missing optional support omits only this action and dialog.
 
 The preview prefers Harness's publicly exported `MarkdownText`, `DisclosureRow`, and `JsonBlock`. When a public primitive is unavailable, only that content falls back to escaped plain text, native `details`/`summary`, or `pre`; the plugin never reaches into a private chat renderer. A tool result folds into an earlier call only when its `toolCallId` exactly matches the call's `callId`, consuming matches in chronological order. Unmatched results remain standalone, and errors use the semantic error token. Images are read from the protected route into Blob URLs, may load lazily before entering the viewport, and abort their read and call `URL.revokeObjectURL` when the preview closes or the image node unmounts.
 

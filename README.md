@@ -54,7 +54,7 @@ dsh plugin --profile web update dsh-archived-chats
 | Area | What it provides |
 | --- | --- |
 | **Browse and search** | Workspace-grouped archive browsing, full-text search across messages and tool results, filters, sorting, tags, and notes. |
-| **Archive a workspace** | From **Archived**, preview and confirm every eligible chat in one existing workspace. The workspace and its directory stay unchanged. |
+| **Archive a workspace** | From a workspace row's ellipsis menu, open one confirmation for every eligible chat in that workspace. The workspace and its directory stay unchanged. |
 | **Read-only preview** | Native conversation layout for Markdown, reasoning, tool activity, JSON, code, and available stored images, with responsive turn navigation. |
 | **Local History** | Validated versions captured after archive, read-only snapshot preview, confirmed deletion, clear-history, and **Restore as copy** without overwriting the source. |
 | **Backup and restore** | JSON + Markdown ZIP export with preview-first, conflict-safe import. Existing session IDs are never overwritten. |
@@ -67,7 +67,7 @@ dsh plugin --profile web update dsh-archived-chats
 - **No silent overwrite:** imports and History restores create or select non-conflicting IDs; they never replace an existing session.
 - **Deletion stays explicit:** ordinary removal enters the Recycle Bin after snapshot protection. Physical removal is available only through confirmed permanent-purge actions.
 - **No automatic cleanup:** retention policies are saved separately from execution. Every cleanup starts with a short-lived preview and explicit selection.
-- **Confirmed workspace archive:** a five-minute, single-use confirmation owns the exact previewed set. Chats added later are excluded; a running chat is skipped, never stopped or moved.
+- **Confirmed workspace archive:** the plugin prepares the exact set in the background, then shows one confirmation with the workspace and chat count. Its five-minute, single-use credential excludes chats added later; a running chat is skipped, never stopped or moved.
 - **Backup scope is visible:** ZIP exports preserve complete session JSON and readable Markdown, but do not include attachment bytes or descendant sessions.
 
 ## Compatibility
@@ -77,7 +77,7 @@ Features activate from the public capabilities exposed by the DeepSeek Harness H
 | Host capability | Plugin behavior |
 | --- | --- |
 | Archive and session reads | Browsing, search, preview, History inventory, storage accounting, and lineage. |
-| Public `archiveSession` | Preview-first bulk archive of one existing workspace. Older Hosts without it return `workspace-archive-unsupported` and make no change. |
+| Workspace action slot + public `archiveSession` | One-confirmation archive from an existing workspace's ellipsis menu. Older Hosts omit the menu action; direct backend attempts without archive capability return `workspace-archive-unsupported` and make no change. |
 | Attachment reads | Stored images appear in conversation and snapshot previews; without it, text remains readable. |
 | Public session writer | ZIP import, **Restore as copy**, and snapshot fallback when an original is missing all write through the Host's public `create` / `append` / `locate` capability, or a dedicated restore entry point where one exists. |
 | Missing write capability | The operation returns `restore-unsupported` without writing or overwriting data. |
