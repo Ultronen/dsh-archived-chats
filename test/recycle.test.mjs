@@ -229,14 +229,15 @@ function recycleFixture(options = {}) {
   };
   const purgedIds = [];
   const pendingPath = join(root, 'pending-deletions.json');
+  const purgePhysical = options.unsupportedPurge ? undefined : async (sessionId) => {
+    calls.push(`physical:purge:${sessionId}`);
+    if (options.purgeError) throw options.purgeError;
+    purgedIds.push(sessionId);
+    persistence.ids.delete(sessionId);
+  };
   const service = createRecycleService({
     registry, persistence, attachments, metadataStore, trashStore, snapshotStore,
-    lifecycle: queue(), disposeLive, purgePhysical: async (sessionId) => {
-      calls.push(`physical:purge:${sessionId}`);
-      if (options.purgeError) throw options.purgeError;
-      purgedIds.push(sessionId);
-      persistence.ids.delete(sessionId);
-    },
+    lifecycle: queue(), disposeLive, purgePhysical,
     invalidate: (ids) => { for (const sessionId of ids) calls.push(`cache:invalidate:${sessionId}`); },
     logger: { warn() {} }, now: () => new Date(NOW),
   });
@@ -427,7 +428,7 @@ test('intact-original restore keeps trash and rolls back partial registry, works
   assert.notEqual(await metadataFailure.trashStore.get('session-a'), null);
 });
 
-test('records purge intent first, deletes the session last of all, and removes trash after it', async () => {
+test('legacy physical purge records intent first, deletes the session last, and removes trash after it', async () => {
   const fixture = recycleFixture({ trashed: true });
   assert.deepEqual(await fixture.service.purge(['session-a']), { purged: ['session-a'], failed: [] });
   // The irreversible step goes last: snapshot removal runs before the session
@@ -440,6 +441,41 @@ test('records purge intent first, deletes the session last of all, and removes t
     'trash:remove:session-a',
     'cache:invalidate:session-a',
   ]);
+});
+
+test('refuses direct and empty purge before changing records, snapshots, or sessions when physical purge is unavailable', async () => {
+  for (const action of ['direct', 'empty']) {
+    const fixture = recycleFixture({ trashed: true, unsupportedPurge: true });
+    const before = await fixture.trashStore.get('session-a');
+    const snapshotBefore = await fixture.snapshotStore.latestFor('session-a');
+
+    const result = action === 'direct'
+      ? await fixture.service.purge(['session-a'])
+      : await fixture.service.empty();
+
+    assert.deepEqual(result, { purged: [], failed: [{ id: 'session-a', reason: 'purge-unsupported' }] });
+    assert.deepEqual(await fixture.trashStore.get('session-a'), before);
+    assert.deepEqual(await fixture.snapshotStore.latestFor('session-a'), snapshotBefore);
+    assert.equal(fixture.persistence.ids.has('session-a'), true);
+    assert.deepEqual(fixture.calls.filter((call) => /^(trash:transition|snapshot:remove|dispose:|physical:purge)/.test(call)), []);
+  }
+});
+
+test('startup recovery cannot delete purge-pending evidence without physical purge capability', async () => {
+  const fixture = recycleFixture({
+    records: [trashRecord('session-a', 'purge-pending')],
+    unsupportedPurge: true,
+  });
+  writeFileSync(fixture.pendingPath, '{"ids":[]}\n');
+  const before = await fixture.trashStore.get('session-a');
+  const snapshotBefore = await fixture.snapshotStore.latestFor('session-a');
+
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+
+  assert.deepEqual(await fixture.trashStore.get('session-a'), before);
+  assert.deepEqual(await fixture.snapshotStore.latestFor('session-a'), snapshotBefore);
+  assert.equal(fixture.persistence.ids.has('session-a'), true);
+  assert.deepEqual(fixture.calls.filter((call) => /^(trash:transition|snapshot:remove|dispose:|physical:purge)/.test(call)), []);
 });
 
 test('startup retries purge-pending but never deletes plain trash', async () => {

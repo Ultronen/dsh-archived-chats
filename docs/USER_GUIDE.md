@@ -14,6 +14,14 @@ This guide covers the complete user workflow, data boundaries, and recovery beha
 
 Groups remember their collapsed state in the browser. Filter by regular or subagent session, project, and tag, then sort by newest, oldest, or title.
 
+## Archive a workspace
+
+Open **Settings → Session Archive**, choose **Archive workspace chats**, then select a workspace in the workspace chooser. The plugin prepares that workspace and opens one confirmation naming the workspace, eligible-chat count, and the **Archived** destination. When applicable, it also shows how many chats currently in use will be skipped without listing chat identities. There is no session preview list or second confirmation.
+
+Choose **Archive all** to proceed, or **Cancel** to leave everything unchanged. Eligible means a chat is currently unarchived, has no non-idle Host agent, and its inspected live or persisted event log contains `turn/start`. A blank new-session window is therefore not an archivable chat. On an older Host without agent status, loaded chats are conservatively skipped; if the plugin cannot confirm a session's event content, it also skips that session instead of guessing. Preparation is limited to 2,000 eligible chats and creates a five-minute, single-use token and nonce for that exact ordered set, so the apply request cannot add IDs and chats created afterward are excluded.
+
+At apply time, each prepared chat is rechecked for workspace membership, archive state, active-agent status, and a real `turn/start`. A complete success refreshes affected views and closes the confirmation. If any chat is skipped or fails, or a History snapshot fails, the Host continues processing and keeps the itemized result visible. A snapshot failure does not undo the archive. An uncertain failure requires a fresh preparation and another explicit confirmation before any retry. The operation never moves chats between workspaces, changes the selected workspace, or changes its directory. A Host without public `archiveSession` rejects preparation with `workspace-archive-unsupported` and changes nothing.
+
 ## Read-only conversation preview
 
 Preview does not require unarchiving. It follows the Harness conversation layout and supports:
@@ -79,6 +87,8 @@ Restore has two levels:
 2. If the original is missing, the plugin uses a validated snapshot through the public `create` / `append` capability and never overwrites an existing ID.
 
 Only the Recycle Bin exposes **Delete permanently** and **Empty Recycle Bin**. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from History. Interrupted purges retry on startup.
+
+On a current Host that exposes handle-based reads without physical session locations, browsing, export, and protection snapshots for ordinary sessions remain available. Session-directory accounting is shown as unavailable, while restore writes and permanent deletion report that the Host capability is unsupported. Purge refusal occurs before changing the recycle record, protection snapshots, pending markers, or a live session. Forked sessions with inherited history are not captured into snapshots yet because the current snapshot schema cannot retain the inherited cut; archive still completes and reports the version-save failure in its result.
 
 If `trash.json` itself cannot be read, the Recycle Bin reports unavailable and every archive change — unarchive, tag and note edits, delete, and purge — is refused rather than guessed. The archived list stays browsable but is labelled as unverified, because a catalog it cannot read cannot prove which chats were already deleted.
 

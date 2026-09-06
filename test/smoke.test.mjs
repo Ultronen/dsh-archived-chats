@@ -254,6 +254,9 @@ const registry = {
   state: workspaceState,
   get archivedSessionIds() { return workspaceState.archivedSessionIds; },
   list: () => workspaces,
+  async archiveSession(id) {
+    if (!workspaceState.archivedSessionIds.includes(id)) workspaceState.archivedSessionIds.push(id);
+  },
   async setState(next) {
     workspaceState.archivedSessionIds = next.archivedSessionIds;
     workspaceState.workspaceIds = next.workspaceIds;
@@ -323,12 +326,162 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 30, `thirty archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all']) {
+assert(routes.size === 33, `thirty-three archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
 assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
+
+console.log('\n[1a] workspace bulk archive routes');
+{
+  const id = 'session-workspace-cold';
+  const blankId = 'session-workspace-blank';
+  const staleId = 'session-workspace-stale';
+  const workspace = workspaces[0];
+  const headers = [
+    { id, createdAt: 1786726700000, cwd: '/workspace/private' },
+    { id: blankId, createdAt: 1786726750000, cwd: '/workspace/private' },
+    { id: staleId, createdAt: 1786726800000, cwd: '/workspace/private' },
+  ];
+  headerRows.push(...headers);
+  registry.headers.set(id, headers[0]);
+  registry.headers.set(blankId, headers[1]);
+  registry.headers.set(staleId, headers[2]);
+  events[id] = [
+    { type: 'turn/start', data: {} },
+    { type: 'session/title', data: { title: '批量归档预览标题' } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: 'workspace-body-secret' }] } },
+  ];
+  events[blankId] = [];
+  events[staleId] = [{ type: 'turn/start', data: {} }];
+  workspace.sessionIds.push(blankId, id);
+
+  const summaries = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(summaries.status === 200 && summaries.json().workspaces.some((item) => item.id === 'ws-1' && item.eligibleCount === 1),
+    `workspace summaries exclude blank new-session windows (got ${summaries.status}: ${summaries.body})`);
+  assert(!JSON.stringify(summaries.json()).includes('/ws/') && !JSON.stringify(summaries.json()).includes('workspace-body-secret'),
+    'workspace summaries expose no paths or session content');
+  const wrongSummaryMethod = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('POST', {}));
+  assert(wrongSummaryMethod.status === 405, 'workspace summaries reject non-GET methods');
+
+  const missingGuard = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', {}, '{"workspaceId":"ws-1"}'));
+  assert(missingGuard.status === 403, 'workspace preview requires the POST guard');
+  const invalidPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1","extra":true}'));
+  assert(invalidPreview.status === 400, 'workspace preview requires an exact request body');
+  const oversizedPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ workspaceId: 'x'.repeat(64 * 1024) })));
+  assert(oversizedPreview.status === 413, 'workspace preview enforces the 64 KiB body limit');
+  const missingWorkspace = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"missing"}'));
+  assert(missingWorkspace.status === 404 && missingWorkspace.json().error === 'workspace-not-found', 'workspace preview preserves stable service errors');
+
+  const preview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  assert(preview.status === 200 && preview.json().sessions.some((item) => item.id === id && item.title === '批量归档预览标题' && item.createdAt === 1786726700000),
+    `workspace preview enriches safe title and timestamp fields (got ${preview.status}: ${preview.body})`);
+  assert(!JSON.stringify(preview.json()).includes('/workspace/private') && !JSON.stringify(preview.json()).includes('workspace-body-secret'),
+    'workspace preview never returns persistence paths or session content');
+  const missingApplyGuard = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', {}, '{"token":"x","nonce":"y"}'));
+  assert(missingApplyGuard.status === 403, 'workspace apply requires the POST guard');
+  const invalidApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"token":"x"}'));
+  assert(invalidApply.status === 400, 'workspace apply requires token and nonce exactly');
+  const oversizedApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: 'x'.repeat(64 * 1024), nonce: 'y' })));
+  assert(oversizedApply.status === 413, 'workspace apply enforces the 64 KiB body limit');
+  const applied = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: preview.json().token, nonce: preview.json().nonce })));
+  assert(applied.status === 200 && applied.json().archived.includes(id) && applied.json().snapshots.some((item) => item.id === id && item.status === 'captured'),
+    `workspace apply archives and snapshots every confirmed cold session (got ${applied.status}: ${applied.body})`);
+  assert(workspaceState.archivedSessionIds.includes(id), 'workspace apply mutates Host archive membership');
+
+  workspace.sessionIds.push(staleId);
+  const stalePreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  workspaceState.archivedSessionIds.push(staleId);
+  const staleApply = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/apply', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ token: stalePreview.json().token, nonce: stalePreview.json().nonce })));
+  assert(staleApply.status === 409 && staleApply.json().archived.length === 0 && staleApply.json().skipped.some((item) => item.id === staleId && item.reason === 'session-archived'),
+    'workspace apply returns 409 when revalidation leaves no archival success');
+
+  const concurrencyIds = Array.from({ length: 20 }, (_, index) => `session-workspace-concurrent-${index}`);
+  const concurrencyHeaders = concurrencyIds.map((sessionId, index) => ({ id: sessionId, createdAt: 1786726900000 + index, cwd: '/workspace/private' }));
+  headerRows.push(...concurrencyHeaders);
+  for (const header of concurrencyHeaders) {
+    registry.headers.set(header.id, header);
+    events[header.id] = [
+      { type: 'turn/start', data: {} },
+      { type: 'session/title', data: { title: `Concurrent ${header.id}` } },
+    ];
+  }
+  workspace.sessionIds.push(...concurrencyIds);
+  const inspect = persistence.inspect;
+  const failedInspectionId = concurrencyIds[7];
+  const inspectedIds = [];
+  let activeInspections = 0;
+  let maxConcurrentInspections = 0;
+  persistence.inspect = async (sessionId) => {
+    inspectedIds.push(sessionId);
+    activeInspections += 1;
+    maxConcurrentInspections = Math.max(maxConcurrentInspections, activeInspections);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    try {
+      if (sessionId === failedInspectionId) throw new Error('fixture inspection failure');
+      return await inspect(sessionId);
+    }
+    finally { activeInspections -= 1; }
+  };
+  const concurrentPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
+  persistence.inspect = inspect;
+  const readableConcurrencyIds = concurrencyIds.filter((sessionId) => sessionId !== failedInspectionId);
+  assert(concurrentPreview.status === 200 && concurrentPreview.json().sessions.map((item) => item.id).join(',') === readableConcurrencyIds.join(','),
+    'workspace preview retains readable candidate order while excluding an unconfirmed conversation');
+  const concurrentRows = concurrentPreview.json().sessions;
+  assert(inspectedIds.length === concurrencyIds.length + 1 && new Set(inspectedIds).size === concurrencyIds.length + 1
+    && inspectedIds.includes(blankId) && concurrencyIds.every((sessionId) => inspectedIds.includes(sessionId)),
+  'workspace preview inspects each unarchived candidate exactly once while checking conversation presence');
+  assert(concurrentPreview.json().skipped.some((item) => item.id === failedInspectionId && item.reason === 'session-unavailable'),
+    'workspace preview fails closed when conversation content cannot be confirmed');
+  assert(concurrentRows.find((item) => item.id === concurrencyIds[6])?.title === `Concurrent ${concurrencyIds[6]}`
+    && concurrentRows.find((item) => item.id === concurrencyIds[8])?.title === `Concurrent ${concurrencyIds[8]}`,
+  'workspace preview preserves neighboring readable titles around an unavailable candidate');
+  assert(maxConcurrentInspections <= 8, `workspace preview bounds persistence inspections (got ${maxConcurrentInspections})`);
+
+  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== blankId && sessionId !== staleId && !concurrencyIds.includes(sessionId));
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
+  for (const header of [...headers, ...concurrencyHeaders]) {
+    headerRows.splice(headerRows.indexOf(header), 1);
+    registry.headers.delete(header.id);
+    delete events[header.id];
+  }
+}
+
+console.log('\n[1a1] workspace archive late session binding');
+{
+  const lateState = { initialized: true, workspaceIds: ['late-ws'], archivedSessionIds: [] };
+  const lateRegistry = {
+    get archivedSessionIds() { return lateState.archivedSessionIds; },
+    list: () => [{ id: 'late-ws', title: 'Late workspace', sessionIds: [] }],
+    archiveSession: async () => {},
+    setState: async () => {},
+  };
+  const latePersistence = {
+    list: async () => [],
+    inspect: async () => ({ meta: { id: 'unused' }, events: [] }),
+    listSnapshots: async () => [],
+    locate: () => undefined,
+  };
+  const lateServices = { webServer: undefined, workspaceRegistry: lateRegistry, sessionPersistence: latePersistence };
+  const lateRoutes = new Map();
+  const lateListeners = [];
+  const lateCtx = {
+    get: (key) => lateServices[key],
+    on: (event, callback) => { lateListeners.push([event, callback]); },
+    effect: (callback) => { callback(); },
+    logger: { warn: () => {}, info: () => {} },
+  };
+  apply(lateCtx);
+  lateServices.webServer = { register: (route) => { lateRoutes.set(route.path, route.handler); return () => lateRoutes.delete(route.path); } };
+  lateListeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
+  const unavailable = await call(lateRoutes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(unavailable.status === 501, 'workspace archive stays fail-closed while sessions are missing');
+  lateServices.sessions = { get: () => undefined };
+  const available = await call(lateRoutes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
+  assert(available.status === 200 && available.json().workspaces[0]?.id === 'late-ws', 'workspace archive retries capability binding after sessions becomes available');
+}
 
 console.log('\n[1a0] storage insights, retention, and lineage routes');
 {
@@ -1360,13 +1513,35 @@ const storageMap = new Map();
 function MarkdownTextStub(props) { return { type: 'markdown-stub', props }; }
 function DisclosureRowStub(props) { return { type: 'disclosure-stub', props: { ...props, children: [props.title, props.children] } }; }
 function JsonBlockStub(props) { return { type: 'json-stub', props }; }
+function MenuActionStub(props) { return { type: 'button', props: { type: 'button', role: 'menuitem', disabled: props.disabled, onClick: props.onSelect, children: props.label } }; }
+function defineStoreStub(spec) {
+  return {
+    spec,
+    create() {
+      const listeners = new Set();
+      const state = spec.init();
+      const actions = Object.fromEntries(Object.entries(spec.actions).map(([name, mutate]) => [name, (...args) => {
+        mutate(state, ...args);
+        for (const listener of listeners) listener();
+      }]));
+      return {
+        actions,
+        getSnapshot: () => state,
+        subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        clearPersisted: () => {},
+      };
+    },
+  };
+}
 const moduleTable = {
   'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
   '@deepseek-ai/dsh-client-ui-primitives': {
     MarkdownText: MarkdownTextStub,
     DisclosureRow: DisclosureRowStub,
     JsonBlock: JsonBlockStub,
+    MenuAction: MenuActionStub,
   },
+  '@deepseek-ai/dsh-client-store': { defineStore: defineStoreStub },
   react: {
     useState: (v) => [v, () => {}],
     useEffect: () => {},
@@ -2239,9 +2414,10 @@ console.log('\n[11] client half — settings section registration');
     && clientCalls.localeRegister[0].dicts.en['history.clear'] === 'Clear history versions'
     && clientCalls.localeRegister[0].dicts.en['history.clearTitle'] === 'Clear all history versions?',
   'English History preview, restore, and deletion copy is localized');
-  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice (got ${clientCalls.slotRegister.length})`);
-  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
-  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
+	  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice without requiring an unreleased Host slot (got ${clientCalls.slotRegister.length})`);
+	  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
+	  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
+	  const workspaceActionRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'sidebar.workspaces.workspace.action');
   const meta = settingsRegistration?.meta;
   assert(meta.name === 'settings.section', 'registration targets settings.section');
   assert(meta.id === 'archived-chats', `section id is "archived-chats" (got "${meta.id}")`);
@@ -2250,10 +2426,12 @@ console.log('\n[11] client half — settings section registration');
   assert(meta.label() === '会话档案', `label() resolves to 会话档案 (got "${meta.label()}")`);
   assert(meta.locale === 'settings.archived-chats', 'section carries its locale namespace');
   assert(typeof settingsRegistration?.component === 'function', 'section component is a function');
-  assert(overlayRegistration?.meta?.id === 'archived-chats-success'
-    && overlayRegistration?.meta?.locale === 'settings.archived-chats'
-    && typeof overlayRegistration?.component === 'function',
-  'archive success notice registers in the frame-wide shell overlay');
+	  assert(overlayRegistration?.meta?.id === 'archived-chats-success'
+	    && overlayRegistration?.meta?.locale === 'settings.archived-chats'
+	    && typeof overlayRegistration?.component === 'function',
+	  'archive success notice registers in the frame-wide shell overlay');
+	  assert(workspaceActionRegistration === undefined,
+	  'the public plugin does not register an unreleased workspace-menu Host slot');
   const noticeController = overlayRegistration?.meta?.inject?.().controller;
   const savedNoticeFetch = globalThis.fetch;
   let noticeUndoRequest = null;
@@ -2487,10 +2665,15 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
 
   const defaultTree = harness.render({ t, refreshSidebar: () => {} });
   const defaultElements = collectElements(defaultTree);
-  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
-  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+	  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+	  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
+	  const workspaceArchiveEntry = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量归档工作区');
+	  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
+	  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+	  assert(workspaceArchiveEntry !== undefined, 'archive settings exposes workspace bulk archive without a Host menu slot');
+	  workspaceArchiveEntry?.props.onClick({ currentTarget: { focus: () => {} } });
+	  const workspaceArchiveFlow = findComponentElement(harness.render({ t, refreshSidebar: () => {} }), 'WorkspaceArchiveChooserDialog');
+	  assert(workspaceArchiveFlow !== undefined, 'the settings-owned workspace action opens the plugin workspace chooser');
   assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '空间与策略'), 'archive manager exposes Storage & Retention tab');
   assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '来源与分支'), 'archive manager names the relationship view by its user-visible purpose');
 
@@ -4243,6 +4426,13 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(JSON.parse(previewRequest?.options.body ?? '{}').scope === 'trash', 'recycle preview is explicitly trash-scoped');
 
   const restoreButton = elements.find((element) => element.type === 'button' && elementText(element) === '恢复' && element.props?.['data-session-id'] === 'trash-a');
+  const recycleFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ restored: [], failed: [{ id: 'trash-a', reason: 'trash-state-conflict' }] }) });
+  await restoreButton?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('状态已变化'), 'restore renders the structured conflict reason instead of a raw HTTP status');
+  assert(elementText(tree).includes('Trash Alpha'), 'failed restore retains its recycle row');
+  globalThis.fetch = recycleFetch;
   await restoreButton?.props.onClick();
   tree = harness.render({ t, refreshSidebar: () => {} });
   elements = collectElements(tree);
@@ -4259,6 +4449,11 @@ console.log('\n[11f] client half — recycle navigation and management');
   const purgeDialog = findComponentElement(tree, 'ConfirmDialog');
   assert(purgeDialog?.props.title === '永久删除回收站中的会话？', 'permanent purge opens a distinct accessible confirmation');
   assert(String(purgeDialog?.props.body).includes('原会话和保护快照'), 'permanent purge copy names original and snapshot removal');
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ purged: [], failed: [{ id: 'trash-b', reason: 'purge-unsupported' }] }) });
+  await purgeDialog?.props.onConfirm();
+  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
+  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('不支持永久删除'), 'purge renders the missing capability and keeps failed rows');
+  globalThis.fetch = recycleFetch;
   await purgeDialog?.props.onConfirm();
   assert(recycleSidebarRefreshes === 1, 'permanent purge re-baselines the sidebar so no deleted ungrouped chat remains');
 
@@ -4329,6 +4524,470 @@ console.log('\n[11g] client half — archive move exposes immediate undo');
   assert(requests.some((request) => request.path.endsWith('/trash/restore') && request.options.body === '{"sessionIds":["undo-a"]}'), 'Undo calls the guarded recycle restore route');
   assert(elementText(tree).includes('Undo Alpha') && !collectElements(tree).some((element) => element.type === 'button' && elementText(element) === '撤销'), 'successful Undo restores the archive row and clears the action');
   harness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11h] client half — workspace bulk archive dialog');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  let applied = 0;
+  let closed = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    requests.push({ path, options });
+    const payload = path.endsWith('/workspace-archive/workspaces')
+      ? { ok: true, workspaces: [{ id: 'workspace-1', title: 'Project One', eligibleCount: 2, liveCount: 1 }] }
+      : path.endsWith('/workspace-archive/preview')
+        ? { ok: true, token: 'token-1', nonce: 'nonce-1', workspace: { id: 'workspace-1', title: 'Project One' }, sessions: [{ id: 'session-title', title: 'Safe title' }, { id: 'session-fallback', title: null }], skipped: [{ id: 'session-live', reason: 'session-live' }, { id: 'session-archived', reason: 'session-archived' }] }
+        : path.endsWith('/workspace-archive/apply')
+          ? { ok: true, workspace: { id: 'workspace-1', title: 'Project One' }, archived: ['session-title'], skipped: [{ id: 'session-fallback', reason: 'session-live' }], failed: [{ id: 'session-failed', reason: 'archive-failed' }], snapshots: [{ id: 'session-title', status: 'snapshot-failed' }] }
+          : {};
+    return { ok: true, status: 200, json: async () => payload };
+  };
+	  const t = clientCtx.locale.bind('settings.archived-chats');
+	  const Chooser = clientExports.__test.WorkspaceArchiveChooserDialog;
+	  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+	  assert(typeof Chooser === 'function', 'workspace bulk archive exposes its settings-owned workspace chooser');
+	  assert(typeof Dialog === 'function', 'workspace bulk archive exposes its dialog component for focused verification');
+	  assert(typeof clientExports.__test.fetchWorkspaceArchiveWorkspaces === 'function'
+	    && typeof clientExports.__test.previewWorkspaceArchive === 'function'
+	    && typeof clientExports.__test.applyWorkspaceArchive === 'function', 'workspace bulk archive exposes guarded request helpers');
+	  let chosenWorkspace = null;
+	  if (typeof Chooser === 'function') {
+	    const chooserHarness = createHookHarness(Chooser);
+	    const chooserProps = {
+	      t,
+	      onChoose: (workspace) => { chosenWorkspace = workspace; },
+	      onClose: () => {},
+	    };
+	    chooserHarness.render(chooserProps);
+	    chooserHarness.flushEffects();
+	    await new Promise((resolve) => setTimeout(resolve, 0));
+	    const chooserTree = chooserHarness.render(chooserProps);
+	    const chooserElements = collectElements(chooserTree);
+	    const workspaceChoice = chooserElements.find((element) => element.props?.['data-workspace-archive-choice'] === 'workspace-1');
+	    assert(elementText(chooserTree).includes('Project One') && elementText(chooserTree).includes('2'), 'workspace chooser lists safe workspace titles and eligible counts');
+	    workspaceChoice?.props.onClick();
+	    assert(chosenWorkspace?.id === 'workspace-1' && chosenWorkspace?.title === 'Project One', 'workspace chooser passes only the selected workspace summary into confirmation');
+	    chooserHarness.unmount();
+	  }
+	  const harness = createHookHarness(Dialog);
+  const props = {
+    t,
+    workspaceId: 'workspace-1',
+    workspaceTitle: 'Project One',
+    onClose: () => { closed += 1; },
+    onApplied: async () => { applied += 1; },
+    restoreFocus: () => {},
+  };
+  harness.render(props);
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render(props);
+  let elements = collectElements(tree);
+  const dialog = elements.find((element) => element.props?.role === 'dialog');
+  assert(dialog?.props['aria-modal'] === 'true' && dialog?.props['aria-labelledby'], 'workspace bulk archive opens an accessible labelled modal dialog');
+  const workspaceStyle = headChildren.find((child) => child.id === 'dsh-archived-chats-css')?.textContent ?? '';
+  assert(/\.dac-workspace-dialog\{[^}]*width:min\(540px,calc\(100vw - 32px\)\)[^}]*border-radius:24px[^}]*padding:26px/u.test(workspaceStyle)
+    && workspaceStyle.includes('.dac-workspace-dialog .dac-preview-head{border-bottom:0;padding:0}')
+    && workspaceStyle.includes('.dac-workspace-dialog .dac-preview-head strong{font-size:24px;line-height:32px}')
+    && workspaceStyle.includes('.dac-workspace-copy{margin:0;color:var(--dsw-alias-label-secondary);font-size:16px;line-height:26px'),
+  'workspace confirmation uses the approved spacious scoped card typography');
+  assert(workspaceStyle.includes('.dac-workspace-actions .dac-btn{border:0;')
+    && workspaceStyle.includes('.dac-workspace-actions .dac-btn-danger{border:0;background:var(--dsw-alias-interactive-bg-hover-danger)')
+    && workspaceStyle.includes('@media (max-width:480px){.dac-workspace-dialog{width:calc(100vw - 32px)')
+    && workspaceStyle.includes('.dac-workspace-actions{flex-direction:row;justify-content:flex-end;flex-wrap:wrap}'),
+  'workspace confirmation keeps filled scoped actions horizontal on mobile');
+  assert(requests.some((request) => request.path.endsWith('/workspace-archive/preview') && request.options.body === '{"workspaceId":"workspace-1"}'), 'workspace confirmation automatically prepares only the supplied workspace');
+  assert(elementText(tree).includes('归档 2 个会话？') && elementText(tree).includes('Project One'), 'workspace confirmation shows the prepared count and supplied workspace title');
+  assert(elementText(tree).includes('这会将「Project One」中的会话归档。之后你可以在会话档案的“已归档”中找到它们。')
+    && !elementText(tree).includes('项目本身不会改变'), 'workspace confirmation names the destination without unrequested contrast copy');
+  const skippedLive = elements.find((element) => element.props?.['data-workspace-archive-skipped-live'] === '1');
+  assert(elementText(skippedLive) === '将跳过 1 个仍在运行或状态未确认的会话。'
+    && !elementText(tree).includes('session-live') && !elementText(tree).includes('session-archived'),
+  'workspace confirmation summarizes only nonzero live skips without exposing ids or other reasons');
+  assert(!elements.some((element) => element.type === 'select')
+    && !elements.some((element) => element.props?.['data-workspace-archive-preview'] === '1')
+    && !elements.some((element) => element.props?.['data-workspace-archive-confirm'] === '1'),
+  'workspace confirmation contains no selector, preview list, or continue step');
+  assert(!requests.some((request) => request.path.endsWith('/workspace-archive/apply')), 'workspace archive never applies before explicit confirmation');
+  const firstFocus = { focus: () => { documentMock.activeElement = firstFocus; } };
+  const lastFocus = { focus: () => { documentMock.activeElement = lastFocus; } };
+  if (dialog?.props.ref) dialog.props.ref.current = { contains: (node) => node === firstFocus || node === lastFocus, querySelectorAll: () => [firstFocus, lastFocus] };
+  documentMock.activeElement = lastFocus;
+  let trapped = false;
+  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { trapped = true; } });
+  documentListeners.get('keydown')?.({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => {} });
+  assert(trapped && documentMock.activeElement === firstFocus && closed === 1, 'workspace bulk archive traps Tab and contains Escape inside its dialog');
+  assert(!elementText(tree).includes('Safe title') && !elementText(tree).includes('session-live'), 'automatic preparation keeps the preview list hidden');
+  const applyButton = elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1');
+  await applyButton?.props.onClick();
+  tree = harness.render(props);
+  assert(requests.some((request) => request.path.endsWith('/workspace-archive/apply') && request.options.body === '{"token":"token-1","nonce":"nonce-1"}'), 'workspace archive apply sends only preview token and nonce after confirmation');
+  assert(applied === 1 && elementText(tree).includes('session-failed') && elementText(tree).includes('历史快照未保存') && !elementText(tree).includes('archive-failed'), 'workspace archive retains localized final failed and snapshot results while refreshing consumers');
+  const dictionaries = clientCalls.localeRegister.find((entry) => entry.ns === 'settings.archived-chats')?.dicts;
+  assert(dictionaries?.zh?.['workspaceArchive.confirmTitle'] === '归档 {count} 个会话？'
+    && dictionaries?.en?.['workspaceArchive.confirmTitle'] === 'Archive {count} chats?', 'workspace archive has matched direct-confirmation titles');
+  assert(dictionaries?.zh?.['workspaceArchive.action'] === '归档会话'
+    && dictionaries?.en?.['workspaceArchive.action'] === 'Archive chats', 'workspace archive has matched approved menu action labels');
+  harness.unmount();
+  globalThis.fetch = async () => ({ ok: false, status: 501, json: async () => ({ error: 'workspace-archive-unsupported' }) });
+  const legacyHarness = createHookHarness(Dialog);
+  legacyHarness.render(props);
+  legacyHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(elementText(legacyHarness.render(props)).includes('当前 DSH 版本不支持按项目批量归档。'), 'old Hosts show a clear workspace archive compatibility message');
+  legacyHarness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11i] client half — workspace archive recovery and completed conflicts');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  let previewCalls = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/workspace-archive/preview')) {
+      previewCalls += 1;
+      if (previewCalls === 1) return { ok: false, status: 503, json: async () => ({ error: 'preview-failed' }) };
+      return { ok: true, status: 200, json: async () => ({ token: 'fresh-token', nonce: 'fresh-nonce', workspace: { id: 'recover', title: 'Recovered' }, sessions: [{ id: 'one' }, { id: 'two' }, { id: 'three' }], skipped: [] }) };
+    }
+    if (path.endsWith('/workspace-archive/apply')) return { ok: false, status: 409, json: async () => ({ workspace: { id: 'recover', title: 'Recovered' }, archived: [], skipped: [{ id: 'late-live', reason: 'session-live' }], failed: [{ id: 'failed', reason: 'archive-failed' }], snapshots: [{ id: 'snapshot', status: 'snapshot-failed' }] }) };
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  let conflictResult = null;
+  try { conflictResult = await clientExports.__test.applyWorkspaceArchive('token', 'nonce'); } catch { /* red: intentional 409 is currently treated as an error */ }
+  assert(Array.isArray(conflictResult?.skipped) && Array.isArray(conflictResult?.failed) && Array.isArray(conflictResult?.snapshots), 'completed 409 workspace apply returns its safe final result');
+  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+  const harness = createHookHarness(Dialog);
+  const props = { t, workspaceId: 'recover', workspaceTitle: 'Recovered', onClose: () => {}, onApplied: async () => {}, restoreFocus: () => {} };
+  harness.render(props); harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = harness.render(props);
+  let retry = collectElements(tree).find((element) => element.props?.['data-workspace-archive-retry'] === '1');
+  retry?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = harness.render(props);
+  assert(previewCalls === 2 && elementText(tree).includes('归档 3 个会话？'), 'workspace Retry obtains a fresh preparation for the same workspace');
+  harness.unmount();
+  let completedCalls = 0;
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    if (path.endsWith('/workspaces')) return { ok: true, status: 200, json: async () => ({ workspaces: [{ id: 'A', title: 'A workspace', eligibleCount: 1, liveCount: 0 }, { id: 'B', title: 'B workspace', eligibleCount: 1, liveCount: 0 }] }) };
+    if (path.endsWith('/preview')) return { ok: true, status: 200, json: async () => ({ token: 'A-token', nonce: 'A-nonce', workspace: { id: 'A', title: 'A workspace' }, sessions: [{ id: 'a', title: null }], skipped: [] }) };
+    if (path.endsWith('/apply')) return { ok: false, status: 409, json: async () => ({ workspace: { id: 'A', title: 'A workspace' }, archived: [], skipped: [{ id: 'live', reason: 'session-live' }], failed: [{ id: 'failed', reason: 'archive-failed' }], snapshots: [{ id: 'saved', status: 'captured' }, { id: 'snapshot', status: 'snapshot-failed' }] }) };
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const completedHarness = createHookHarness(Dialog);
+  const completedProps = { ...props, workspaceId: 'A', workspaceTitle: 'A workspace', onApplied: async () => { completedCalls += 1; } };
+  completedHarness.render(completedProps); completedHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = completedHarness.render(completedProps); let elements = collectElements(tree);
+  await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+  tree = completedHarness.render(completedProps);
+  assert(completedCalls === 0 && elementText(tree).includes('仍在运行或状态未确认，已跳过') && elementText(tree).includes('归档失败') && elementText(tree).includes('历史快照未保存') && !elementText(tree).includes('captured'), 'completed 409 renders localized skipped, failed, and snapshot-failed results without refreshing');
+  completedHarness.unmount();
+  let resolvePreviewA;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/preview')) {
+      const target = JSON.parse(options.body).workspaceId;
+      if (target === 'A') return new Promise((resolve) => { resolvePreviewA = () => resolve({ ok: true, status: 200, json: async () => ({ token: 'A-token', nonce: 'A-nonce', workspace: { id: 'A', title: 'A workspace' }, sessions: [{ id: 'a' }], skipped: [] }) }); });
+      return { ok: true, status: 200, json: async () => ({ token: 'B-token', nonce: 'B-nonce', workspace: { id: 'B', title: 'B workspace' }, sessions: [{ id: 'b' }], skipped: [] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const staleHarness = createHookHarness(Dialog);
+  const propsA = { ...props, workspaceId: 'A', workspaceTitle: 'A workspace' };
+  const propsB = { ...props, workspaceId: 'B', workspaceTitle: 'B workspace' };
+  staleHarness.render(propsA); staleHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  staleHarness.render(propsB); staleHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  resolvePreviewA?.(); await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = staleHarness.render(propsB); elements = collectElements(tree);
+  assert(elementText(tree).includes('B workspace') && !elementText(tree).includes('A workspace'), 'a stale preparation cannot overwrite a newer workspace target');
+  staleHarness.unmount();
+
+  let cancelledWhilePreparing = 0;
+  let preparingApplyCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/preview')) return new Promise(() => {});
+    if (String(url).endsWith('/apply')) preparingApplyCalls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const preparingHarness = createHookHarness(Dialog);
+  const preparingProps = { ...props, onClose: () => { cancelledWhilePreparing += 1; } };
+  preparingHarness.render(preparingProps); preparingHarness.flushEffects();
+  tree = preparingHarness.render(preparingProps); elements = collectElements(tree);
+  const preparingApply = elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1');
+  elements.find((element) => element.props?.['data-workspace-archive-cancel'] === '1')?.props.onClick();
+  assert(preparingApply?.props.disabled === true && cancelledWhilePreparing === 1 && preparingApplyCalls === 0, 'preparation keeps apply disabled while allowing cancellation without mutation');
+  preparingHarness.unmount();
+
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => String(url).endsWith('/preview')
+      ? { token: 'empty-token', nonce: 'empty-nonce', workspace: { id: 'empty', title: 'Empty workspace' }, sessions: [], skipped: [] }
+      : {},
+  });
+  const emptyHarness = createHookHarness(Dialog);
+  const emptyProps = { ...props, workspaceId: 'empty', workspaceTitle: 'Empty workspace' };
+  emptyHarness.render(emptyProps); emptyHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = emptyHarness.render(emptyProps); elements = collectElements(tree);
+  assert(elementText(tree).includes(t('workspaceArchive.empty'))
+    && elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.disabled === true
+    && !elements.some((element) => element.props?.['data-workspace-archive-skipped-live'] === '1'),
+  'empty preparation explains the state, cannot apply, and omits a zero live-skip count');
+  emptyHarness.unmount();
+
+  let doubleApplyCalls = 0;
+  let releaseApply;
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    if (path.endsWith('/preview')) return { ok: true, status: 200, json: async () => ({ token: 'once-token', nonce: 'once-nonce', workspace: { id: 'once', title: 'Once' }, sessions: [{ id: 'one' }], skipped: [] }) };
+    if (path.endsWith('/apply')) {
+      doubleApplyCalls += 1;
+      return new Promise((resolve) => { releaseApply = () => resolve({ ok: true, status: 200, json: async () => ({ workspace: { id: 'once', title: 'Once' }, archived: [], skipped: [], failed: [], snapshots: [] }) }); });
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const doubleHarness = createHookHarness(Dialog);
+  const doubleProps = { ...props, workspaceId: 'once', workspaceTitle: 'Once' };
+  doubleHarness.render(doubleProps); doubleHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = doubleHarness.render(doubleProps); elements = collectElements(tree);
+  const applyOnce = elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1');
+  const firstApply = applyOnce.props.onClick();
+  const secondApply = applyOnce.props.onClick();
+  assert(doubleApplyCalls === 1, 'workspace confirmation blocks duplicate apply synchronously');
+  releaseApply(); await Promise.all([firstApply, secondApply]);
+  doubleHarness.unmount();
+
+  let uncertainPreviewCalls = 0;
+  const uncertainBodies = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/preview')) {
+      uncertainPreviewCalls += 1;
+      return { ok: true, status: 200, json: async () => ({ token: `token-${uncertainPreviewCalls}`, nonce: `nonce-${uncertainPreviewCalls}`, workspace: { id: 'uncertain', title: 'Uncertain' }, sessions: [{ id: 'one' }], skipped: [] }) };
+    }
+    if (path.endsWith('/apply')) {
+      uncertainBodies.push(options.body);
+      return uncertainBodies.length === 1
+        ? { ok: false, status: 503, json: async () => ({ error: 'uncertain' }) }
+        : { ok: true, status: 200, json: async () => ({ workspace: { id: 'uncertain', title: 'Uncertain' }, archived: ['one'], skipped: [], failed: [], snapshots: [] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const uncertainHarness = createHookHarness(Dialog);
+  const uncertainProps = { ...props, workspaceId: 'uncertain', workspaceTitle: 'Uncertain' };
+  uncertainHarness.render(uncertainProps); uncertainHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = uncertainHarness.render(uncertainProps); elements = collectElements(tree);
+  await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+  tree = uncertainHarness.render(uncertainProps); elements = collectElements(tree);
+  assert(elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.disabled === true
+    && elements.some((element) => element.props?.['data-workspace-archive-retry'] === '1'),
+  'an uncertain apply failure invalidates confirmation and requires fresh preparation');
+  elements.find((element) => element.props?.['data-workspace-archive-retry'] === '1')?.props.onClick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  tree = uncertainHarness.render(uncertainProps); elements = collectElements(tree);
+  await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+  assert(uncertainPreviewCalls === 2
+    && uncertainBodies[0] === '{"token":"token-1","nonce":"nonce-1"}'
+    && uncertainBodies[1] === '{"token":"token-2","nonce":"nonce-2"}',
+  'retry applies only a newly prepared token and nonce after another explicit confirmation');
+  uncertainHarness.unmount();
+  globalThis.fetch = savedFetch;
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+console.log('\n[11j] client half — workspace archive final coverage');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const dictionaries = clientCalls.localeRegister.find((entry) => entry.ns === 'settings.archived-chats')?.dicts;
+  const stableResultKeys = [
+    'workspaceArchive.reason.session-live',
+    'workspaceArchive.reason.session-archived',
+    'workspaceArchive.reason.session-workspace-changed',
+    'workspaceArchive.reason.archive-failed',
+    'workspaceArchive.reason.archive-uncommitted',
+    'workspaceArchive.reason.lifecycle-failed',
+    'workspaceArchive.status.captured',
+    'workspaceArchive.status.snapshot-failed',
+    'workspaceArchive.reason.unknown',
+  ];
+  for (const key of stableResultKeys) {
+    assert(typeof dictionaries?.zh?.[key] === 'string' && dictionaries.zh[key].length > 0
+      && typeof dictionaries?.en?.[key] === 'string' && dictionaries.en[key].length > 0,
+    `workspace archive localizes stable service result ${key} in Chinese and English`);
+  }
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+  const renderFinalResult = async (applyResult, overrides = {}) => {
+    globalThis.fetch = async (url) => {
+      const path = String(url);
+      if (path.endsWith('/workspace-archive/preview')) return { ok: true, status: 200, json: async () => ({ token: 'final-token', nonce: 'final-nonce', workspace: { id: 'ws-final', title: 'Final workspace' }, sessions: [{ id: 'candidate' }], skipped: [] }) };
+      if (path.endsWith('/workspace-archive/apply')) return { ok: applyResult.status !== 409, status: applyResult.status ?? 200, json: async () => applyResult };
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+    const harness = createHookHarness(Dialog);
+    const props = { t, workspaceId: 'ws-final', workspaceTitle: 'Final workspace', onClose: overrides.onClose ?? (() => {}), onApplied: overrides.onApplied ?? (async () => {}), restoreFocus: () => {} };
+    harness.render(props); harness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+    let tree = harness.render(props); let elements = collectElements(tree);
+    await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+    tree = harness.render(props);
+    return { harness, tree };
+  };
+  const happy = await renderFinalResult({
+    workspace: { id: 'ws-final', title: 'Final workspace' }, archived: ['archived-id'],
+    skipped: [{ id: 'skipped-id', reason: 'session-archived' }],
+    failed: [{ id: 'failed-id', reason: 'archive-uncommitted' }],
+    snapshots: [{ id: 'saved', status: 'captured' }, { id: 'snapshot-failed-id', status: 'snapshot-failed' }],
+  });
+  const happyGroups = collectElements(happy.tree).filter((element) => element.props?.className === 'dac-workspace-result-group');
+  const groupText = (heading) => elementText(happyGroups.find((group) => elementText(group.props?.children?.[0]) === heading));
+  assert(groupText(t('workspaceArchive.archived')).includes('archived-id')
+    && groupText(t('workspaceArchive.skipped')).includes('skipped-id')
+    && groupText(t('workspaceArchive.skipped')).includes(t('workspaceArchive.reason.session-archived'))
+    && groupText(t('workspaceArchive.failed')).includes('failed-id')
+    && groupText(t('workspaceArchive.failed')).includes(t('workspaceArchive.reason.archive-uncommitted')),
+  'happy workspace result renders archived, skipped, and failed headings with ids and localized explanations');
+  const happySnapshotGroup = groupText(t('workspaceArchive.snapshotFailed'));
+  assert(happySnapshotGroup.includes('snapshot-failed-id') && happySnapshotGroup.includes(t('workspaceArchive.status.snapshot-failed'))
+    && !happySnapshotGroup.includes('saved') && !happySnapshotGroup.includes(t('workspaceArchive.status.captured')),
+  'captured snapshots are excluded from the snapshot-failed result group');
+  happy.harness.unmount();
+  const partial = await renderFinalResult({
+    workspace: { id: 'ws-final', title: 'Final workspace' }, archived: ['moved-id'],
+    skipped: [{ id: 'already-archived', reason: 'session-archived' }], failed: [],
+    snapshots: [{ id: 'moved-id', status: 'captured' }],
+  });
+  const partialGroupHeadings = collectElements(partial.tree)
+    .filter((element) => element.props?.className === 'dac-workspace-result-group')
+    .map((group) => elementText(group.props?.children?.[0]));
+  assert(partialGroupHeadings.join('|') === `${t('workspaceArchive.archived')}|${t('workspaceArchive.skipped')}`,
+    'partial workspace result omits empty failure and snapshot-warning groups');
+  partial.harness.unmount();
+  const completed = await renderFinalResult({
+    status: 409, workspace: { id: 'ws-final', title: 'Final workspace' }, archived: [],
+    skipped: [{ id: 'completed-skipped', reason: 'session-live' }],
+    failed: [{ id: 'completed-failed', reason: 'lifecycle-failed' }],
+    snapshots: [{ id: 'completed-snapshot-failed', status: 'snapshot-failed' }],
+  });
+  const completedText = elementText(completed.tree);
+  assert(completedText.includes(t('workspaceArchive.skipped')) && completedText.includes('completed-skipped') && completedText.includes(t('workspaceArchive.reason.session-live'))
+    && completedText.includes(t('workspaceArchive.failed')) && completedText.includes('completed-failed') && completedText.includes(t('workspaceArchive.reason.lifecycle-failed'))
+    && completedText.includes(t('workspaceArchive.snapshotFailed')) && completedText.includes('completed-snapshot-failed') && completedText.includes(t('workspaceArchive.status.snapshot-failed')),
+  'completed 409 final result renders every localized result group and row');
+  completed.harness.unmount();
+
+  let fullSuccessRefreshes = 0;
+  let fullSuccessCloses = 0;
+  const fullSuccess = await renderFinalResult({
+    workspace: { id: 'ws-final', title: 'Final workspace' }, archived: ['archived-id'], skipped: [], failed: [],
+    snapshots: [{ id: 'archived-id', status: 'captured' }],
+  }, {
+    onApplied: async () => { fullSuccessRefreshes += 1; throw new Error('consumer refresh failed'); },
+    onClose: () => { fullSuccessCloses += 1; },
+  });
+  assert(fullSuccessRefreshes === 1 && fullSuccessCloses === 1
+    && !collectElements(fullSuccess.tree).some((element) => element.props?.['data-workspace-archive-result'] === '1'),
+  'full workspace success closes after refresh even when a consumer refresh rejects');
+  fullSuccess.harness.unmount();
+
+  let closeCalls = 0;
+  let restoredFocus = 0;
+  const focusHarness = createHookHarness(Dialog);
+  const focusProps = { t, workspaceId: 'focus', workspaceTitle: 'Focus workspace', onClose: () => { closeCalls += 1; }, onApplied: async () => {}, restoreFocus: () => { restoredFocus += 1; } };
+  const focusTree = focusHarness.render(focusProps);
+  const focusElements = collectElements(focusTree);
+  const focusDialog = focusElements.find((element) => element.props?.role === 'dialog');
+  const cancelButton = focusElements.find((element) => element.props?.['data-workspace-archive-cancel'] === '1');
+  const first = { focus: () => { documentMock.activeElement = first; } };
+  const last = { focus: () => { documentMock.activeElement = last; } };
+  focusDialog.props.ref.current = { contains: (node) => node === first || node === last, querySelectorAll: () => [first, last], focus: () => {} };
+  cancelButton.props.ref.current = first;
+  focusHarness.flushEffects();
+  assert(documentMock.activeElement === first, 'workspace archive dialog gives its cancel control initial focus');
+  let reverseTrapped = false;
+  documentMock.activeElement = first;
+  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: true, preventDefault: () => { reverseTrapped = true; } });
+  let forwardTrapped = false;
+  documentMock.activeElement = last;
+  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { forwardTrapped = true; } });
+  documentListeners.get('keydown')?.({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => {} });
+  assert(reverseTrapped && forwardTrapped && documentMock.activeElement === first && closeCalls === 1, 'workspace archive dialog wraps reverse and forward Tab and closes on Escape');
+  focusHarness.unmount();
+  assert(restoredFocus === 1, 'workspace archive dialog restores the captured settings trigger on unmount');
+
+  const savedWorkspaceRefresh = clientServices.workspaces.refresh;
+  const savedSidebarRefresh = clientServices.sessions.refresh;
+  let sidebarAttempts = 0;
+  let workspaceRefreshes = 0;
+  let stateRequests = 0;
+  let rejectStateRefresh = false;
+  clientServices.sessions.refresh = () => { sidebarAttempts += 1; throw new Error('sidebar refresh rejected'); };
+  clientServices.workspaces.refresh = async () => { workspaceRefreshes += 1; };
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/state')) {
+      stateRequests += 1;
+      if (rejectStateRefresh) throw new Error('state refresh rejected');
+      return { ok: true, status: 200, json: async () => ({ metadataStatus: 'ready', sessions: [] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
+  const pageHarness = createHookHarness(settingsRegistration.component);
+  const pageProps = { t, ...settingsRegistration.meta.inject() };
+  let pageTree = pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  let pageElements = collectElements(pageHarness.render(pageProps));
+  let restoredSettingsFocus = 0;
+  const settingsTrigger = pageElements.find((element) => element.type === 'button' && elementText(element) === t('workspaceArchive.settingsAction'));
+  settingsTrigger?.props.onClick({ currentTarget: { focus: () => { restoredSettingsFocus += 1; } } });
+  pageTree = pageHarness.render(pageProps);
+  const chooser = findComponentElement(pageTree, 'WorkspaceArchiveChooserDialog');
+  assert(chooser !== undefined, 'settings trigger opens the workspace chooser without a Host workspace-menu slot');
+  chooser.props.onChoose({ id: 'workspace-settings', title: 'Settings Project' });
+  pageTree = pageHarness.render(pageProps);
+  const refreshDialog = findComponentElement(pageTree, 'WorkspaceArchiveDialog');
+  assert(refreshDialog?.props.workspaceId === 'workspace-settings' && refreshDialog?.props.workspaceTitle === 'Settings Project',
+    'the settings-owned chooser opens confirmation for the selected workspace');
+  const findTab = (label) => pageElements.find((element) => element.type === 'button' && element.props?.role === 'tab' && elementText(element) === label);
+  const archivedTab = findTab(t('tab.archived'));
+  const historyTab = findTab(t('tab.history'));
+  const insightsTab = findTab(t('tab.insights'));
+  historyTab?.props.onClick();
+  pageTree = pageHarness.render(pageProps);
+  const historyBefore = findComponentElement(pageTree, 'HistoryPanel')?.props.key;
+  insightsTab?.props.onClick();
+  pageTree = pageHarness.render(pageProps);
+  const insightsBefore = findComponentElement(pageTree, 'StorageRetentionPanel')?.props.key;
+  rejectStateRefresh = true;
+  await refreshDialog.props.onApplied();
+  pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+  historyTab?.props.onClick();
+  pageTree = pageHarness.render(pageProps);
+  const historyAfter = findComponentElement(pageTree, 'HistoryPanel')?.props.key;
+  insightsTab?.props.onClick();
+  pageTree = pageHarness.render(pageProps);
+  const insightsAfter = findComponentElement(pageTree, 'StorageRetentionPanel')?.props.key;
+  assert(stateRequests >= 2 && sidebarAttempts === 1 && workspaceRefreshes === 1
+    && historyBefore === 'history-0' && historyAfter === 'history-1'
+    && insightsBefore === 'insights-0' && insightsAfter === 'insights-1',
+  'workspace apply refreshes independent consumers despite failures and remounts History and Storage panels');
+  const dialogHarness = createHookHarness(Dialog);
+  dialogHarness.render(refreshDialog.props);
+  dialogHarness.flushEffects();
+  dialogHarness.unmount();
+  assert(restoredSettingsFocus === 1, 'closing the settings-owned dialog restores the settings trigger exactly once');
+  pageHarness.unmount();
+  clientServices.sessions.refresh = savedSidebarRefresh;
+  clientServices.workspaces.refresh = savedWorkspaceRefresh;
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
@@ -4484,6 +5143,51 @@ console.log('\n[13d] client half — every array-children element uses the stati
   assert(offenders.length === 0, `array children always use jsxs (offenders: ${offenders.join(' | ') || 'none'})`);
 }
 
+console.log('\n[13e] client half — official Host slot compatibility and disposal');
+{
+  const cleanups = [];
+  const registrations = [];
+  const injectedSlots = [];
+  const disposalCtx = {
+    ...clientCtx,
+    locale: {
+      register: () => () => {},
+      bind: () => clientCtx.locale.bind('settings.archived-chats'),
+    },
+    slots: {
+      inject: (name, callback) => { injectedSlots.push(name); callback(); },
+      register: (meta, component) => { registrations.push({ meta, component }); return () => {}; },
+    },
+    effect: (factory) => {
+      const cleanup = factory();
+      if (typeof cleanup === 'function') cleanups.push(cleanup);
+    },
+  };
+  clientExports.apply(disposalCtx);
+  for (const cleanup of cleanups.reverse()) cleanup();
+  assert(injectedSlots.join('|') === 'settings.section|shell.overlay'
+    && registrations.length === 2
+    && registrations.some((entry) => entry.meta?.name === 'settings.section')
+    && registrations.some((entry) => entry.meta?.name === 'shell.overlay'),
+  'the plugin requests and registers only the two official Host slots');
+  assert(registrations.every((entry) => entry.meta?.store === undefined)
+    && !clientSource.includes('@deepseek-ai/dsh-client-store'),
+  'settings-owned workspace archive state has no optional client-store dependency');
+
+  const officialHostRegistrations = [];
+  clientExports.apply({
+    ...clientCtx,
+    locale: disposalCtx.locale,
+    slots: {
+      inject: (_name, callback) => callback(),
+      register: (meta, component) => { officialHostRegistrations.push({ meta, component }); return () => {}; },
+    },
+    effect: (factory) => { factory(); },
+  });
+  assert(officialHostRegistrations.map((entry) => entry.meta?.name).join('|') === 'settings.section|shell.overlay',
+  'an official Host without an unreleased workspace action slot preserves settings and archive notice');
+}
+
 console.log('\n[14] host half — an unreadable recycle catalog fails mutations closed');
 {
   const trashFile = join(testHome, 'plugin-data', 'archived-chats', 'trash.json');
@@ -4616,6 +5320,96 @@ console.log('\n[17] host half — export distinguishes a bad request from a bug 
   assert(warnings.length > warningCount, 'the internal failure left a diagnosable warning');
   assert(!warnings.slice(warningCount).join('\n').includes('internal invariant broken'),
     'the warning carries a stable code, not the raw message');
+}
+
+console.log('\n[18] host half — modern persistence reads work while unsupported purge preserves evidence');
+{
+  const modernHome = mkdtempSync(join(tmpdir(), 'dsh-archived-chats-modern-home-'));
+  process.env.DSH_HOME = modernHome;
+  const id = 'session-modern-read';
+  const header = { id, version: 2, cwd: '/modern', createdAt: 1786727000000, isSeeded: false };
+  const revision = 'modern-revision-1';
+  const modernEvents = [
+    { seq: 0, type: 'session/start', data: {} },
+    { seq: 1, type: 'session/title', data: { title: 'Modern persisted title' } },
+  ];
+  let closes = 0;
+  let reads = 0;
+  let disposeCalls = 0;
+  const modernPersistence = {
+    async list() { return [{ header, revision, eventCount: modernEvents.length, sizeBytes: 321 }]; },
+    async open(sessionId, access) {
+      assert(sessionId === id && access === 'read', 'modern adapter requests an exact read handle');
+      return {
+        header,
+        inheritedEventCount: 0,
+        async read(offset, length) {
+          reads += 1;
+          assert(offset === 0 && length === undefined, 'modern adapter reads the complete log from offset zero');
+          return modernEvents;
+        },
+        async close() { closes += 1; },
+      };
+    },
+  };
+  const modernState = { initialized: true, workspaceIds: ['modern-workspace'], archivedSessionIds: [id] };
+  const modernWorkspace = {
+    id: 'modern-workspace', title: 'Modern workspace', path: '/modern', sessionIds: new Set([id]),
+    async detachSession(sessionId) { this.sessionIds.delete(sessionId); },
+  };
+  const modernRegistry = {
+    state: modernState,
+    get archivedSessionIds() { return modernState.archivedSessionIds; },
+    list: () => [modernWorkspace],
+    async setState(next) { modernState.archivedSessionIds = next.archivedSessionIds; },
+    headers: new Map([[id, header]]),
+    sessionPaths: new Map(),
+    invalidSessionPaths: new Map(),
+  };
+  const modernRoutes = new Map();
+  const modernServices = {
+    webServer: { register: (route) => { modernRoutes.set(route.path, route.handler); return () => modernRoutes.delete(route.path); } },
+    workspaceRegistry: modernRegistry,
+    sessionPersistence: modernPersistence,
+    sessions: { get: () => undefined },
+    agents: { get: () => { disposeCalls += 1; return undefined; } },
+  };
+  apply({
+    get: (key) => modernServices[key],
+    on: () => {},
+    effect: (fn) => { fn(); },
+    logger: { warn: () => {}, info: () => {} },
+  });
+
+  const state = await call(modernRoutes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
+  assert(state.status === 200 && state.json().sessions[0]?.title === 'Modern persisted title',
+    `modern handle inspection powers archive reads (got ${state.status})`);
+  const stats = await call(modernRoutes, '/plugins/dsh-archived-chats/stats', mockReq('GET', {}));
+  assert(stats.status === 200 && stats.json().sessions[id]?.status === 'unavailable',
+    'modern read-only persistence reports physical storage measurement unavailable');
+  const moved = await call(modernRoutes, '/plugins/dsh-archived-chats/delete', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
+  ));
+  assert(moved.status === 200 && moved.json().trashed.includes(id), 'modern read-only session can enter the recycle bin with a protection snapshot');
+  const historyBefore = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  const purge = await call(modernRoutes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [id] }),
+  ));
+  const trashAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  const historyAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  assert(purge.status === 409 && purge.json().failed?.[0]?.reason === 'purge-unsupported',
+    `modern read-only purge refuses with the stable capability code (got ${purge.status})`);
+  assert(trashAfter.json().sessions[0]?.state === 'trashed', 'unsupported purge preserves the original recycle state');
+  const versionsBefore = historyBefore.json().sessions.flatMap((session) => session.versions);
+  const versionsAfter = historyAfter.json().sessions.flatMap((session) => session.versions);
+  assert(versionsBefore.length === 1 && versionsAfter.length === 1,
+    'unsupported purge preserves the protection snapshot');
+  assert(modernState.archivedSessionIds.includes(id) && modernWorkspace.sessionIds.has(id),
+    'unsupported purge preserves the original session and workspace ownership');
+  assert(disposeCalls === 0, 'unsupported purge never reaches live-session disposal');
+  assert(reads > 0 && closes === reads, 'every modern inspection closes its read handle');
+  rmSync(modernHome, { recursive: true, force: true });
+  process.env.DSH_HOME = testHome;
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.

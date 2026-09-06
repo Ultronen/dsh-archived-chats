@@ -1,7 +1,9 @@
 /**
- * Browser client entry — the Session Archive settings section. It keeps the
- * existing searchable archive manager and adds Archived, History, Recycle Bin,
- * Storage & Retention, and Origins & Branches views. History versions are
+ * Browser client entry — the Session Archive settings section with a workspace
+ * chooser and one-confirmation bulk archive flow. The flow stays inside the
+ * plugin-owned Settings surface and requires no workspace-row extension slot.
+ * The searchable manager includes Archived, History, Recycle Bin, Storage &
+ * Retention, and Origins & Branches views. History versions are
  * local, read-only previews and restore only as new archived copies. Removing an archived chat from
  * this plugin moves it to recoverable trash and
  * exposes immediate Undo. The recycle view has independent selection, scoped

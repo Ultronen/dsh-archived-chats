@@ -20,6 +20,26 @@ const expectedScreenshots = [
   'assets/screenshots/preview-08.png',
 ];
 
+test('public docs describe the settings-owned workspace archive flow', () => {
+  const docs = [
+    'README.md',
+    'README.zh-CN.md',
+    'docs/USER_GUIDE.md',
+    'docs/USER_GUIDE.zh-CN.md',
+    'docs/ARCHITECTURE.en.md',
+    'docs/ARCHITECTURE.md',
+  ].map((path) => readFileSync(join(root, path), 'utf8')).join('\n');
+
+  assert(!docs.includes("workspace row's ellipsis menu"));
+  assert(!docs.includes('工作区行的省略号菜单'));
+  assert(!docs.includes('public Harness workspace-action slot'));
+  assert(!docs.includes('Harness 公开的工作区操作 slot'));
+  assert(docs.includes('Settings → Session Archive'));
+  assert(docs.includes('设置 → 会话档案'));
+  assert(docs.includes('workspace chooser'));
+  assert(docs.includes('工作区选择器'));
+});
+
 test('package declares the verified minimum DeepSeek Harness version', () => {
   assert.equal(packageManifest.dsh?.engines?.dsh, '>=0.1.0-rc.7');
 });
@@ -96,6 +116,7 @@ test(`published ${packageVersion} package contains runtime, brand banner, fixed 
     'lib/lineage.js',
     'lib/history.js',
     'lib/history-restore.js',
+    'lib/workspace-bulk-archive.js',
     'docs/ARCHITECTURE.md',
     'docs/ARCHITECTURE.en.md',
   ]) assert(paths.has(required), `missing ${required}`);

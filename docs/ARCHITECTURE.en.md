@@ -10,7 +10,7 @@ The plugin has a Host service half and a browser client half:
 
 - The Host service in lib/index.js runs inside the DSH Web host, reads the workspace registry and session persistence, and exposes local HTTP routes.
 - The browser client in lib/client.js registers the Session Archive settings.section and renders state and actions.
-- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, lib/stats.js, lib/insights.js, lib/retention.js, lib/retention-service.js, and lib/lineage.js. lib/history.js owns capture, safe inventory, and preview authorization; lib/history-restore.js owns single-use restore-as-copy transactions. lib/trash.js owns the recycle catalog, lib/snapshot.js owns verified snapshots, and lib/recycle.js composes recycle lifecycle operations.
+- Pure domain logic lives in lib/export.js, lib/import.js, lib/restore.js, lib/metadata.js, lib/search.js, lib/stats.js, lib/insights.js, lib/retention.js, lib/retention-service.js, lib/lineage.js, and lib/workspace-bulk-archive.js. lib/persistence-compat.js narrows the current Host's handle-based reads to a private read-only view; lib/history.js owns capture, safe inventory, and preview authorization; lib/history-restore.js owns single-use restore-as-copy transactions. lib/trash.js owns the recycle catalog, lib/snapshot.js owns verified snapshots, and lib/recycle.js composes recycle lifecycle operations.
 
 The browser never reads session files directly. All reads and writes go through Host routes.
 
@@ -22,6 +22,9 @@ Current routes:
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 GET  /plugins/dsh-archived-chats/insights
+GET  /plugins/dsh-archived-chats/workspace-archive/workspaces
+POST /plugins/dsh-archived-chats/workspace-archive/preview
+POST /plugins/dsh-archived-chats/workspace-archive/apply
 POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/preview
 POST /plugins/dsh-archived-chats/retention/apply
@@ -52,6 +55,8 @@ POST /plugins/dsh-archived-chats/delete-all
 ~~~
 
 Every mutating route, plus preview, preview/image, search, history/preview, and history/preview/image, requires the `x-dsh-archived-chats: 1` header. `GET /history` returns only bounded safe inventory. History images require both the snapshot identity and the complete projected descriptor to match.
+
+Workspace archive lists only safe workspace summaries. Preview accepts exactly one workspace ID and creates a five-minute, single-use token/nonce for at most 2,000 ordered eligible IDs. Apply accepts only that token and nonce, never caller-selected IDs. Eligibility requires unarchived membership in the existing workspace, no non-idle Host agent, and an inspected live or persisted event log containing `turn/start`; an empty new-session window is classified as `session-empty`, while an inspection failure is `session-unavailable`, and both fail closed. On Hosts without agent status, a loaded session is conservatively considered live. Candidate inspection is bounded to eight concurrent reads. Each item revalidates membership, archive state, agent status, and conversation content inside the shared lifecycle queue, then invokes the public `workspaceRegistry.archiveSession()` receiver-bound to the registry. New chats after preview are excluded; an item that became live, empty, unavailable, archived, or detached is reported and skipped. Successful archives attempt History capture under the held lifecycle lock; a capture failure is reported without rolling back the archive, and later items continue. This feature changes neither workspace membership nor a workspace path or directory, and never moves a chat across workspaces. A Host without public `archiveSession` returns `workspace-archive-unsupported` without mutation.
 
 ## State and local data
 
@@ -129,9 +134,10 @@ Permanent purge persists `purge-pending` before physical writes, then removes ev
 
 ## Browser client
 
-client.js registers an order-30 settings.section and uses the public Harness overlay, state, and design tokens. The page state includes:
+client.js registers an order-30 `settings.section` plus a `shell.overlay`, and uses public Host archive services and design tokens. Workspace archive UI state stays inside the plugin-owned settings section and requires no workspace-action slot or shared client store. The page state includes:
 
 - A frame-wide archive success notice in `shell.overlay`: during its effect lifetime the plugin wraps public `workspaces.archiveSession` and starts history capture only after the original succeeds. Capture pauses the three-second dismissal; success resumes it, while failure retains retry-save without rolling back archive. View and Undo remain available.
+- An **Archive workspace chats** action in **Settings → Session Archive**: it opens a workspace chooser, then prepares the selected workspace and shows one confirmation with the exact eligible count, Archived destination, and only a nonzero live-skip count, with no visible session preview. Full success refreshes consumers and closes; any skipped, failed, or snapshot-failed outcome retains the per-item result until dismissed.
 - Archived sessions and workspace groups.
 - Search, type/project/tag filters, and sorting.
 - Tag and note editor.
@@ -139,6 +145,8 @@ client.js registers an order-30 settings.section and uses the public Harness ove
 - Archived, History, Recycle Bin, Storage & Retention, and Origins & Branches tabs. History requests safe inventory only on first activation and starts with groups collapsed. Snapshot preview reuses the conversation dialog with a visible snapshot timestamp. Restore confirmation focuses Cancel first and never places token/nonce in the render tree. Storage and relationship views retain on-demand loads, bounded dialogs, and read-only relationship projection.
 - Import preview, disabled conflicts, and restore results.
 - Responsive settings-page markers and sidebar refresh injection.
+
+When `MenuAction`, `defineStore`, and `sidebar.workspaces.workspace.action` are available, one handle declared per plugin apply is shared by the workspace action, `shell.overlay`, and `settings.section`. The Host menu owner closes its menu before invoking the contributed callback and supplies `restoreFocus`; the plugin keeps that callback only in its apply closure, while components receive actions and selector hooks from the slot renderer. Contributor disposal is the plugin's responsibility: apply cleanup marks the contribution disposed synchronously and the deferred callback checks that guard before retaining focus or opening state. The Host separately owns cancellation when its row/browser unmounts. Missing optional support omits only this action and dialog.
 
 The preview prefers Harness's publicly exported `MarkdownText`, `DisclosureRow`, and `JsonBlock`. When a public primitive is unavailable, only that content falls back to escaped plain text, native `details`/`summary`, or `pre`; the plugin never reaches into a private chat renderer. A tool result folds into an earlier call only when its `toolCallId` exactly matches the call's `callId`, consuming matches in chronological order. Unmatched results remain standalone, and errors use the semantic error token. Images are read from the protected route into Blob URLs, may load lazily before entering the viewport, and abort their read and call `URL.revokeObjectURL` when the preview closes or the image node unmounts.
 
@@ -150,6 +158,7 @@ The browser never mutates files directly. After an operation, the Host response 
 
 - All state-changing routes require POST and the guard header.
 - History responses exclude workspace/snapshot/attachment paths, raw events, notes, and confirmation tokens; logs contain only IDs and stable codes.
+- Workspace archive responses expose only safe workspace IDs/titles, eligible counts, session IDs/titles/timestamps in a confirmed preview, and stable per-item outcomes; workspace paths, event bodies, notes, attachment paths, and confirmation credentials stay out of logs and rendered results.
 - Import limits ZIP size, entries, paths, versions, and JSON structure, rejecting traversal, duplicates, and prototype-pollution keys.
 - Ordinary delete never invokes physical purge; only a committed recycle record can enter purge.
 - Snapshot and recycle documents use `0600`, directories use `0700`, and snapshot files are reopened with write access before sync; publication remains temporary write, sync, atomic rename with matching durability semantics on Windows, macOS, and Linux.
@@ -158,7 +167,11 @@ The browser never mutates files directly. After an operation, the Host response 
 
 ## Compatibility and testing
 
-The plugin adapts through Host capability detection: archive reads, attachment reads, persistence writes, and live-session lifecycle support are evaluated independently, and missing capabilities must degrade safely or return explicit errors. Import, History restore-as-copy, and snapshot fallback when the original is missing all write through the public `create` / `append` / `locate` capability, or a dedicated restore entry point where the Host offers one; only a Host exposing neither returns `restore-unsupported` without mutation. A capability set that no shipped Host satisfies is not an acceptable guard — it makes the feature permanently dead rather than gracefully degraded. Back up the complete plugin-data directory before downgrading to a release that does not display History or understand recycle snapshots.
+The plugin adapts through Host capability detection: archive reads, attachment reads, persistence writes, physical location, and live-session lifecycle support are evaluated independently, and missing capabilities must degrade safely or return explicit errors. A legacy persistence object with native `inspect` is retained unchanged. The current Host's `list()` snapshots and `open(id, 'read')` handles are adapted into a private `list` / `listSnapshots` / `inspect` read view; every inspection reads from offset 0 and closes its handle after success or failure. The view does not invent `create`, `append`, or `locate`. Ordinary sessions remain browsable, exportable, and snapshot-capable, while session-directory accounting, restore writes, and permanent purge are unavailable through this read-only view. Without physical location, purge returns `purge-unsupported` before changing recycle state, snapshots, pending markers, or live sessions.
+
+Snapshot and ZIP schema v1 cannot preserve `inheritedEventCount`. When a current read handle reports an inherited prefix greater than zero, the adapter returns `session-inspection-unsupported` before reading events and still closes the handle, avoiding a silently flattened branch history. Workspace archive itself retains the Host's successful result, while the associated History capture reports its existing per-item snapshot failure. This UI change does not widen the snapshot or restore protocol.
+
+On Hosts with the compatible legacy writer surface, Import, History restore-as-copy, and snapshot fallback when the original is missing still write through the public `create` / `append` / `locate` capability, or a dedicated restore entry point where the Host offers one; only a Host exposing neither returns `restore-unsupported` without mutation. A capability set that no shipped Host satisfies is not an acceptable guard — it makes the feature permanently dead rather than gracefully degraded. Back up the complete plugin-data directory before downgrading to a release that does not display History or understand recycle snapshots.
 
 Coverage includes:
 
