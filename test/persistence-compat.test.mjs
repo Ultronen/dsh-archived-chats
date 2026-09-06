@@ -10,6 +10,35 @@ const HEADER = Object.freeze({
   isSeeded: false,
 });
 
+test('preserves the modern public locate contract for a session-scoped purge location', async () => {
+  const raw = {
+    async list() { return [{ header: HEADER, revision: 'rev' }]; },
+    async open() { throw new Error('unused'); },
+    async locate(header) {
+      assert.equal(this, raw);
+      assert.equal(header, HEADER);
+      return { kind: 'jsonl', path: '/sessions/session-modern/session.v2.jsonl' };
+    },
+  };
+  const view = resolvePersistenceCompat(raw);
+  assert.deepEqual(await view.locate(HEADER), {
+    kind: 'jsonl',
+    path: '/sessions/session-modern/session.v2.jsonl',
+  });
+  raw.locate = async () => undefined;
+  assert.equal(await view.locate(HEADER), undefined);
+  for (const location of [
+    { kind: '', path: '/sessions/session-modern/session.v2.jsonl' },
+    { kind: 'jsonl', path: 'session-modern/session.v2.jsonl' },
+    { path: '/sessions/session-modern/session.v2.jsonl' },
+  ]) {
+    raw.locate = async () => location;
+    await assert.rejects(view.locate(HEADER), { code: 'session-location-unavailable' });
+  }
+  assert.equal(view.create, undefined);
+  assert.equal(view.append, undefined);
+});
+
 test('preserves a legacy inspection surface and its method receiver', async () => {
   const legacy = {
     marker: 'legacy',

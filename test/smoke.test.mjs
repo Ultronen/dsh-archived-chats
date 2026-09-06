@@ -336,25 +336,30 @@ assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claud
 console.log('\n[1a] workspace bulk archive routes');
 {
   const id = 'session-workspace-cold';
+  const blankId = 'session-workspace-blank';
   const staleId = 'session-workspace-stale';
   const workspace = workspaces[0];
   const headers = [
     { id, createdAt: 1786726700000, cwd: '/workspace/private' },
+    { id: blankId, createdAt: 1786726750000, cwd: '/workspace/private' },
     { id: staleId, createdAt: 1786726800000, cwd: '/workspace/private' },
   ];
   headerRows.push(...headers);
   registry.headers.set(id, headers[0]);
-  registry.headers.set(staleId, headers[1]);
+  registry.headers.set(blankId, headers[1]);
+  registry.headers.set(staleId, headers[2]);
   events[id] = [
+    { type: 'turn/start', data: {} },
     { type: 'session/title', data: { title: '批量归档预览标题' } },
     { type: 'user/message', data: { content: [{ type: 'text', text: 'workspace-body-secret' }] } },
   ];
-  events[staleId] = [];
-  workspace.sessionIds.push(id);
+  events[blankId] = [];
+  events[staleId] = [{ type: 'turn/start', data: {} }];
+  workspace.sessionIds.push(blankId, id);
 
   const summaries = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('GET', {}));
   assert(summaries.status === 200 && summaries.json().workspaces.some((item) => item.id === 'ws-1' && item.eligibleCount === 1),
-    `workspace summaries expose eligible cold sessions (got ${summaries.status}: ${summaries.body})`);
+    `workspace summaries exclude blank new-session windows (got ${summaries.status}: ${summaries.body})`);
   assert(!JSON.stringify(summaries.json()).includes('/ws/') && !JSON.stringify(summaries.json()).includes('workspace-body-secret'),
     'workspace summaries expose no paths or session content');
   const wrongSummaryMethod = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/workspaces', mockReq('POST', {}));
@@ -397,7 +402,10 @@ console.log('\n[1a] workspace bulk archive routes');
   headerRows.push(...concurrencyHeaders);
   for (const header of concurrencyHeaders) {
     registry.headers.set(header.id, header);
-    events[header.id] = [{ type: 'session/title', data: { title: `Concurrent ${header.id}` } }];
+    events[header.id] = [
+      { type: 'turn/start', data: {} },
+      { type: 'session/title', data: { title: `Concurrent ${header.id}` } },
+    ];
   }
   workspace.sessionIds.push(...concurrencyIds);
   const inspect = persistence.inspect;
@@ -418,20 +426,21 @@ console.log('\n[1a] workspace bulk archive routes');
   };
   const concurrentPreview = await call(routes, '/plugins/dsh-archived-chats/workspace-archive/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, '{"workspaceId":"ws-1"}'));
   persistence.inspect = inspect;
-  assert(concurrentPreview.status === 200 && concurrentPreview.json().sessions.map((item) => item.id).join(',') === concurrencyIds.join(','),
-    'workspace preview retains candidate order while enriching titles');
+  const readableConcurrencyIds = concurrencyIds.filter((sessionId) => sessionId !== failedInspectionId);
+  assert(concurrentPreview.status === 200 && concurrentPreview.json().sessions.map((item) => item.id).join(',') === readableConcurrencyIds.join(','),
+    'workspace preview retains readable candidate order while excluding an unconfirmed conversation');
   const concurrentRows = concurrentPreview.json().sessions;
-  const failedInspectionIndex = concurrencyIds.indexOf(failedInspectionId);
-  assert(inspectedIds.length === concurrencyIds.length && new Set(inspectedIds).size === concurrencyIds.length,
-    'workspace preview inspects every candidate exactly once while enriching titles');
-  assert(concurrentRows[failedInspectionIndex]?.id === failedInspectionId && concurrentRows[failedInspectionIndex]?.title === null,
-    'workspace preview retains a failed inspection in place with a null title');
-  assert(concurrentRows[failedInspectionIndex - 1]?.title === `Concurrent ${concurrencyIds[failedInspectionIndex - 1]}`
-    && concurrentRows[failedInspectionIndex + 1]?.title === `Concurrent ${concurrencyIds[failedInspectionIndex + 1]}`,
-  'workspace preview preserves neighboring successful titles around an inspection fallback');
+  assert(inspectedIds.length === concurrencyIds.length + 1 && new Set(inspectedIds).size === concurrencyIds.length + 1
+    && inspectedIds.includes(blankId) && concurrencyIds.every((sessionId) => inspectedIds.includes(sessionId)),
+  'workspace preview inspects each unarchived candidate exactly once while checking conversation presence');
+  assert(concurrentPreview.json().skipped.some((item) => item.id === failedInspectionId && item.reason === 'session-unavailable'),
+    'workspace preview fails closed when conversation content cannot be confirmed');
+  assert(concurrentRows.find((item) => item.id === concurrencyIds[6])?.title === `Concurrent ${concurrencyIds[6]}`
+    && concurrentRows.find((item) => item.id === concurrencyIds[8])?.title === `Concurrent ${concurrencyIds[8]}`,
+  'workspace preview preserves neighboring readable titles around an unavailable candidate');
   assert(maxConcurrentInspections <= 8, `workspace preview bounds persistence inspections (got ${maxConcurrentInspections})`);
 
-  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId && !concurrencyIds.includes(sessionId));
+  workspace.sessionIds = workspace.sessionIds.filter((sessionId) => sessionId !== id && sessionId !== blankId && sessionId !== staleId && !concurrencyIds.includes(sessionId));
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((sessionId) => sessionId !== id && sessionId !== staleId);
   for (const header of [...headers, ...concurrencyHeaders]) {
     headerRows.splice(headerRows.indexOf(header), 1);
@@ -2405,7 +2414,7 @@ console.log('\n[11] client half — settings section registration');
     && clientCalls.localeRegister[0].dicts.en['history.clear'] === 'Clear history versions'
     && clientCalls.localeRegister[0].dicts.en['history.clearTitle'] === 'Clear all history versions?',
   'English History preview, restore, and deletion copy is localized');
-	  assert(clientCalls.slotRegister.length === 3, `settings, shell overlay, and workspace menu action register exactly three times (got ${clientCalls.slotRegister.length})`);
+	  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice without requiring an unreleased Host slot (got ${clientCalls.slotRegister.length})`);
 	  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
 	  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
 	  const workspaceActionRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'sidebar.workspaces.workspace.action');
@@ -2421,10 +2430,8 @@ console.log('\n[11] client half — settings section registration');
 	    && overlayRegistration?.meta?.locale === 'settings.archived-chats'
 	    && typeof overlayRegistration?.component === 'function',
 	  'archive success notice registers in the frame-wide shell overlay');
-	  assert(workspaceActionRegistration?.meta?.id === 'archived-chats-workspace-archive'
-	    && workspaceActionRegistration.meta.store === settingsRegistration.meta.store
-	    && workspaceActionRegistration.meta.store === overlayRegistration.meta.store,
-	  'workspace menu action, shell overlay, and settings section share one per-apply declared store handle');
+	  assert(workspaceActionRegistration === undefined,
+	  'the public plugin does not register an unreleased workspace-menu Host slot');
   const noticeController = overlayRegistration?.meta?.inject?.().controller;
   const savedNoticeFetch = globalThis.fetch;
   let noticeUndoRequest = null;
@@ -2658,10 +2665,15 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
 
   const defaultTree = harness.render({ t, refreshSidebar: () => {} });
   const defaultElements = collectElements(defaultTree);
-  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
-  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+	  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+	  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
+	  const workspaceArchiveEntry = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量归档工作区');
+	  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
+	  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
+	  assert(workspaceArchiveEntry !== undefined, 'archive settings exposes workspace bulk archive without a Host menu slot');
+	  workspaceArchiveEntry?.props.onClick({ currentTarget: { focus: () => {} } });
+	  const workspaceArchiveFlow = findComponentElement(harness.render({ t, refreshSidebar: () => {} }), 'WorkspaceArchiveChooserDialog');
+	  assert(workspaceArchiveFlow !== undefined, 'the settings-owned workspace action opens the plugin workspace chooser');
   assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '空间与策略'), 'archive manager exposes Storage & Retention tab');
   assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '来源与分支'), 'archive manager names the relationship view by its user-visible purpose');
 
@@ -4414,6 +4426,13 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(JSON.parse(previewRequest?.options.body ?? '{}').scope === 'trash', 'recycle preview is explicitly trash-scoped');
 
   const restoreButton = elements.find((element) => element.type === 'button' && elementText(element) === '恢复' && element.props?.['data-session-id'] === 'trash-a');
+  const recycleFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ restored: [], failed: [{ id: 'trash-a', reason: 'trash-state-conflict' }] }) });
+  await restoreButton?.props.onClick();
+  tree = harness.render({ t, refreshSidebar: () => {} });
+  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('状态已变化'), 'restore renders the structured conflict reason instead of a raw HTTP status');
+  assert(elementText(tree).includes('Trash Alpha'), 'failed restore retains its recycle row');
+  globalThis.fetch = recycleFetch;
   await restoreButton?.props.onClick();
   tree = harness.render({ t, refreshSidebar: () => {} });
   elements = collectElements(tree);
@@ -4430,6 +4449,11 @@ console.log('\n[11f] client half — recycle navigation and management');
   const purgeDialog = findComponentElement(tree, 'ConfirmDialog');
   assert(purgeDialog?.props.title === '永久删除回收站中的会话？', 'permanent purge opens a distinct accessible confirmation');
   assert(String(purgeDialog?.props.body).includes('原会话和保护快照'), 'permanent purge copy names original and snapshot removal');
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ purged: [], failed: [{ id: 'trash-b', reason: 'purge-unsupported' }] }) });
+  await purgeDialog?.props.onConfirm();
+  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
+  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('不支持永久删除'), 'purge renders the missing capability and keeps failed rows');
+  globalThis.fetch = recycleFetch;
   await purgeDialog?.props.onConfirm();
   assert(recycleSidebarRefreshes === 1, 'permanent purge re-baselines the sidebar so no deleted ungrouped chat remains');
 
@@ -4523,13 +4547,34 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
           : {};
     return { ok: true, status: 200, json: async () => payload };
   };
-  const t = clientCtx.locale.bind('settings.archived-chats');
-  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
-  assert(typeof Dialog === 'function', 'workspace bulk archive exposes its dialog component for focused verification');
-  assert(typeof clientExports.__test.fetchWorkspaceArchiveWorkspaces === 'function'
-    && typeof clientExports.__test.previewWorkspaceArchive === 'function'
-    && typeof clientExports.__test.applyWorkspaceArchive === 'function', 'workspace bulk archive exposes guarded request helpers');
-  const harness = createHookHarness(Dialog);
+	  const t = clientCtx.locale.bind('settings.archived-chats');
+	  const Chooser = clientExports.__test.WorkspaceArchiveChooserDialog;
+	  const Dialog = clientExports.__test.WorkspaceArchiveDialog;
+	  assert(typeof Chooser === 'function', 'workspace bulk archive exposes its settings-owned workspace chooser');
+	  assert(typeof Dialog === 'function', 'workspace bulk archive exposes its dialog component for focused verification');
+	  assert(typeof clientExports.__test.fetchWorkspaceArchiveWorkspaces === 'function'
+	    && typeof clientExports.__test.previewWorkspaceArchive === 'function'
+	    && typeof clientExports.__test.applyWorkspaceArchive === 'function', 'workspace bulk archive exposes guarded request helpers');
+	  let chosenWorkspace = null;
+	  if (typeof Chooser === 'function') {
+	    const chooserHarness = createHookHarness(Chooser);
+	    const chooserProps = {
+	      t,
+	      onChoose: (workspace) => { chosenWorkspace = workspace; },
+	      onClose: () => {},
+	    };
+	    chooserHarness.render(chooserProps);
+	    chooserHarness.flushEffects();
+	    await new Promise((resolve) => setTimeout(resolve, 0));
+	    const chooserTree = chooserHarness.render(chooserProps);
+	    const chooserElements = collectElements(chooserTree);
+	    const workspaceChoice = chooserElements.find((element) => element.props?.['data-workspace-archive-choice'] === 'workspace-1');
+	    assert(elementText(chooserTree).includes('Project One') && elementText(chooserTree).includes('2'), 'workspace chooser lists safe workspace titles and eligible counts');
+	    workspaceChoice?.props.onClick();
+	    assert(chosenWorkspace?.id === 'workspace-1' && chosenWorkspace?.title === 'Project One', 'workspace chooser passes only the selected workspace summary into confirmation');
+	    chooserHarness.unmount();
+	  }
+	  const harness = createHookHarness(Dialog);
   const props = {
     t,
     workspaceId: 'workspace-1',
@@ -4561,7 +4606,7 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   assert(elementText(tree).includes('这会将「Project One」中的会话归档。之后你可以在会话档案的“已归档”中找到它们。')
     && !elementText(tree).includes('项目本身不会改变'), 'workspace confirmation names the destination without unrequested contrast copy');
   const skippedLive = elements.find((element) => element.props?.['data-workspace-archive-skipped-live'] === '1');
-  assert(elementText(skippedLive) === '将跳过 1 个正在使用的会话。'
+  assert(elementText(skippedLive) === '将跳过 1 个仍在运行或状态未确认的会话。'
     && !elementText(tree).includes('session-live') && !elementText(tree).includes('session-archived'),
   'workspace confirmation summarizes only nonzero live skips without exposing ids or other reasons');
   assert(!elements.some((element) => element.type === 'select')
@@ -4645,7 +4690,7 @@ console.log('\n[11i] client half — workspace archive recovery and completed co
   tree = completedHarness.render(completedProps); let elements = collectElements(tree);
   await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
   tree = completedHarness.render(completedProps);
-  assert(completedCalls === 0 && elementText(tree).includes('正在使用中，已跳过') && elementText(tree).includes('归档失败') && elementText(tree).includes('历史快照未保存') && !elementText(tree).includes('captured'), 'completed 409 renders localized skipped, failed, and snapshot-failed results without refreshing');
+  assert(completedCalls === 0 && elementText(tree).includes('仍在运行或状态未确认，已跳过') && elementText(tree).includes('归档失败') && elementText(tree).includes('历史快照未保存') && !elementText(tree).includes('captured'), 'completed 409 renders localized skipped, failed, and snapshot-failed results without refreshing');
   completedHarness.unmount();
   let resolvePreviewA;
   globalThis.fetch = async (url, options = {}) => {
@@ -4878,7 +4923,7 @@ console.log('\n[11j] client half — workspace archive final coverage');
   documentListeners.get('keydown')?.({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => {} });
   assert(reverseTrapped && forwardTrapped && documentMock.activeElement === first && closeCalls === 1, 'workspace archive dialog wraps reverse and forward Tab and closes on Escape');
   focusHarness.unmount();
-  assert(restoredFocus === 1, 'workspace archive dialog restores the captured workspace-menu trigger on unmount');
+  assert(restoredFocus === 1, 'workspace archive dialog restores the captured settings trigger on unmount');
 
   const savedWorkspaceRefresh = clientServices.workspaces.refresh;
   const savedSidebarRefresh = clientServices.sessions.refresh;
@@ -4897,39 +4942,21 @@ console.log('\n[11j] client half — workspace archive final coverage');
     return { ok: true, status: 200, json: async () => ({}) };
   };
   const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
-  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
-  const actionRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'sidebar.workspaces.workspace.action');
-  const archiveStore = actionRegistration.meta.store.create();
-  const useArchiveStore = (selector) => selector(archiveStore.getSnapshot());
-  let deferredAction = null;
-  let restoredMenuFocus = 0;
-  const actionTree = actionRegistration.component({
-    t,
-    workspaceId: 'workspace-menu',
-    workspaceTitle: 'Menu Project',
-    selectAction: (callback) => { deferredAction = callback; },
-    actions: archiveStore.actions,
-    ...actionRegistration.meta.inject(),
-  });
-  assert(elementText(actionTree) === '归档会话', 'workspace row menu uses the approved concise archive action label');
-  collectElements(actionTree).find((element) => element.props?.role === 'menuitem')?.props.onClick();
-  assert(archiveStore.getSnapshot().workspaceArchive === null && typeof deferredAction === 'function', 'workspace menu selection defers opening until the owner closes its menu');
-  deferredAction(() => { restoredMenuFocus += 1; });
-  assert(archiveStore.getSnapshot().workspaceArchive?.workspaceId === 'workspace-menu', 'deferred workspace menu action opens the shared overlay for the supplied row');
-
-  const overlayTree = overlayRegistration.component({
-    t,
-    useStore: useArchiveStore,
-    actions: archiveStore.actions,
-    ...overlayRegistration.meta.inject(),
-  });
-  const refreshDialog = findComponentElement(overlayTree, 'WorkspaceArchiveDialog');
-  assert(refreshDialog?.props.workspaceTitle === 'Menu Project', 'the shared shell overlay receives the selected workspace without reading plugin context');
-
   const pageHarness = createHookHarness(settingsRegistration.component);
-  const pageProps = { t, useStore: useArchiveStore, ...settingsRegistration.meta.inject() };
+  const pageProps = { t, ...settingsRegistration.meta.inject() };
   let pageTree = pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
   let pageElements = collectElements(pageHarness.render(pageProps));
+  let restoredSettingsFocus = 0;
+  const settingsTrigger = pageElements.find((element) => element.type === 'button' && elementText(element) === t('workspaceArchive.settingsAction'));
+  settingsTrigger?.props.onClick({ currentTarget: { focus: () => { restoredSettingsFocus += 1; } } });
+  pageTree = pageHarness.render(pageProps);
+  const chooser = findComponentElement(pageTree, 'WorkspaceArchiveChooserDialog');
+  assert(chooser !== undefined, 'settings trigger opens the workspace chooser without a Host workspace-menu slot');
+  chooser.props.onChoose({ id: 'workspace-settings', title: 'Settings Project' });
+  pageTree = pageHarness.render(pageProps);
+  const refreshDialog = findComponentElement(pageTree, 'WorkspaceArchiveDialog');
+  assert(refreshDialog?.props.workspaceId === 'workspace-settings' && refreshDialog?.props.workspaceTitle === 'Settings Project',
+    'the settings-owned chooser opens confirmation for the selected workspace');
   const findTab = (label) => pageElements.find((element) => element.type === 'button' && element.props?.role === 'tab' && elementText(element) === label);
   const archivedTab = findTab(t('tab.archived'));
   const historyTab = findTab(t('tab.history'));
@@ -4953,12 +4980,11 @@ console.log('\n[11j] client half — workspace archive final coverage');
     && historyBefore === 'history-0' && historyAfter === 'history-1'
     && insightsBefore === 'insights-0' && insightsAfter === 'insights-1',
   'workspace apply refreshes independent consumers despite failures and remounts History and Storage panels');
-  archiveStore.actions.close();
   const dialogHarness = createHookHarness(Dialog);
   dialogHarness.render(refreshDialog.props);
   dialogHarness.flushEffects();
   dialogHarness.unmount();
-  assert(restoredMenuFocus === 1, 'closing the shell-owned dialog invokes the captured owner restore callback exactly once');
+  assert(restoredSettingsFocus === 1, 'closing the settings-owned dialog restores the settings trigger exactly once');
   pageHarness.unmount();
   clientServices.sessions.refresh = savedSidebarRefresh;
   clientServices.workspaces.refresh = savedWorkspaceRefresh;
@@ -5117,10 +5143,11 @@ console.log('\n[13d] client half — every array-children element uses the stati
   assert(offenders.length === 0, `array children always use jsxs (offenders: ${offenders.join(' | ') || 'none'})`);
 }
 
-console.log('\n[13e] client half — workspace action compatibility and disposal');
+console.log('\n[13e] client half — official Host slot compatibility and disposal');
 {
   const cleanups = [];
   const registrations = [];
+  const injectedSlots = [];
   const disposalCtx = {
     ...clientCtx,
     locale: {
@@ -5128,7 +5155,7 @@ console.log('\n[13e] client half — workspace action compatibility and disposal
       bind: () => clientCtx.locale.bind('settings.archived-chats'),
     },
     slots: {
-      inject: (_name, callback) => callback(),
+      inject: (name, callback) => { injectedSlots.push(name); callback(); },
       register: (meta, component) => { registrations.push({ meta, component }); return () => {}; },
     },
     effect: (factory) => {
@@ -5137,63 +5164,28 @@ console.log('\n[13e] client half — workspace action compatibility and disposal
     },
   };
   clientExports.apply(disposalCtx);
-  const disposalAction = registrations.find((entry) => entry.meta?.name === 'sidebar.workspaces.workspace.action');
-  const disposalStore = disposalAction.meta.store.create();
-  let deferred = null;
-  let retainedFocus = 0;
-  const actionTree = disposalAction.component({
-    t: clientCtx.locale.bind('settings.archived-chats'),
-    workspaceId: 'dispose-workspace',
-    workspaceTitle: 'Dispose workspace',
-    selectAction: (callback) => { deferred = callback; },
-    actions: disposalStore.actions,
-    ...disposalAction.meta.inject(),
-  });
-  collectElements(actionTree).find((element) => element.props?.role === 'menuitem')?.props.onClick();
   for (const cleanup of cleanups.reverse()) cleanup();
-  deferred(() => { retainedFocus += 1; });
-  assert(disposalStore.getSnapshot().workspaceArchive === null && retainedFocus === 0,
-    'a deferred workspace action invoked after plugin disposal cannot retain focus or open the overlay');
+  assert(injectedSlots.join('|') === 'settings.section|shell.overlay'
+    && registrations.length === 2
+    && registrations.some((entry) => entry.meta?.name === 'settings.section')
+    && registrations.some((entry) => entry.meta?.name === 'shell.overlay'),
+  'the plugin requests and registers only the two official Host slots');
+  assert(registrations.every((entry) => entry.meta?.store === undefined)
+    && !clientSource.includes('@deepseek-ai/dsh-client-store'),
+  'settings-owned workspace archive state has no optional client-store dependency');
 
-  const oldHostRegistrations = [];
+  const officialHostRegistrations = [];
   clientExports.apply({
     ...clientCtx,
     locale: disposalCtx.locale,
     slots: {
-      inject: (name, callback) => { if (name !== 'sidebar.workspaces.workspace.action') callback(); },
-      register: (meta, component) => { oldHostRegistrations.push({ meta, component }); return () => {}; },
-    },
-    effect: (factory) => { factory(); },
-  });
-  assert(oldHostRegistrations.some((entry) => entry.meta?.name === 'settings.section')
-    && oldHostRegistrations.some((entry) => entry.meta?.name === 'shell.overlay')
-    && !oldHostRegistrations.some((entry) => entry.meta?.name === 'sidebar.workspaces.workspace.action'),
-  'an older Host without the workspace action slot preserves the settings section and archive notice');
-
-  let missingRuntimeDefinition = null;
-  const missingRuntimeWindow = { ...windowMock, __ModuleLoader__: { load: (definition) => { missingRuntimeDefinition = definition; } } };
-  const loadMissingRuntime = new Function('window', 'document', 'require', clientSource);
-  loadMissingRuntime(missingRuntimeWindow, documentMock, (name) => {
-    if (name === '@deepseek-ai/dsh-client-store') throw new Error('module unavailable');
-    return moduleTable[name];
-  });
-  const missingRuntimeExports = missingRuntimeDefinition.factory((name) => {
-    if (name === '@deepseek-ai/dsh-client-store') throw new Error('module unavailable');
-    return moduleTable[name];
-  });
-  const missingRuntimeRegistrations = [];
-  missingRuntimeExports.apply({
-    ...clientCtx,
-    locale: disposalCtx.locale,
-    slots: {
       inject: (_name, callback) => callback(),
-      register: (meta, component) => { missingRuntimeRegistrations.push({ meta, component }); return () => {}; },
+      register: (meta, component) => { officialHostRegistrations.push({ meta, component }); return () => {}; },
     },
     effect: (factory) => { factory(); },
   });
-  assert(missingRuntimeRegistrations.length === 2
-    && missingRuntimeRegistrations.every((entry) => entry.meta.store === undefined),
-  'missing optional store support skips only workspace archive UI state and keeps existing registrations');
+  assert(officialHostRegistrations.map((entry) => entry.meta?.name).join('|') === 'settings.section|shell.overlay',
+  'an official Host without an unreleased workspace action slot preserves settings and archive notice');
 }
 
 console.log('\n[14] host half — an unreadable recycle catalog fails mutations closed');

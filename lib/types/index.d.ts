@@ -3,6 +3,8 @@
  * (state, stats, insights, retention/policy, retention/preview, retention/apply,
  * lineage, history, history/capture, history/preview, history/preview/image,
  * history/restore/preview, history/restore, history/delete, history/delete-all,
+ * workspace-archive/workspaces, workspace-archive/preview,
+ * workspace-archive/apply,
  * preview, preview/image, search,
  * export, import/inspect, import/restore,
  * metadata, trash, trash/restore, trash/purge, trash/empty, unarchive,

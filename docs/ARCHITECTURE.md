@@ -56,7 +56,7 @@ POST /plugins/dsh-archived-chats/delete-all
 
 所有修改路由以及会返回对话内容的 preview、preview/image、search、history/preview 和 history/preview/image 路由都要求 `x-dsh-archived-chats: 1` 请求头。`GET /history` 只返回有界安全清单；历史图片只在快照身份与完整描述符同时匹配时返回。
 
-工作区归档只列出安全的工作区摘要。preview 只接受一个工作区 ID，并为最多 2,000 条符合条件且有序的会话 ID 签发 5 分钟有效、只能使用一次的 token/nonce；apply 只接受该 token 和 nonce，绝不接受调用方指定的会话 ID。符合条件是指会话仍属于现有工作区、尚未归档，且不在 Host `sessions` 存储中。每一项都会在共享生命周期队列内重新检查归属、归档状态和驻留状态，然后以 registry 为 receiver 调用公开的 `workspaceRegistry.archiveSession()`。预览后新增的聊天不会纳入；已变为运行中、已归档或脱离工作区的项目会明确跳过。成功归档后会在持有生命周期锁时尝试保存历史版本；抓取失败会报告但不撤销归档，后续项目仍继续。此功能不改变工作区成员关系、路径或目录，也不会在工作区之间移动聊天。Host 没有公开 `archiveSession` 时返回 `workspace-archive-unsupported`，且不作修改。
+工作区归档只列出安全的工作区摘要。preview 只接受一个工作区 ID，并为最多 2,000 条符合条件且有序的会话 ID 签发 5 分钟有效、只能使用一次的 token/nonce；apply 只接受该 token 和 nonce，绝不接受调用方指定的会话 ID。符合条件要求会话仍属于现有工作区、尚未归档、没有非空闲 Host agent，并且检查到活动或持久化事件日志包含 `turn/start`；空白的新会话窗口标记为 `session-empty`，检查失败标记为 `session-unavailable`，两者都会保守跳过。Host 不提供 agent 状态时，已加载会话会被保守视为活动；候选内容检查最多并发读取 8 条。每一项都会在共享生命周期队列内重新检查归属、归档状态、agent 状态和对话内容，然后以 registry 为 receiver 调用公开的 `workspaceRegistry.archiveSession()`。预览后新增的聊天不会纳入；已变为运行中、空白、不可确认、已归档或脱离工作区的项目会明确跳过。成功归档后会在持有生命周期锁时尝试保存历史版本；抓取失败会报告但不撤销归档，后续项目仍继续。此功能不改变工作区成员关系、路径或目录，也不会在工作区之间移动聊天。Host 没有公开 `archiveSession` 时返回 `workspace-archive-unsupported`，且不作修改。
 
 ## 状态和本地数据
 
@@ -134,10 +134,10 @@ import/inspect 只接受本插件版本一导出的 ZIP。Host 以有界压缩�
 
 ## 浏览器客户端
 
-client.js 注册 order 30 的 settings.section，并使用 Harness 公开的工作区操作 slot、浮层、声明式 store 和设计令牌。页面状态包括：
+client.js 注册 order 30 的 `settings.section` 与 `shell.overlay`，并使用 Host 公开的归档服务和设计令牌。工作区归档 UI 状态保存在插件自己的设置区内，不依赖工作区操作 slot 或共享客户端 store。页面状态包括：
 
 - `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后发起历史抓取。抓取进行时暂停 3 秒关闭计时，成功后恢复，失败时显示不回滚归档的重试保存；查看与撤销继续可用。
-- 每个工作区行省略号菜单中的 **归档会话** 操作：自动准备该工作区，显示一次包含精确符合条件数量、已归档去向和仅在非零时出现的活动会话跳过数量的确认，不显示会话预览。全部成功后刷新消费者并关闭；存在跳过、失败或快照失败时保留逐项结果直至关闭。
+- **设置 → 会话档案** 中的 **批量归档工作区** 操作：先打开工作区选择器，再准备所选工作区并显示一次包含精确符合条件数量、已归档去向和仅在非零时出现的活动会话跳过数量的确认，不显示会话预览。全部成功后刷新消费者并关闭；存在跳过、失败或快照失败时保留逐项结果直至关闭。
 - 归档列表和工作区分组。
 - 搜索、类型/项目/标签筛选和排序。
 - 标签备注编辑器。

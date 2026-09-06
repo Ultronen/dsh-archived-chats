@@ -9,6 +9,7 @@ function fixture(options = {}) {
   let currentTime = options.now ?? NOW;
   const archived = new Set(options.archivedIds ?? ['already-archived']);
   const live = new Set(options.liveIds ?? ['session-live']);
+  const blank = new Set(options.blankIds ?? []);
   const calls = { archive: [], capture: [], lifecycle: [] };
   const workspace = {
     id: 'workspace-a',
@@ -51,6 +52,7 @@ function fixture(options = {}) {
   const dependencies = {
     registry,
     sessions,
+    inspectConversation: async (id) => ({ hasConversation: !blank.has(String(id)) }),
     historyService,
     lifecycle,
     now: () => new Date(currentTime),
@@ -58,7 +60,7 @@ function fixture(options = {}) {
   };
   const service = createWorkspaceBulkArchiveService(dependencies);
   return {
-    service, registry, workspace, archived, live, calls, dependencies,
+    service, registry, workspace, archived, live, blank, calls, dependencies,
     advance(ms) { currentTime += ms; },
   };
 }
@@ -69,6 +71,7 @@ test('rejects hosts without every required public capability', () => {
     { registry: { ...dependencies.registry, list: undefined } },
     { registry: { ...dependencies.registry, archiveSession: undefined } },
     { sessions: {} },
+    { inspectConversation: null },
     { historyService: {} },
     { lifecycle: {} },
     { now: null },
@@ -98,7 +101,7 @@ test('rejects malformed archivedSessionIds capability shapes before any operatio
 test('lists and previews only safe workspace and cold-session fields in stable deduplicated order', async () => {
   const item = fixture();
 
-  assert.deepEqual(item.service.listWorkspaces(), [
+  assert.deepEqual(await item.service.listWorkspaces(), [
     { id: 'workspace-a', title: 'Workspace A', eligibleCount: 2, liveCount: 1 },
     { id: 'workspace-b', title: 'Workspace B', eligibleCount: 0, liveCount: 0 },
   ]);
@@ -117,6 +120,24 @@ test('lists and previews only safe workspace and cold-session fields in stable d
   assert.equal(JSON.stringify(preview).includes('/private/'), false);
   assert.equal(JSON.stringify(preview).includes('private event'), false);
   assert.equal(JSON.stringify(preview).includes('private note'), false);
+});
+
+test('blank new-session windows are never counted or prepared as archiveable conversations', async () => {
+  const item = fixture({
+    sessionIds: ['blank-first', 'real-conversation', 'blank-last'],
+    blankIds: ['blank-first', 'blank-last'],
+  });
+
+  assert.deepEqual(await item.service.listWorkspaces(), [
+    { id: 'workspace-a', title: 'Workspace A', eligibleCount: 1, liveCount: 0 },
+    { id: 'workspace-b', title: 'Workspace B', eligibleCount: 0, liveCount: 0 },
+  ]);
+  const preview = await item.service.preview('workspace-a');
+  assert.deepEqual(preview.sessions.map(({ id }) => id), ['real-conversation']);
+  assert.deepEqual(preview.skipped, [
+    { id: 'blank-first', reason: 'session-empty' },
+    { id: 'blank-last', reason: 'session-empty' },
+  ]);
 });
 
 test('rejects unknown workspaces before issuing a confirmation', async () => {
@@ -160,11 +181,12 @@ test('a fresh preview sweeps expired confirmations before retaining another one'
 });
 
 test('execution revalidates stale membership, archive state, and live sessions without touching them', async () => {
-  const item = fixture({ sessionIds: ['moved', 'became-archived', 'became-live'] });
+  const item = fixture({ sessionIds: ['moved', 'became-archived', 'became-live', 'became-empty'] });
   const preview = await item.service.preview('workspace-a');
-  item.workspace.sessionIds = ['became-archived', 'became-live'];
+  item.workspace.sessionIds = ['became-archived', 'became-live', 'became-empty'];
   item.archived.add('became-archived');
   item.live.add('became-live');
+  item.blank.add('became-empty');
 
   const result = await item.service.execute(preview.token, preview.nonce);
 
@@ -173,6 +195,7 @@ test('execution revalidates stale membership, archive state, and live sessions w
     { id: 'moved', reason: 'session-workspace-changed' },
     { id: 'became-archived', reason: 'session-archived' },
     { id: 'became-live', reason: 'session-live' },
+    { id: 'became-empty', reason: 'session-empty' },
   ]);
   assert.equal(item.calls.archive.length, 0);
   assert.equal(item.calls.capture.length, 0);
@@ -234,4 +257,28 @@ test('a lifecycle rejection after its callback reports one failure without commi
   assert.deepEqual(result.archived, []);
   assert.deepEqual(result.snapshots, []);
   assert.deepEqual(result.failed, [{ id: 'queue-rejected', reason: 'lifecycle-failed' }]);
+});
+
+
+test('loaded idle sessions can be archived while running agents are skipped', async () => {
+  const item = fixture({ sessionIds: ['idle', 'running'], liveIds: ['idle', 'running'] });
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies,
+    agents: { get: (id) => ({ status: id === 'running' ? 'running' : 'idle' }) },
+  });
+  const preview = await service.preview('workspace-a');
+  assert.deepEqual(preview.sessions.map(({ id }) => id), ['idle']);
+  assert.deepEqual(preview.skipped, [{ id: 'running', reason: 'session-live' }]);
+  assert.deepEqual((await service.execute(preview.token, preview.nonce)).archived, ['idle']);
+});
+
+test('an idle agent that starts running after preview is rechecked before archive', async () => {
+  const item = fixture({ sessionIds: ['idle'], liveIds: ['idle'] });
+  const agent = { status: 'idle' };
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies, agents: { get: () => agent } });
+  const preview = await service.preview('workspace-a');
+  assert.equal(preview.sessions.length, 1);
+  agent.status = 'running';
+  const result = await service.execute(preview.token, preview.nonce);
+  assert.deepEqual(result.skipped, [{ id: 'idle', reason: 'session-live' }]);
+  assert.equal(item.calls.archive.length, 0);
 });
