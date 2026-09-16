@@ -10,6 +10,11 @@ const HEADER = Object.freeze({
   isSeeded: false,
 });
 
+const HEADER_V3 = Object.freeze({
+  ...HEADER,
+  version: 3,
+});
+
 test('preserves the modern public locate contract for a session-scoped purge location', async () => {
   const raw = {
     async list() { return [{ header: HEADER, revision: 'rev' }]; },
@@ -115,6 +120,34 @@ test('opens modern persistence for exact read access and always closes after suc
   assert.deepEqual(openCalls, [[HEADER.id, 'read']]);
   assert.deepEqual(readCalls, [[0, undefined]]);
   assert.equal(closes, 1);
+});
+
+test('accepts v3 headers and unwraps event slices returned by the current read contract', async () => {
+  const events = Object.freeze([
+    { seq: 0, type: 'session/start', data: {} },
+    { seq: 1, type: 'user/message', data: { text: 'hello' } },
+  ]);
+  const handle = {
+    header: HEADER_V3,
+    inheritedEventCount: 0,
+    async read(...args) {
+      assert.deepEqual(args, [0, undefined]);
+      return { eventState: { nextOffset: events.length }, events };
+    },
+    async close() {},
+  };
+  const raw = {
+    async list() { return [{ header: HEADER_V3, revision: 'rev-v3' }]; },
+    async open(id, mode) {
+      assert.deepEqual([id, mode], [HEADER_V3.id, 'read']);
+      return handle;
+    },
+  };
+
+  const view = resolvePersistenceCompat(raw);
+
+  assert.deepEqual(await view.list(), [HEADER_V3]);
+  assert.deepEqual(await view.inspect(HEADER_V3.id), { meta: HEADER_V3, events });
 });
 
 test('closes a modern read handle when reading fails', async () => {

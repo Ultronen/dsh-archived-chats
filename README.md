@@ -58,7 +58,7 @@ dsh plugin --profile web update dsh-archived-chats
 | **Read-only preview** | Native conversation layout for Markdown, reasoning, tool activity, JSON, code, and available stored images, with responsive turn navigation. |
 | **Local History** | Validated versions captured after archive, read-only snapshot preview, confirmed deletion, clear-history, and **Restore as copy** without overwriting the source. |
 | **Backup and restore** | JSON + Markdown ZIP export with preview-first, conflict-safe import. Existing session IDs are never overwritten. |
-| **Recoverable deletion** | Snapshot-protected Recycle Bin with immediate Undo, two-level restore, and separately confirmed permanent deletion. |
+| **Recoverable deletion** | Snapshot-protected Recycle Bin with immediate Undo, two-level restore, separately confirmed permanent deletion, and an optional direct permanent-delete action for users who do not need recovery. |
 | **Storage and relationships** | Separate storage accounting, preview-first retention policies, and read-only Origins & Branches for forks and subagent trees. |
 
 ## Safety by design

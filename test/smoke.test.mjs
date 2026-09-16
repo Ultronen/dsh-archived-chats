@@ -1175,6 +1175,21 @@ console.log('\n[6] delete — full path');
   assert(!registry.sessionPaths.has('session-b'), 'registry session-path index purged');
   assert(registry.headers.has('session-c'), 'other sessions stay indexed');
   assert(readMetadataStore().sessions['session-b'] === undefined, 'cold delete removes metadata after physical deletion');
+
+  const directDelete = await call(routes, '/plugins/dsh-archived-chats/delete-all', mockReq(
+    'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: ['session-c'], permanent: true }),
+  ));
+  assert(directDelete.status === 200 && directDelete.json().deleted.includes('session-c'), 'direct permanent delete answers 200');
+  assert(!existsSync(join(tmp, 'session-c')), 'direct permanent delete skips recycle and removes the session directory');
+  assert(!workspaceState.archivedSessionIds.includes('session-c'), 'direct permanent delete removes archive membership');
+
+  headerRows.push({ id: 'session-c', createdAt: 1786726500000, cwd: '/ws/one' });
+  events['session-c'] = [];
+  mkdirSync(join(tmp, 'session-c'), { recursive: true });
+  writeFileSync(join(tmp, 'session-c', 'session.jsonl.zstd'), 'restored');
+  workspaceState.archivedSessionIds.push('session-c');
+  registry.headers.set('session-c', headerRows.at(-1));
+  registry.sessionPaths.set('session-c', '/ws/one');
   mkdirSync(join(tmp, 'session-b'), { recursive: true });
   writeFileSync(join(tmp, 'session-b', 'session.jsonl.zstd'), 'restored');
   workspaceState.archivedSessionIds.push('session-b');
