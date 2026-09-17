@@ -46,8 +46,8 @@ dsh plugin --profile web update dsh-archived-chats
 ```
 
 <p align="center">
-  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="Native read-only legacy-data preview with snapshot time and a synthetic stored image"></a>
-  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="Storage and Retention with session directories, protection snapshots, and policy controls"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="Multi-workspace archive chooser with Select all and explicit confirmation"></a>
+  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="Confirmation before enabling automatic Recycle Bin cleanup"></a>
 </p>
 
 ## Core capabilities
@@ -97,19 +97,19 @@ The eight fixed screenshots below come from an isolated Simplified Chinese light
 <br>
 <table>
   <tr>
-    <td><img src="assets/screenshots/preview-01.png" alt="Session Archive overview with four management views"><br><sub>Archive overview</sub></td>
+    <td><img src="assets/screenshots/preview-01.png" alt="Latest Archived view with search, filters, tags, one-line notes, and current actions"><br><sub>Archive overview</sub></td>
     <td><img src="assets/screenshots/preview-02.png" alt="Full-text search, filters, tags, and readable hit excerpts"><br><sub>Full-text search</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-03.png" alt="Native read-only snapshot preview with a stored image"><br><sub>Read-only preview</sub></td>
-    <td><img src="assets/screenshots/preview-04.png" alt="Existing snapshots unified into the Recycle Bin"><br><sub>Unified Recycle Bin</sub></td>
+    <td><img src="assets/screenshots/preview-03.png" alt="Eligible-only multi-workspace archive chooser with Select all"><br><sub>Workspace archive chooser</sub></td>
+    <td><img src="assets/screenshots/preview-04.png" alt="Native read-only legacy snapshot preview with a stored image"><br><sub>Read-only preview</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-05.png" alt="Irreversible confirmation before emptying the Recycle Bin"><br><sub>Empty Recycle Bin confirmation</sub></td>
-    <td><img src="assets/screenshots/preview-06.png" alt="Recycle Bin row and workspace restore and permanent-delete actions"><br><sub>Recycle Bin actions</sub></td>
+    <td><img src="assets/screenshots/preview-05.png" alt="Unified Recycle Bin with legacy snapshots and row and workspace actions"><br><sub>Unified Recycle Bin</sub></td>
+    <td><img src="assets/screenshots/preview-06.png" alt="Irreversible confirmation before emptying every workspace in the Recycle Bin"><br><sub>Empty Recycle Bin confirmation</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-07.png" alt="Storage accounting and retention policy controls"><br><sub>Storage and retention</sub></td>
+    <td><img src="assets/screenshots/preview-07.png" alt="Storage and Retention confirmation before enabling automatic cleanup"><br><sub>Automatic cleanup confirmation</sub></td>
     <td><img src="assets/screenshots/preview-08.png" alt="Origins and Branches with forks, subagents, and recycled state"><br><sub>Origins and Branches</sub></td>
   </tr>
 </table>

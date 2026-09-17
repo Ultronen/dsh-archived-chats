@@ -1,3 +1,17 @@
+## 1.3.1 — 更新插件市场截图 / Refresh plugin-market screenshots
+
+### 中文
+
+- 重新拍摄全部 8 个插件市场演示场景，使图片与 1.3 系列的当前界面和操作一致。
+- 新增工作区归档选择器、统一回收站工作区菜单和自动清理确认等关键界面展示。
+- 同步更新中英文 README 的截图顺序、替代文字和图注。本补丁不改变运行时行为。
+
+### English
+
+- Recaptured all eight plugin-market demo scenes so the images match the current 1.3 interface and actions.
+- Added coverage for the workspace archive chooser, unified Recycle Bin workspace menu, and automatic-cleanup confirmation.
+- Synchronized screenshot order, alt text, and captions in both READMEs. This patch does not change runtime behavior.
+
 ## 1.3.0 — 统一回收站与精简操作 / Unified Recycle Bin and simpler actions
 
 ### 中文
