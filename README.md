@@ -27,7 +27,7 @@
 
 </div>
 
-Session Archive gives DeepSeek Harness a first-class home for chats that disappear from the sidebar after archive. Browse every archived conversation by workspace, search its full content, inspect validated local history, and recover or remove it through explicit, reversible workflows.
+Session Archive gives DeepSeek Harness a first-class home for chats that disappear from the sidebar after archive. Browse every archived conversation by workspace, search its full content, recover deleted chats from the Recycle Bin, and manage them through explicit, reversible workflows.
 
 > Formerly **Archived Chats**, now **Session Archive / 会话档案**. The package name, repository, install command, and local data location are unchanged; existing users need no data migration.
 
@@ -46,7 +46,7 @@ dsh plugin --profile web update dsh-archived-chats
 ```
 
 <p align="center">
-  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="Native read-only History preview with snapshot time and a synthetic stored image"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="Native read-only legacy-data preview with snapshot time and a synthetic stored image"></a>
   <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="Storage and Retention with session directories, protection snapshots, and policy controls"></a>
 </p>
 
@@ -57,15 +57,17 @@ dsh plugin --profile web update dsh-archived-chats
 | **Browse and search** | Workspace-grouped archive browsing, full-text search across messages and tool results, filters, sorting, tags, and notes. |
 | **Archive a workspace** | From **Settings → Session Archive**, choose a workspace and open one confirmation for every eligible chat in it. Empty new-session windows are excluded; the workspace and its directory stay unchanged. |
 | **Read-only preview** | Native conversation layout for Markdown, reasoning, tool activity, JSON, code, and available stored images, with responsive turn navigation. |
-| **Local History** | Validated versions captured after archive, read-only snapshot preview, confirmed deletion, clear-history, and **Restore as copy** without overwriting the source. |
+| **Existing data** | Prior snapshots remain accessible under **Storage & Retention → Legacy data** for read-only preview, recovery as an archived copy, or confirmed deletion. Archiving no longer creates versions. |
 | **Backup and restore** | JSON + Markdown ZIP export with preview-first, conflict-safe import. Existing session IDs are never overwritten. |
 | **Recoverable deletion** | Snapshot-protected Recycle Bin with immediate Undo, two-level restore, separately confirmed permanent deletion, and an optional direct permanent-delete action for users who do not need recovery. |
-| **Storage and relationships** | Separate storage accounting, preview-first retention policies, and read-only Origins & Branches for forks and subagent trees. |
+| **Storage and relationships** | Separate storage accounting, preview-first Recycle Bin age policies, and read-only Origins & Branches for forks and subagent trees. |
+
+The four main views are **Archived**, **Recycle Bin**, **Storage & Retention**, and **Origins & Branches**. Existing snapshots are preserved during upgrades; the separate History tab and archive-time capture have been retired.
 
 ## Safety by design
 
 - **Local only:** plugin metadata, recycle records, policies, and validated snapshots stay under `$DSH_HOME/plugin-data/archived-chats/`. Nothing is uploaded or cloud-synced.
-- **No silent overwrite:** imports and History restores create or select non-conflicting IDs; they never replace an existing session.
+- **No silent overwrite:** imports and legacy-data recovery create or select non-conflicting IDs; they never replace an existing session.
 - **Deletion stays explicit:** ordinary removal enters the Recycle Bin after snapshot protection. Physical removal is available only through confirmed permanent-purge actions.
 - **No automatic cleanup:** retention policies are saved separately from execution. Every cleanup starts with a short-lived preview and explicit selection.
 - **Confirmed workspace archive:** the plugin prepares the exact set in the background, then shows one confirmation with the workspace and chat count. Only sessions whose inspected log contains a real `turn/start` are eligible; empty new-session windows and sessions whose content cannot be confirmed are skipped. Its five-minute, single-use credential excludes chats added later; a running chat is skipped, never stopped or moved.
@@ -77,14 +79,14 @@ Features activate from the public capabilities exposed by the DeepSeek Harness H
 
 | Host capability | Plugin behavior |
 | --- | --- |
-| Archive and session reads | Browsing, search, preview, History inventory, storage accounting, and lineage. |
+| Archive and session reads | Browsing, search, preview, legacy-data inventory, storage accounting, and lineage. |
 | `settings.section` + public `archiveSession` | The plugin-owned settings page provides the workspace chooser and one-confirmation archive flow without requiring a workspace-menu extension slot. Without archive capability, preparation returns `workspace-archive-unsupported` and makes no change. |
 | Attachment reads | Stored images appear in conversation and snapshot previews; without it, text remains readable. |
 | Session-scoped log location | Recycle Bin permanent deletion uses the persistence provider's public `locate(meta)` capability. Providers without a session-scoped location remain unsupported; failed operations retain their rows and display the reason. |
-| Public session writer | ZIP import, **Restore as copy**, and snapshot fallback when an original is missing all write through the Host's public `create` / `append` / `locate` capability, or a dedicated restore entry point where one exists. |
+| Public session writer | ZIP import, legacy-data recovery, and snapshot fallback when an original is missing all write through the Host's public `create` / `append` / `locate` capability, or a dedicated restore entry point where one exists. |
 | Missing write capability | The operation returns `restore-unsupported` without writing or overwriting data. |
 
-Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading to a release that does not display History or understand recycle snapshots.
+Back up `$DSH_HOME/plugin-data/archived-chats/` before downgrading to a release that does not display legacy data or understand recycle snapshots.
 
 ## Demo preview
 
@@ -95,15 +97,15 @@ The eight fixed screenshots below come from an isolated Simplified Chinese light
 <br>
 <table>
   <tr>
-    <td><img src="assets/screenshots/preview-01.png" alt="Session Archive overview with five management views"><br><sub>Archive overview</sub></td>
+    <td><img src="assets/screenshots/preview-01.png" alt="Session Archive overview with four management views"><br><sub>Archive overview</sub></td>
     <td><img src="assets/screenshots/preview-02.png" alt="Full-text search, filters, tags, and readable hit excerpts"><br><sub>Full-text search</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-03.png" alt="Native read-only History preview with a stored image"><br><sub>Read-only preview</sub></td>
-    <td><img src="assets/screenshots/preview-04.png" alt="History timeline with restore-as-copy and deletion actions"><br><sub>History timeline</sub></td>
+    <td><img src="assets/screenshots/preview-03.png" alt="Native read-only legacy-data preview with a stored image"><br><sub>Read-only preview</sub></td>
+    <td><img src="assets/screenshots/preview-04.png" alt="Legacy data with recovery and deletion actions"><br><sub>Legacy data</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-05.png" alt="Irreversible confirmation before clearing ordinary History"><br><sub>Clear History confirmation</sub></td>
+    <td><img src="assets/screenshots/preview-05.png" alt="Irreversible confirmation before clearing legacy data"><br><sub>Clear legacy data confirmation</sub></td>
     <td><img src="assets/screenshots/preview-06.png" alt="Recycle Bin protection snapshot, restore, and permanent deletion"><br><sub>Recycle Bin</sub></td>
   </tr>
   <tr>
@@ -133,7 +135,7 @@ Session Archive is actively maintained. The latest stable npm release receives f
 npm test
 ```
 
-The suite covers Host and browser behavior, export/import, History, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. It uses isolated temporary data and never reads real sessions.
+The suite covers Host and browser behavior, export/import, legacy-data recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. It uses isolated temporary data and never reads real sessions.
 
 ## Uninstall
 

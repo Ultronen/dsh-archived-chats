@@ -72,7 +72,6 @@ test('rejects hosts without every required public capability', () => {
     { registry: { ...dependencies.registry, archiveSession: undefined } },
     { sessions: {} },
     { inspectConversation: null },
-    { historyService: {} },
     { lifecycle: {} },
     { now: null },
     { secret: '' },
@@ -223,11 +222,11 @@ test('execution archives exactly the previewed IDs and preserves the registry re
   assert.deepEqual(result.archived, ['captured']);
   assert.deepEqual(item.calls.archive.map((call) => call.id), ['captured']);
   assert.equal(item.calls.archive[0]?.receiver, item.registry);
-  assert.deepEqual(item.calls.capture, [{ id: 'captured', captureOptions: { lockHeld: true } }]);
+  assert.deepEqual(item.calls.capture, []);
   assert.equal(JSON.stringify(result).includes('never return this'), false);
 });
 
-test('continues after archive and snapshot failures while retaining successful archives', async () => {
+test('continues after archive failures without capturing snapshots', async () => {
   const item = fixture({
     sessionIds: ['good-first', 'archive-fails', 'snapshot-fails', 'good-last'],
     archiveFails: new Set(['archive-fails']),
@@ -239,11 +238,8 @@ test('continues after archive and snapshot failures while retaining successful a
 
   assert.deepEqual(result.archived, ['good-first', 'snapshot-fails', 'good-last']);
   assert.deepEqual(result.failed, [{ id: 'archive-fails', reason: 'archive-failed' }]);
-  assert.deepEqual(result.snapshots, [
-    { id: 'good-first', status: 'captured' },
-    { id: 'snapshot-fails', status: 'snapshot-failed' },
-    { id: 'good-last', status: 'captured' },
-  ]);
+  assert.deepEqual(result.snapshots, []);
+  assert.deepEqual(item.calls.capture, []);
   assert.deepEqual(item.calls.archive.map((call) => call.id), ['good-first', 'archive-fails', 'snapshot-fails', 'good-last']);
   assert.equal(item.calls.lifecycle.length, 4);
 });
@@ -281,4 +277,11 @@ test('an idle agent that starts running after preview is rechecked before archiv
   const result = await service.execute(preview.token, preview.nonce);
   assert.deepEqual(result.skipped, [{ id: 'idle', reason: 'session-live' }]);
   assert.equal(item.calls.archive.length, 0);
+});
+
+test('workspace archive no longer requires a history capture service', async () => {
+  const item = fixture({ sessionIds: ['cold'] });
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies, historyService: undefined });
+  const preview = await service.preview('workspace-a');
+  assert.deepEqual((await service.execute(preview.token, preview.nonce)).archived, ['cold']);
 });

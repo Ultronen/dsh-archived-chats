@@ -100,7 +100,7 @@ const snapshot = (snapshotId, sessionId, createdAt, totalBytes, active = false) 
   attachmentCount: 0, status: 'ready', active,
 });
 
-test('retention planner applies count, age, quota, and recycle age in stable order', () => {
+test('retention planner ignores legacy count, age, and quota policies and only applies recycle age', () => {
   const MiB = 1024 * 1024;
   const inventory = {
     summary: { snapshotBytes: 7 * MiB },
@@ -132,12 +132,9 @@ test('retention planner applies count, age, quota, and recycle age in stable ord
   });
 
   assert.deepEqual(plan.candidates.map(({ key, action, reason }) => ({ key, action, reason })), [
-    { key: 'snapshot:s-old-count', action: 'delete-snapshot', reason: 'history-count' },
-    { key: 'snapshot:s-old-age', action: 'delete-snapshot', reason: 'snapshot-age' },
-    { key: 'snapshot:s-old-quota', action: 'delete-snapshot', reason: 'snapshot-quota' },
     { key: 'trash:old-chat', action: 'purge-trash', reason: 'recycle-age' },
   ]);
-  assert.equal(plan.projectedSnapshotBytes, 4 * MiB);
+  assert.equal(plan.projectedSnapshotBytes, 7 * MiB);
   assert.match(plan.fingerprint, /^[0-9a-f]{64}$/);
   assert.equal(plan.candidates.some((item) => item.key === 'snapshot:s-active'), false);
   assert.equal(plan.candidates.some((item) => item.key === 'snapshot:broken'), false);
@@ -148,7 +145,7 @@ test('retention planner applies count, age, quota, and recycle age in stable ord
   });
 });
 
-test('disabled age and quota rules produce no candidates beyond history count', () => {
+test('default policy preserves all existing legacy snapshots', () => {
   const inventory = {
     summary: { snapshotBytes: 200 },
     snapshots: [
@@ -162,6 +159,30 @@ test('disabled age and quota rules produce no candidates beyond history count', 
     policy: DEFAULT_RETENTION_POLICY,
     now: new Date('2026-08-24T00:00:00.000Z'),
   });
-  assert.deepEqual(plan.candidates.map((item) => item.key), ['snapshot:old']);
-  assert.equal(plan.projectedSnapshotBytes, 100);
+  assert.deepEqual(plan.candidates.map((item) => item.key), []);
+  assert.equal(plan.projectedSnapshotBytes, 200);
+});
+
+test('existing retention documents remain readable without selecting legacy snapshots or rewriting disk', async () => {
+  const { path, store } = await storeFixture();
+  const legacyPolicy = {
+    historicalSnapshotsPerSession: 0,
+    historicalSnapshotMaxAgeDays: 1,
+    snapshotQuotaBytes: 1024 * 1024,
+    recycleMaxAgeDays: null,
+  };
+  const source = JSON.stringify({ version: 1, policy: legacyPolicy });
+  await writeFile(path, source, 'utf8');
+  const loaded = await store.load();
+  assert.deepEqual(loaded, { status: 'ready', policy: legacyPolicy });
+  const plan = planRetention({
+    inventory: {
+      summary: { snapshotBytes: 2 * 1024 * 1024 },
+      snapshots: [snapshot('legacy', 'a', '2020-01-01T00:00:00.000Z', 2 * 1024 * 1024)],
+    },
+    trashRecords: new Map(), policy: loaded.policy,
+    now: new Date('2026-09-17T00:00:00.000Z'),
+  });
+  assert.deepEqual(plan.candidates, []);
+  assert.equal(await readFile(path, 'utf8'), source);
 });

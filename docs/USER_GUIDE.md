@@ -7,10 +7,9 @@ This guide covers the complete user workflow, data boundaries, and recovery beha
 ## Archive and find a chat
 
 1. Archive a conversation from the normal DSH session menu.
-2. After Host success, the global notice reports that it is saving a History version. Its three-second dismissal starts only after capture finishes.
-3. Capture failure never rolls back a successful archive. The notice retains **Retry save**, **View**, **Undo**, and close actions.
-4. Open **Settings → Session Archive**. The **Archived** view groups every visible archived chat by workspace.
-5. Search titles, workspaces, tags, notes, user messages, assistant answers, and tool results from one field. Matching conversation content includes a readable excerpt.
+2. After Host success, the global notice offers **View** and **Undo** and dismisses after three seconds. Archiving does not capture a snapshot.
+3. Open **Settings → Session Archive**. The **Archived** view groups every visible archived chat by workspace.
+4. Search titles, workspaces, tags, notes, user messages, assistant answers, and tool results from one field. Matching conversation content includes a readable excerpt.
 
 Groups remember their collapsed state in the browser. Filter by regular or subagent session, project, and tag, then sort by newest, oldest, or title.
 
@@ -20,7 +19,7 @@ Open **Settings → Session Archive**, choose **Archive workspace chats**, then 
 
 Choose **Archive all** to proceed, or **Cancel** to leave everything unchanged. Eligible means a chat is currently unarchived, has no non-idle Host agent, and its inspected live or persisted event log contains `turn/start`. A blank new-session window is therefore not an archivable chat. On an older Host without agent status, loaded chats are conservatively skipped; if the plugin cannot confirm a session's event content, it also skips that session instead of guessing. Preparation is limited to 2,000 eligible chats and creates a five-minute, single-use token and nonce for that exact ordered set, so the apply request cannot add IDs and chats created afterward are excluded.
 
-At apply time, each prepared chat is rechecked for workspace membership, archive state, active-agent status, and a real `turn/start`. A complete success refreshes affected views and closes the confirmation. If any chat is skipped or fails, or a History snapshot fails, the Host continues processing and keeps the itemized result visible. A snapshot failure does not undo the archive. An uncertain failure requires a fresh preparation and another explicit confirmation before any retry. The operation never moves chats between workspaces, changes the selected workspace, or changes its directory. A Host without public `archiveSession` rejects preparation with `workspace-archive-unsupported` and changes nothing.
+At apply time, each prepared chat is rechecked for workspace membership, archive state, active-agent status, and a real `turn/start`. A complete success refreshes affected views and closes the confirmation. If any chat is skipped or fails, the Host continues processing and keeps the itemized result visible. An uncertain failure requires a fresh preparation and another explicit confirmation before any retry. The operation never moves chats between workspaces, changes the selected workspace, or changes its directory. A Host without public `archiveSession` rejects preparation with `workspace-archive-unsupported` and changes nothing.
 
 ## Read-only conversation preview
 
@@ -44,17 +43,13 @@ Closing the preview cancels outstanding image and page requests. Preview never e
 - The row delete icon sits immediately before Unarchive and opens permanent-delete confirmation for that chat. The row menu contains tag and note editing and single-chat export. Project menus offer Unarchive all, Move all to Recycle Bin, and Delete all permanently, including chats in that project hidden by filters.
 - The header’s **Export all** always exports the entire archive, regardless of search, filters, or selection. The batch toolbar’s **Export selected** exports selected chats only.
 
-## History versions
+## Legacy data
 
-The **History** view loads on first activation and groups validated local versions by source chat.
+The main views are **Archived**, **Recycle Bin**, **Storage & Retention**, and **Origins & Branches**. The separate History feature has been retired. Ordinary and workspace archiving no longer create versions.
 
-- A successful browser-originated archive captures one validated version and deduplicates the same non-empty source revision.
-- The plugin does not scan unrelated active chats and performs no scheduled or startup capture.
-- Each healthy version shows timestamp, size, attachment count, and Recycle Bin protection state.
-- Preview is read-only and identifies the exact snapshot time.
-- **Restore as copy** asks the Host for a new session ID and creates a new archived chat. It never overwrites, unarchives, or deletes the source.
-- Ordinary versions can be deleted individually or cleared globally after confirmation. Only versions protecting Recycle Bin recovery are skipped.
-- An unreadable degraded version can no longer be restored from, but its bytes still occupy the snapshot store, so the same panel can reclaim it. A degraded version a recycle record still points at stays protected.
+Upgrades preserve existing snapshots. Open **Storage & Retention → Legacy data** to browse them by source, preview them read-only, recover a new archived copy, or delete them after confirmation. Recovery never overwrites the source chat. Snapshots still referenced by the Recycle Bin cannot be deleted here; unreadable snapshots can only be cleared, not recovered.
+
+Export a backup for deliberate long-term preservation. Use Recycle Bin restore to recover deleted chats.
 
 ## Export, import, and restore
 
@@ -77,9 +72,9 @@ Import accepts this plugin's version-one ZIP format and always previews before w
 - Tags and notes restore through the same local limits.
 - Raw events and Markdown are never rendered in the import preview.
 - Confirmation tokens expire after 10 minutes and can be used once.
-- Restore writes through a dedicated Host restore entry point when one exists, otherwise through the ordinary `create` / `append` / `locate` session-writer capability — the same path History **Restore as copy** already uses. Only a Host exposing neither returns `restore-unsupported`, and it writes nothing.
+- Restore writes through a dedicated Host restore entry point when one exists, otherwise through the ordinary `create` / `append` / `locate` session-writer capability — the same path legacy-data recovery already uses. Only a Host exposing neither returns `restore-unsupported`, and it writes nothing.
 
-ZIP import and History **Restore as copy** are separate workflows.
+ZIP import and legacy-data recovery are separate workflows.
 
 ## Recycle Bin and permanent deletion
 
@@ -90,9 +85,9 @@ Restore has two levels:
 1. If the original session remains intact, restore removes only the recycle marker.
 2. If the original is missing, the plugin uses a validated snapshot through the public `create` / `append` capability and never overwrites an existing ID.
 
-The Recycle Bin provides **Delete permanently** and **Empty Recycle Bin**. Archived chats can also be permanently deleted after confirmation from a row, project menu, or batch actions. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from History. Interrupted purges retry on startup.
+The Recycle Bin provides **Delete permanently** and **Empty Recycle Bin**. Archived chats can also be permanently deleted after confirmation from a row, project menu, or batch actions. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from Legacy data. Interrupted purges retry on startup.
 
-On a current Host that exposes handle-based reads without physical session locations, browsing, export, and protection snapshots for ordinary sessions remain available. Session-directory accounting is shown as unavailable, while restore writes and permanent deletion report that the Host capability is unsupported. Purge refusal occurs before changing the recycle record, protection snapshots, pending markers, or a live session. Forked sessions with inherited history are not captured into snapshots yet because the current snapshot schema cannot retain the inherited cut; archive still completes and reports the version-save failure in its result.
+On a current Host that exposes handle-based reads without physical session locations, browsing, export, and protection snapshots for ordinary sessions remain available. Session-directory accounting is shown as unavailable, while restore writes and permanent deletion report that the Host capability is unsupported. Purge refusal occurs before changing the recycle record, protection snapshots, pending markers, or a live session. Forked sessions with inherited history are not captured into snapshots yet because the current snapshot schema cannot retain the inherited cut. Archiving does not require a snapshot; moving such a session to the Recycle Bin remains unavailable.
 
 If `trash.json` itself cannot be read, the Recycle Bin reports unavailable and every archive change — unarchive, tag and note edits, delete, and purge — is refused rather than guessed. The archived list stays browsable but is labelled as unverified, because a catalog it cannot read cannot prove which chats were already deleted.
 
@@ -103,13 +98,13 @@ Removing snapshot attachment copies does not guarantee immediate cleanup of iden
 Storage accounting separates:
 
 - Archived and recycled session directories.
-- Plugin-owned History and protection snapshots.
+- Plugin-owned legacy data and protection snapshots.
 - Unavailable or degraded measurements.
 - Repeated snapshot attachment bytes.
 
 Searchable detail dialogs keep large inventories out of the main policy view. Reported bytes are not described as globally reclaimable Harness attachment storage.
 
-Retention can plan by History count per source, snapshot age, snapshot quota, and Recycle Bin age. The default keeps one recovery snapshot per source. Saving a policy never executes it. Every cleanup requires a single-use five-minute preview, explicit selection, confirmation, and execution-time revalidation. Active Recycle Bin protection and unavailable snapshots are excluded; permanent recycle purges start unselected.
+Retention uses Recycle Bin age only. Old version-count, snapshot-age, and quota settings no longer plan deletion of snapshots. Saving a policy never executes cleanup. Every cleanup requires a single-use five-minute preview, explicit selection, confirmation, and execution-time revalidation. Permanent recycle purges start unselected. Manage existing snapshots explicitly through Legacy data.
 
 ## Origins and Branches
 
@@ -132,7 +127,7 @@ The directory may contain:
 - `metadata.json` for tags and notes.
 - `trash.json` for Recycle Bin records.
 - `retention.json` for saved policy.
-- `snapshots/` for History and protection snapshots.
+- `snapshots/` for legacy data and protection snapshots.
 - A legacy `pending-deletions.json` until migration completes.
 
 The plugin does not upload, cloud-sync, or schedule background capture of conversations or attachments. Uninstalling removes only the package and deliberately keeps this directory so a later reinstall can recover the same state.
@@ -147,16 +142,16 @@ No. DSH hides it from the sidebar and keeps its archived session record. Session
 </details>
 
 <details>
-<summary><b>Are History versions screenshots?</b></summary>
+<summary><b>What is Legacy data?</b></summary>
 
-No. They are validated local copies of session records and available attachments. Snapshot preview is read-only.
+It contains retained local copies of session records and available attachments. Snapshot preview is read-only.
 
 </details>
 
 <details>
 <summary><b>Can restore overwrite the source?</b></summary>
 
-No. History restore creates a new archived ID, while Recycle Bin fallback refuses an existing ID. Neither path overwrites the source.
+No. Legacy-data recovery creates a new archived ID, while Recycle Bin fallback refuses an existing ID. Neither path overwrites the source.
 
 </details>
 
@@ -170,13 +165,13 @@ The row is marked as a conflict, disabled, and skipped. Import never overwrites 
 <details>
 <summary><b>Why can snapshots remain when the archive list is empty?</b></summary>
 
-Restoring a recycled chat removes its recycle record but retains the validated snapshot as History. Delete ordinary History explicitly or apply a previewed retention policy when it is no longer needed.
+Restoring a recycled chat removes its recycle record but retains the validated snapshot. Manage retained snapshots explicitly under Storage & Retention → Legacy data when no longer needed.
 
 </details>
 
 <details>
 <summary><b>What should I do before downgrading or deleting plugin data?</b></summary>
 
-Restore anything you still need and back up the complete plugin-data directory. Older releases may not display History or understand newer recycle snapshots.
+Restore anything you still need and back up the complete plugin-data directory. Older releases may not display legacy data or understand newer recycle snapshots.
 
 </details>

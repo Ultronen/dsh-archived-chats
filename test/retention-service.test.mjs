@@ -106,7 +106,7 @@ function fixture(options = {}) {
 test('retention preview issues a bounded token and nonce without private data', async () => {
   const current = fixture();
   const preview = await current.service.preview();
-  assert.deepEqual(preview.candidates.map((item) => item.key), ['snapshot:s1', 'trash:t1']);
+  assert.deepEqual(preview.candidates.map((item) => item.key), ['trash:t1']);
   assert.equal(typeof preview.token, 'string');
   assert.equal(typeof preview.nonce, 'string');
   assert.equal(preview.expiresAt, '2026-08-24T00:05:00.000Z');
@@ -143,30 +143,24 @@ test('retention apply revalidates and processes an ordered candidate subset', as
   const result = await current.service.apply({
     token: preview.token,
     nonce: preview.nonce,
-    keys: ['snapshot:s1', 'trash:t1'],
+    keys: ['trash:t1'],
   });
   assert.deepEqual(result.applied, [
-    { key: 'snapshot:s1', action: 'delete-snapshot' },
     { key: 'trash:t1', action: 'purge-trash' },
   ]);
   assert.deepEqual(result.failed, []);
-  assert.deepEqual(current.removed, ['s1']);
+  assert.deepEqual(current.removed, []);
   assert.deepEqual(current.purged, ['t1']);
-  assert.equal(current.lifecycleCalls.length, 2);
-  assert.equal(current.invalidations(), 2);
+  assert.equal(current.lifecycleCalls.length, 1);
+  assert.equal(current.invalidations(), 1);
 });
 
-test('retention apply refuses a snapshot that became active after preview', async () => {
+test('retention apply rejects legacy snapshot deletion keys even when old policies remain', async () => {
   const current = fixture();
   const preview = await current.service.preview();
-  current.records.set('new-owner', { ...oldTrash('s1'), sessionId: 'new-owner' });
-  const result = await current.service.apply({
-    token: preview.token,
-    nonce: preview.nonce,
-    keys: ['snapshot:s1'],
-  });
-  assert.deepEqual(result.applied, []);
-  assert.deepEqual(result.failed, [{ key: 'snapshot:s1', reason: 'retention-candidate-stale' }]);
+  await assert.rejects(current.service.apply({
+    token: preview.token, nonce: preview.nonce, keys: ['snapshot:s1'],
+  }), (error) => error.code === 'retention-selection-invalid');
   assert.deepEqual(current.removed, []);
 });
 
@@ -191,17 +185,16 @@ test('retention recycle apply does not nest the shared lifecycle queue', async (
   assert.deepEqual(current.purged, ['t1']);
 });
 
-test('retention apply reports partial failures and continues independent candidates', async () => {
-  const current = fixture({ removeError: Object.assign(new Error('private'), { code: 'snapshot-remove-failed' }) });
+test('retention apply reports recycle purge failures without deleting legacy snapshots', async () => {
+  const current = fixture({ purgeError: 'recycle-purge-failed' });
   const preview = await current.service.preview();
   const result = await current.service.apply({
-    token: preview.token,
-    nonce: preview.nonce,
-    keys: ['snapshot:s1', 'trash:t1'],
+    token: preview.token, nonce: preview.nonce, keys: ['trash:t1'],
   });
-  assert.deepEqual(result.applied, [{ key: 'trash:t1', action: 'purge-trash' }]);
-  assert.deepEqual(result.failed, [{ key: 'snapshot:s1', reason: 'snapshot-remove-failed' }]);
-  assert.deepEqual(current.purged, ['t1']);
+  assert.deepEqual(result.applied, []);
+  assert.deepEqual(result.failed, [{ key: 'trash:t1', reason: 'recycle-purge-failed' }]);
+  assert.deepEqual(current.removed, []);
+  assert.deepEqual(current.purged, []);
 });
 
 test('saving retention policy never previews or applies cleanup', async () => {
