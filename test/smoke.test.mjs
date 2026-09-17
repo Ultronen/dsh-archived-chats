@@ -318,6 +318,14 @@ services.attachments = {
   }),
 };
 
+// Seed an upgrade-era snapshot before the plugin starts. The current release
+// must surface it through Recycle Bin without requiring a legacy-data screen.
+const legacyStore = createSnapshotStore({ root: join(testHome, 'plugin-data', 'archived-chats', 'snapshots'), persistence, attachments: services.attachments });
+const seedLegacy = () => legacyStore.capture({ sessionId: 'session-a', archive: { title: 'Legacy Alpha', workspace: { id: 'ws-1', title: 'Project', path: '/ws/private' }, wasArchived: true, tags: [], note: 'keep this' }, liveDisposition: 'cold' });
+const capturedSnapshotId = (await seedLegacy()).snapshotId;
+const purgeSnapshotId = (await seedLegacy()).snapshotId;
+const clearSnapshotId = (await seedLegacy()).snapshotId;
+
 const { apply, name } = await import(new URL('../lib/index.js', import.meta.url));
 //#endregion
 
@@ -327,7 +335,7 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 33, `thirty-three archive-management routes registered after webServer binds (got ${routes.size})`);
+assert(routes.size === 34, `thirty-four archive-management routes registered after webServer binds (got ${routes.size})`);
 for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
@@ -455,13 +463,13 @@ console.log('\n[1a1] workspace archive late session binding');
   const lateState = { initialized: true, workspaceIds: ['late-ws'], archivedSessionIds: [] };
   const lateRegistry = {
     get archivedSessionIds() { return lateState.archivedSessionIds; },
-    list: () => [{ id: 'late-ws', title: 'Late workspace', sessionIds: [] }],
+    list: () => [{ id: 'late-ws', title: 'Late workspace', sessionIds: ['late-session'] }],
     archiveSession: async () => {},
     setState: async () => {},
   };
   const latePersistence = {
     list: async () => [],
-    inspect: async () => ({ meta: { id: 'unused' }, events: [] }),
+    inspect: async () => ({ meta: { id: 'late-session' }, events: [{ type: 'turn/start' }] }),
     listSnapshots: async () => [],
     locate: () => undefined,
   };
@@ -505,15 +513,13 @@ console.log('\n[1a0] storage insights, retention, and lineage routes');
     'x-dsh-archived-chats': '1',
   }, JSON.stringify({ sessionId: 'session-a' })));
   assert(capturedHistory.status === 410, 'retired capture route refuses new history versions');
-  // Seed an on-disk snapshot as an upgrade fixture, never through the retired API.
-  const legacyStore = createSnapshotStore({ root: join(testHome, 'plugin-data', 'archived-chats', 'snapshots'), persistence, attachments: services.attachments });
-  const seedLegacy = () => legacyStore.capture({ sessionId: 'session-a', archive: { title: 'Legacy Alpha', workspace: { id: 'ws-1', title: 'Project', path: '/ws/private' }, wasArchived: true, tags: [], note: 'keep this' }, liveDisposition: 'cold' });
-  const capturedSnapshotId = (await seedLegacy()).snapshotId;
-  const historyList = await call(routes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
-  assert(historyList.status === 200 && historyList.json().sessions[0].versions[0].snapshotId === capturedSnapshotId,
-    `history list exposes the captured version (got ${historyList.status})`);
-  assert(!JSON.stringify(historyList.json()).includes('/ws/'), 'history list never exposes workspace paths');
-  assert(!JSON.stringify(historyList.json()).includes('keep this'), 'history list never exposes private notes');
+	const upgradedTrash = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+	const legacyRowId = `legacy:${capturedSnapshotId}`;
+	const legacyRow = upgradedTrash.json().sessions.find((row) => row.sessionId === legacyRowId);
+	assert(upgradedTrash.status === 200 && legacyRow?.sourceKind === 'legacy-snapshot' && legacyRow.restorable === true,
+	  `upgrade snapshot appears as a restorable Recycle Bin item (got ${upgradedTrash.status})`);
+	assert(!JSON.stringify(upgradedTrash.json()).includes('/ws/'), 'Recycle Bin never exposes legacy workspace paths');
+	assert(!JSON.stringify(upgradedTrash.json()).includes('keep this'), 'Recycle Bin never exposes private legacy notes');
 
   const historyPage = await call(routes, '/plugins/dsh-archived-chats/history/preview', mockReq('POST', {
     'x-dsh-archived-chats': '1',
@@ -529,41 +535,35 @@ console.log('\n[1a0] storage insights, retention, and lineage routes');
     `history image answers 200 (got ${historyImage.status})`);
   assert(historyImage.bytes().equals(archivedImageBytes), 'history image returns only verified snapshot bytes');
 
-  const preparedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/history/restore/preview', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ snapshotId: capturedSnapshotId })));
-  assert(preparedHistoryRestore.status === 200 && preparedHistoryRestore.json().destination.sessionId !== 'session-a',
-    `history restore preview answers 200 with a new identity (got ${preparedHistoryRestore.status})`);
-  const restoredHistory = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ token: preparedHistoryRestore.json().token, nonce: preparedHistoryRestore.json().nonce })));
-  const restoredHistoryId = restoredHistory.json().restored?.[0];
-  assert(restoredHistory.status === 200 && restoredHistoryId !== undefined && restoredHistoryId !== 'session-a',
-    `history restore creates a new archived session (got ${restoredHistory.status})`);
-  assert(workspaceState.archivedSessionIds.includes('session-a') && workspaceState.archivedSessionIds.includes(restoredHistoryId),
-    'history restore preserves the source and registers the new copy');
-  const replayedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ token: preparedHistoryRestore.json().token, nonce: preparedHistoryRestore.json().nonce })));
-  assert(replayedHistoryRestore.status === 410, 'history restore confirmation is single-use');
+	const restoredHistory = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', {
+	  'x-dsh-archived-chats': '1',
+	}, JSON.stringify({ sessionIds: [legacyRowId] })));
+	const restoredHistoryId = restoredHistory.json().created?.[0];
+	assert(restoredHistory.status === 200 && restoredHistory.json().restored?.includes(legacyRowId)
+	  && restoredHistoryId !== undefined && restoredHistoryId !== 'session-a',
+	  `Recycle Bin restores legacy data as a new archived session (got ${restoredHistory.status})`);
+	assert(workspaceState.archivedSessionIds.includes('session-a') && workspaceState.archivedSessionIds.includes(restoredHistoryId),
+	  'Recycle Bin restore preserves the source and registers the new copy');
+	const replayedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', {
+	  'x-dsh-archived-chats': '1',
+	}, JSON.stringify({ sessionIds: [legacyRowId] })));
+	assert(replayedHistoryRestore.status === 409, 'restored legacy item cannot be restored twice');
 
-  const deletedHistory = await call(routes, '/plugins/dsh-archived-chats/history/delete', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ snapshotId: capturedSnapshotId })));
-  assert(deletedHistory.status === 200 && deletedHistory.json().deleted.includes(capturedSnapshotId),
-    'history delete removes one exact healthy version');
-  const historyAfterDelete = await call(routes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
-  assert(!historyAfterDelete.json().sessions.some((session) => session.versions.some((item) => item.snapshotId === capturedSnapshotId)),
-    'deleted history version leaves the safe inventory immediately');
+	const recapturedRowId = `legacy:${purgeSnapshotId}`;
+	const deletedHistory = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq('POST', {
+	  'x-dsh-archived-chats': '1',
+	}, JSON.stringify({ sessionIds: [recapturedRowId] })));
+	assert(deletedHistory.status === 200 && deletedHistory.json().purged.includes(recapturedRowId),
+	  `Recycle Bin permanently deletes one exact legacy snapshot (got ${deletedHistory.status}: ${deletedHistory.body})`);
 
-  const recapturedSnapshotId = (await seedLegacy()).snapshotId;
-  const clearedHistory = await call(routes, '/plugins/dsh-archived-chats/history/delete-all', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, '{}'));
-  assert(clearedHistory.status === 200 && clearedHistory.json().deleted.includes(recapturedSnapshotId),
-    'history clear removes every ordinary history version');
-  const historyAfterClear = await call(routes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
-  assert(historyAfterClear.json().sessions.length === 0, 'history clear refreshes the safe inventory');
+	const clearedHistory = await call(routes, '/plugins/dsh-archived-chats/trash/empty', mockReq('POST', {
+	  'x-dsh-archived-chats': '1',
+	}, '{}'));
+	assert(clearedHistory.status === 200 && clearedHistory.json().purged.includes(`legacy:${clearSnapshotId}`),
+	  `empty Recycle Bin removes every remaining legacy snapshot (got ${clearedHistory.status}: ${clearedHistory.body})`);
+	const trashAfterClear = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+	assert(!trashAfterClear.json().sessions.some((row) => row.sourceKind === 'legacy-snapshot'),
+	  'empty Recycle Bin refreshes the unified inventory');
 
   workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== restoredHistoryId);
   await persistence.removeSession(restoredHistoryId);
@@ -610,6 +610,15 @@ console.log('\n[1a0] storage insights, retention, and lineage routes');
   assert(emptyLineage.status === 200 && emptyLineage.json().roots.length === 0,
     'lineage is empty when the archive manager has no archived or recycled sessions');
 
+  const autoGuard = await call(routes, '/plugins/dsh-archived-chats/retention/policy/preview', mockReq('POST', {}, '{}'));
+  assert(autoGuard.status === 403, 'automatic cleanup confirmation preview requires guard');
+  const autoPolicy = { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: 7, recycleAutoDelete: true };
+  const enableWithoutConfirmation = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify(autoPolicy)));
+  assert(enableWithoutConfirmation.status === 409 && enableWithoutConfirmation.json().error === 'retention-confirmation-required', 'enabling auto cleanup requires server confirmation');
+  const autoPreview = await call(routes, '/plugins/dsh-archived-chats/retention/policy/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify(autoPolicy)));
+  assert(autoPreview.status === 200 && autoPreview.json().confirmationRequired === true && autoPreview.json().candidates.length === 0, 'enabling with an empty bin still explains future automatic deletion');
+  const confirmedPolicy = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ policy: autoPolicy, confirmation: autoPreview.json() })));
+  assert(confirmedPolicy.status === 200 && confirmedPolicy.json().policy.recycleAutoDelete === true, 'confirmed policy persists explicit opt-in');
   const policyGet = await call(routes, '/plugins/dsh-archived-chats/retention/policy', mockReq('GET', {}));
   assert(policyGet.status === 405, 'retention policy rejects GET');
   const previewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/retention/preview', mockReq('POST', {}, '{}'));
@@ -1633,8 +1642,6 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert([...selectedVisible].sort().join(',') === 'a,b,hidden', 'select-visible preserves hidden selections');
   const deselectedVisible = clientExports.__test.setVisibleSelection(selectedVisible, ['a', 'b'], false);
   assert([...deselectedVisible].join(',') === 'hidden', 'clear-visible preserves hidden selections');
-  const reconciled = clientExports.__test.reconcileSelection(new Set(['hidden', 'b']), [{ id: 'b' }, { id: 'c' }]);
-  assert([...reconciled].join(',') === 'b', 'selection drops chats removed by an operation or refresh');
 
   assert(clientExports.__test.formatBytes(0) === '0 B', 'formats zero bytes');
   assert(clientExports.__test.formatBytes(1536) === '1.5 KB', 'formats binary kilobytes');
@@ -2294,7 +2301,7 @@ console.log('\n[10b] client model — sorting and visible selection');
 
   assert(JSON.stringify(clientExports.__test.uniqueSessionIds?.(['b', '', 'a', 'b', null])) === '["b","a"]', 'trash ID normalization preserves unique request order');
   const trashGroups = clientExports.__test.groupTrashSessions?.(trashRows);
-  assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.selectionIds }))) === JSON.stringify([
+  assert(JSON.stringify(trashGroups?.map((group) => ({ key: group.key, ids: group.sessionIds }))) === JSON.stringify([
     { key: 'ws-1', ids: ['session-a', 'session-c'] },
     { key: '__ungrouped__', ids: ['session-b'] },
   ]), 'trash grouping keeps first workspace order and row order');
@@ -2325,15 +2332,10 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['archiveNotice.view'] === '查看'
     && zhDict['archiveNotice.undo'] === '撤销',
   'Chinese archive success notice copy is localized');
-  assert(zhDict['legacy.title'] === '旧版数据'
-    && zhDict['history.preview'] === '预览'
-    && zhDict['history.restore'] === '恢复旧版数据'
-    && zhDict['history.restoreTitle'] === '恢复旧版数据为归档副本？'
-    && zhDict['history.delete'] === '删除'
-    && zhDict['history.clear'] === '清空旧版数据'
-    && zhDict['history.clearTitle'] === '清空所有旧版数据？',
-  'Chinese History preview, restore, and deletion copy is localized');
-  assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export this chat', 'English row export action is localized');
+  assert(zhDict['trash.status.legacy'] === '旧版恢复副本'
+    && zhDict['trash.confirm.emptyBody'] === '这将永久删除回收站中所有工作区的会话和保护快照。',
+  'Chinese unified Recycle Bin copy is localized');
+  assert(clientCalls.localeRegister[0].dicts.en['export.row'] === undefined, 'single-chat export copy is removed');
   assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
     && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
   'English session archive label and page title are localized');
@@ -2341,14 +2343,9 @@ console.log('\n[11] client half — settings section registration');
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
   'English archive success notice copy is localized');
-  assert(clientCalls.localeRegister[0].dicts.en['legacy.title'] === 'Legacy data'
-    && clientCalls.localeRegister[0].dicts.en['history.preview'] === 'Preview'
-    && clientCalls.localeRegister[0].dicts.en['history.restore'] === 'Recover legacy data'
-    && clientCalls.localeRegister[0].dicts.en['history.restoreTitle'] === 'Recover legacy data as an archived copy?'
-    && clientCalls.localeRegister[0].dicts.en['history.delete'] === 'Delete'
-    && clientCalls.localeRegister[0].dicts.en['history.clear'] === 'Clear legacy data'
-    && clientCalls.localeRegister[0].dicts.en['history.clearTitle'] === 'Clear all legacy data?',
-  'English History preview, restore, and deletion copy is localized');
+  assert(clientCalls.localeRegister[0].dicts.en['trash.status.legacy'] === 'Legacy recovery copy'
+    && clientCalls.localeRegister[0].dicts.en['trash.confirm.emptyBody'] === 'This permanently deletes the chats and protection snapshots from every workspace in the Recycle Bin.',
+  'English unified Recycle Bin copy is localized');
 	  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice without requiring an unreleased Host slot (got ${clientCalls.slotRegister.length})`);
 	  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
 	  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
@@ -2422,15 +2419,18 @@ console.log('\n[11] client half — settings section registration');
     && style?.textContent.includes('@media (max-width:640px){.dac-archive-notice{')
     && style?.textContent.includes('.dac-archive-notice-actions{flex-wrap:wrap;justify-content:flex-end}'),
   'archive success notice has stable desktop and wrapping narrow-screen styling');
-  assert(style?.textContent.includes('.dac-history-timeline{')
-    && style?.textContent.includes('.dac-history-actions{')
-    && style?.textContent.includes('.dac-history-version{align-items:flex-start;flex-direction:column}')
-    && style?.textContent.includes('.dac-history-actions{width:100%}'),
-  'History timeline and actions remain usable in narrow layouts');
   assert(style?.textContent.includes('.dac-lineage-diagnostic{')
     && style?.textContent.includes('white-space:normal;overflow-wrap:anywhere'),
   'relationship diagnostics wrap completely inside managed cards');
   assert(!clientSource.includes('settings.plugin.item'), 'rc.7 keyed plugin-item slot is not used by the settings section');
+}
+
+function renderTestComponent(node) {
+  if (node.type.name !== 'NotePreview') return node.type(node.props ?? {});
+  // A nested note owns hooks independently of the enclosing page/dialog.
+  const savedHooks = { ...moduleTable.react };
+  try { return createHookHarness(node.type).render(node.props ?? {}); }
+  finally { Object.assign(moduleTable.react, savedHooks); }
 }
 
 function collectElements(node, result = []) {
@@ -2442,7 +2442,7 @@ function collectElements(node, result = []) {
   if (typeof node !== 'object') return result;
   if (typeof node.type === 'function') {
     result.push(node);
-    return collectElements(node.type(node.props ?? {}), result);
+    return collectElements(renderTestComponent(node), result);
   }
   result.push(node);
   collectElements(node.props?.children, result);
@@ -2454,7 +2454,7 @@ function elementText(node) {
   if (Array.isArray(node)) return node.map(elementText).join('');
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (typeof node !== 'object') return '';
-  if (typeof node.type === 'function') return elementText(node.type(node.props ?? {}));
+  if (typeof node.type === 'function') return elementText(renderTestComponent(node));
   return elementText(node.props?.children);
 }
 
@@ -2540,6 +2540,57 @@ function createHookHarness(component) {
 console.log('\n[11a] client half — responsive host marker follows the loaded page lifecycle');
 {
   const savedHooks = { ...moduleTable.react };
+  const NotePreview = clientExports.__test.NotePreview;
+  assert(typeof NotePreview === 'function', 'archive notes expose a full-text hover preview');
+  if (typeof NotePreview === 'function') {
+    const note = 'First line\n' + 'Long note <script>plain text</script> '.repeat(30);
+    const props = { note, sessionId: 'note-test', t: (key) => key };
+    const harness = createHookHarness(NotePreview);
+    let tree = harness.render(props);
+    assert(!collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'note preview starts collapsed');
+    const summaryBounds = { scrollWidth: 1000, clientWidth: 200 };
+    tree.props.ref.current = { querySelector: () => summaryBounds, getBoundingClientRect: () => ({ left: 20, top: 30, bottom: 50 }), contains: () => false };
+    tree.props.onMouseEnter();
+    tree = harness.render(props);
+    assert(collectElements(tree).find((el) => el.props?.role === 'tooltip')?.props.children === note, 'hover exposes complete multiline note as plain text');
+    let restoredFocus = false;
+    const originalActive = documentMock.activeElement;
+    documentMock.activeElement = {};
+    tree.props.ref.current.contains = (target) => target === documentMock.activeElement;
+    tree.props.ref.current.focus = () => { restoredFocus = true; documentMock.activeElement = tree.props.ref.current; };
+    let prevented = false;
+    tree.props.onKeyDown({ key: 'Escape', preventDefault() { prevented = true; }, stopPropagation() {} });
+    tree = harness.render(props);
+    assert(prevented && !collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'Escape dismisses the note popup');
+    assert(restoredFocus, 'Escape returns focus from the popup to its note');
+    documentMock.activeElement = originalActive;
+    tree.props.onFocus();
+    tree = harness.render(props);
+    assert(collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'keyboard focus also exposes complete note');
+    tree.props.onMouseEnter(); tree.props.onMouseLeave(); tree = harness.render(props);
+    assert(collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'pointer exit preserves a keyboard-focused note popup');
+    assert(collectElements(tree).find((el) => el.props?.role === 'tooltip')?.props.tabIndex === 0, 'long note popup is keyboard scrollable');
+    tree.props.onBlur({ currentTarget: { contains: () => false }, relatedTarget: null });
+    tree = harness.render(props);
+    assert(!collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'leaving focus closes the note popup');
+    summaryBounds.scrollWidth = summaryBounds.clientWidth;
+    tree.props.onMouseEnter();
+    tree = harness.render(props);
+    assert(!collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'fully visible notes do not open a hover popup');
+    tree.props.onFocus();
+    tree = harness.render(props);
+    assert(!collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'fully visible notes do not open a focus popup');
+    summaryBounds.clientWidth = 100;
+    tree.props.onMouseEnter();
+    tree = harness.render(props);
+    assert(collectElements(tree).some((el) => el.props?.role === 'tooltip'), 'overflow is remeasured when available width changes');
+    harness.unmount();
+  }
+  Object.assign(moduleTable.react, savedHooks);
+}
+
+{
+  const savedHooks = { ...moduleTable.react };
   const savedFetch = globalThis.fetch;
   globalThis.fetch = async (url) => ({
     ok: true,
@@ -2571,7 +2622,7 @@ console.log('\n[11a] client half — responsive host marker follows the loaded p
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11b] client half — selection mode and preview request lifecycle');
+console.log('\n[11b] client half — simplified archive actions');
 {
   const savedHooks = { ...moduleTable.react };
   const savedFetch = globalThis.fetch;
@@ -2580,302 +2631,60 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
     { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
     { id: 'session-c', title: 'Gamma', createdAt: 30, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二' },
   ];
-  let failBeta = false;
-  const mutations = [];
+  const requests = [];
   globalThis.fetch = async (url, options = {}) => {
     const path = String(url);
-    const ids = options.body ? JSON.parse(options.body).sessionIds ?? [] : [];
-    if (options.method === 'POST') mutations.push({ path, body: JSON.parse(options.body) });
-    return { ok: true, status: 200, json: async () => path.endsWith('/state')
-      ? { metadataStatus: 'ready', sessions: archivedRows }
-      : path.endsWith('/delete-all')
-        ? { trashed: ids.filter((id) => !failBeta || id !== 'session-b'), failed: failBeta ? [{ sessionId: 'session-b', error: 'locked' }] : [] }
-        : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} } };
+    if (options.method === 'POST') requests.push({ path, body: JSON.parse(options.body) });
+    const payload = path.endsWith('/state')
+      ? { metadataStatus: 'ready', trashStatus: 'ready', sessions: archivedRows }
+      : path.endsWith('/stats')
+        ? { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} }
+        : path.endsWith('/delete-all')
+          ? { deleted: archivedRows.map((row) => row.id), pending: [], failed: [] }
+          : {};
+    return { ok: true, status: 200, json: async () => payload };
   };
   const t = clientCtx.locale.bind('settings.archived-chats');
   const harness = createHookHarness(clientCalls.slotRegister[0].component);
   const render = () => harness.render({ t, refreshSidebar: () => {} });
-  const elements = () => collectElements(render());
-  const input = (label) => elements().find((element) => element.type === 'input' && element.props?.['aria-label'] === label);
-  const master = (name = '项目一') => input(`全选当前显示的聊天：${name}`);
-  const check = (element, checked) => element?.props.onChange({ target: { checked } });
-  const bulk = () => elements().find((element) => element.props?.className === 'dac-bulkbar');
-  const bulkAction = (text) => collectElements(bulk()).find((element) => element.type === 'button' && elementText(element) === text);
-  const search = (value) => elements().find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容')?.props.onChange({ target: { value } });
   render(); harness.flushEffects();
   await new Promise((resolve) => setTimeout(resolve, 0));
+  let tree = render();
+  let elements = collectElements(tree);
 
-  assert(master() !== undefined && master('项目二') !== undefined, 'each project has one persistent select-all checkbox');
-  assert(input('选择 Alpha') === undefined && bulk() === undefined, 'unselected archive hides row checkboxes and batch actions');
-  const sides = elements().filter((element) => element.props?.className === 'dac-group-side');
-  assert(sides.length === 2 && sides.every((side) => collectElements(side).filter((element) => element.type === 'input').length === 1), 'each project select-all sits beside its own chat count');
-  assert(!elements().some((element) => elementText(element) === '更多' || elementText(element) === '选择当前结果'), 'duplicate header controls stay removed');
-  const workspaceArchiveEntry = elements().find((element) => element.type === 'button' && elementText(element) === '批量归档工作区');
-  workspaceArchiveEntry?.props.onClick({ currentTarget: { focus: () => {} } });
-  assert(findComponentElement(render(), 'WorkspaceArchiveChooserDialog') !== undefined, 'settings workspace action still opens its chooser');
-  findComponentElement(render(), 'WorkspaceArchiveChooserDialog')?.props.onClose();
+  assert(!elements.some((element) => element.type === 'button' && elementText(element) === '批量选择')
+    && !elements.some((element) => element.props?.className === 'dac-bulkbar')
+    && !elements.some((element) => element.type === 'input' && String(element.props?.['aria-label'] ?? '').startsWith('选择 ')),
+  'archive list removes batch selection controls and row checkboxes');
+  const head = elements.find((element) => element.props?.className === 'dac-head');
+  const deleteAll = collectElements(head).find((element) => element.type === 'button' && elementText(element) === '全部删除');
+  assert(deleteAll !== undefined, 'archive Delete all action sits in the page-title row');
+  assert(elements.filter((element) => element.type === 'button' && elementText(element) === '取消归档').length === 3,
+    'individual unarchive actions remain available');
+  assert(elements.filter((element) => element.type === 'button' && element.props?.['aria-label'] === '永久删除').length === 3,
+    'individual permanent-delete actions remain available');
+  assert(elements.filter((element) => element.type === 'button' && element.props?.['aria-label'] === '…').length === 2,
+    'each workspace keeps its More menu');
 
-  check(master(), true);
-  assert(input('选择 Alpha')?.props.checked && input('选择 Beta')?.props.checked && !input('选择 Gamma')?.props.checked, 'one master click selects its project and leaves other projects unselected');
-  assert(elementText(bulk()).includes('已选择 2 个聊天'), 'first master click immediately opens an accurate batch action bar');
-  check(input('选择 Alpha'), false);
-  assert(master()?.props['aria-checked'] === 'mixed' && !master()?.props.checked, 'partial project selection displays the mixed state');
-  check(master(), true);
-  assert(master()?.props.checked === true && input('选择 Alpha')?.props.checked, 'clicking a mixed master completes project selection');
-  check(master(), false);
-  assert(input('选择 Alpha') === undefined && bulk() === undefined && master()?.props.checked === false, 'clearing the last selected project closes batch mode automatically');
-
-  check(master(), true);
-  check(master('项目二'), true);
-  check(master(), false);
-  assert(input('选择 Gamma')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'clearing one project preserves selections in another project');
-  check(input('选择 Gamma'), false);
-  assert(bulk() === undefined && input('选择 Gamma') === undefined, 'clearing the final row exits selection mode');
-
-  check(master(), true);
-  search('Alpha');
-  assert(bulk() === undefined, 'search changes clear previously selected chats immediately');
-  check(master(), true);
-  assert(elementText(bulk()).includes('已选择 1 个聊天') && !input('选择 Beta'), 'filtered project select-all selects only visible matching chats');
-  bulkAction('导出选中项')?.props.onClick();
-  assert(input('选择 Alpha')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'export preserves the selected chats');
-  const exportForm = createdElements.filter((element) => element.tagName === 'FORM').at(-1);
-  assert(exportForm?.children.find((element) => element.tagName === 'INPUT')?.value === '["session-a"]', 'filtered export excludes hidden and other-project chats');
-  elements().find((element) => element.type === 'button' && elementText(element) === '全部导出')?.props.onClick();
-  const globalExportForm = createdElements.filter((element) => element.tagName === 'FORM').at(-1);
-  assert(globalExportForm?.children.find((element) => element.tagName === 'INPUT')?.value === '["session-a","session-b","session-c"]', 'header export-all includes every archived chat regardless of filters and selection');
-  assert(input('选择 Alpha')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'global export-all preserves selection');
-  search('');
-  for (const [label, value, reset] of [['全部聊天', 'normal', 'all'], ['所有项目', 'ws-1', 'all'], ['全部标签', 'absent-tag', '']]) {
-    check(master(), true);
-    const change = (next) => elements().find((element) => element.type === 'select' && element.props?.['aria-label'] === label)?.props.onChange({ target: { value: next } });
-    change(value);
-    assert(bulk() === undefined, `${label} filter clears hidden selections`);
-    change(reset);
-  }
-  check(master(), true);
-  elements().find((element) => element.type === 'select' && element.props?.['aria-label'] === '排序方式')?.props.onChange({ target: { value: 'oldest' } });
-  assert(elementText(bulk()).includes('已选择 2 个聊天'), 'sorting preserves selections because the visible scope is unchanged');
-  assert(bulkAction('永久删除') !== undefined && bulkAction('全部永久删除') === undefined, 'batch permanent-delete wording describes only the selected scope');
-  bulkAction('永久删除')?.props.onClick();
-  let dialog = findComponentElement(render(), 'ConfirmDialog');
-  assert(String(dialog?.props.body).includes('共 2 个聊天'), 'permanent-delete confirmation states the exact selected count');
+  deleteAll?.props.onClick();
+  tree = render();
+  let dialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(dialog?.props.title === '永久删除所有归档聊天？', 'global archive deletion has a specific confirmation title');
+  assert(String(dialog?.props.body).includes('所有工作区') && String(dialog?.props.body).includes('回收站中的内容不受影响'),
+    'global archive deletion explains its complete scope and Recycle Bin boundary');
   dialog?.props.onCancel();
-  assert(mutations.length === 0 && elementText(bulk()).includes('已选择 2 个聊天'), 'cancelling deletion preserves selection and sends no mutation');
+  assert(requests.length === 0, 'cancelling global archive deletion sends no mutation');
+  collectElements(render()).find((element) => element.type === 'button' && elementText(element) === '全部删除')?.props.onClick();
+  dialog = findComponentElement(render(), 'ConfirmDialog');
+  await dialog?.props.onConfirm();
+  assert(requests[0]?.path.endsWith('/delete-all') && requests[0]?.body.permanent === true
+    && requests[0]?.body.sessionIds.join(',') === 'session-a,session-b,session-c',
+  'global archive deletion permanently targets every archived chat in list order');
 
-  failBeta = true;
-  bulkAction('移至回收站')?.props.onClick();
-  await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
-  assert(mutations.at(-1)?.body.sessionIds.join(',') === 'session-a,session-b', 'batch move targets only the selected project');
-  assert(input('选择 Alpha') === undefined && input('选择 Beta')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'partial success removes successes and retains failed chats selected');
-  failBeta = false;
-  bulkAction('移至回收站')?.props.onClick();
-  await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
-  assert(bulk() === undefined && input('选择 Gamma') === undefined && master('项目二')?.props.checked === false, 'successful retry closes batch actions and preserves unselected projects');
-  check(master('项目二'), true);
-  await bulkAction('取消归档')?.props.onClick();
-  assert(bulk() === undefined && !elements().some((element) => element.type === 'input' && element.props?.type === 'checkbox'), 'successful unarchive leaves no selection control in the empty list');
   harness.unmount();
-
-  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
-  const renderLoadedArchiveSection = async (sectionHarness) => {
-    sectionHarness.render({ t, refreshSidebar: () => {} });
-    sectionHarness.flushEffects();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    let loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
-    sectionHarness.flushEffects();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    loadedTree = sectionHarness.render({ t, refreshSidebar: () => {} });
-    return loadedTree;
-  };
-
-  const closePending = [];
-  globalThis.fetch = (url, options = {}) => {
-    const path = String(url);
-    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
-    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
-    if (path.endsWith('/preview')) return new Promise((resolve) => { closePending.push({ resolve, options }); });
-    return Promise.resolve(responseFor({}));
-  };
-  const closeHarness = createHookHarness(clientCalls.slotRegister[0].component);
-  let closeTree = await renderLoadedArchiveSection(closeHarness);
-  let closeElements = collectElements(closeTree);
-  const closeAlpha = closeElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha');
-  const closeOpenPromise = closeAlpha?.props.onClick();
-  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
-  const loadingPreview = findComponentElement(closeTree, 'PreviewDialog');
-  loadingPreview?.props.onCancel();
-  assert(closePending[0]?.options.signal?.aborted === true, 'closing a loading conversation preview aborts its request');
-  closePending[0]?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
-  await closeOpenPromise;
-  closeTree = closeHarness.render({ t, refreshSidebar: () => {} });
-  assert(findComponentElement(closeTree, 'PreviewDialog') === undefined, 'a completed request cannot reopen a closed conversation preview');
-  closeHarness.unmount();
-
-  const orderedPending = [];
-  globalThis.fetch = (url, options = {}) => {
-    const path = String(url);
-    if (path.endsWith('/state')) return Promise.resolve(responseFor({ metadataStatus: 'ready', sessions: archivedRows }));
-    if (path.endsWith('/stats')) return Promise.resolve(responseFor({ summary: { sessionCount: 2, totalBytes: 10, unavailableCount: 0 }, sessions: {} }));
-    if (path.endsWith('/preview')) {
-      const body = JSON.parse(options.body ?? '{}');
-      return new Promise((resolve) => { orderedPending.push({ sessionId: body.sessionId, resolve, options }); });
-    }
-    return Promise.resolve(responseFor({}));
-  };
-  const orderHarness = createHookHarness(clientCalls.slotRegister[0].component);
-  let orderTree = await renderLoadedArchiveSection(orderHarness);
-  let orderElements = collectElements(orderTree);
-  const alphaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Alpha')?.props.onClick();
-  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
-  orderElements = collectElements(orderTree);
-  const betaOpenPromise = orderElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Beta')?.props.onClick();
-  const alphaPending = orderedPending.find((entry) => entry.sessionId === 'session-a');
-  const betaPending = orderedPending.find((entry) => entry.sessionId === 'session-b');
-  betaPending?.resolve(responseFor({ ok: true, session: archivedRows[1], messages: [], total: 0, nextOffset: null }));
-  await betaOpenPromise;
-  alphaPending?.resolve(responseFor({ ok: true, session: archivedRows[0], messages: [], total: 0, nextOffset: null }));
-  await alphaOpenPromise;
-  orderTree = orderHarness.render({ t, refreshSidebar: () => {} });
-  const orderedPreview = findComponentElement(orderTree, 'PreviewDialog');
-  assert(alphaPending?.options.signal?.aborted === true, 'opening a newer conversation preview aborts the older request');
-  assert(orderedPreview?.props.preview?.session?.id === 'session-b', 'an older response cannot overwrite the newest conversation preview');
-  orderHarness.unmount();
-
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
-
-console.log('\n[11c] client half — bulk selection workflow');
-{
-  const savedHooks = { ...moduleTable.react };
-  const archivedRows = [
-    { id: 'session-a', title: 'Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' },
-    { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
-  ];
-  let stateCall = 0;
-  let selectedAfterRow = null;
-  const renderedEffects = [];
-  moduleTable.react.useState = (initial) => {
-    const value = typeof initial === 'function' ? initial() : initial;
-    const index = stateCall++;
-    const current = index === 0
-      ? archivedRows
-      : index === 7
-        ? 'Alpha'
-      : index === 12
-          ? { title: '将选中的已归档聊天移至回收站？', body: '这将把选中的 1 个已归档聊天移至回收站', ids: ['session-a'] }
-          : value instanceof Set ? new Set(['session-a']) : value;
-    const setter = value instanceof Set
-      ? (next) => { selectedAfterRow = typeof next === 'function' ? next(current) : next; }
-      : () => {};
-    return [current, setter];
-  };
-  moduleTable.react.useEffect = (effect, deps) => { renderedEffects.push({ effect, deps }); };
-  moduleTable.react.useMemo = (fn) => fn();
-  moduleTable.react.useCallback = (fn) => fn;
-  moduleTable.react.useRef = (value) => ({ current: value });
-
-  const t = clientCtx.locale.bind('settings.archived-chats');
-  const tree = clientCalls.slotRegister[0].component({ t, refreshSidebar: () => {} });
-  const elements = collectElements(tree);
-  const sortSelect = elements.find((el) => el.type === 'select' && el.props?.['aria-label'] === '排序方式');
-  assert(sortSelect?.props.value === 'newest', 'sort control defaults to newest first');
-  assert(sortSelect?.props.children.map((option) => option.props.value).join(',') === 'newest,oldest,title', 'sort control offers newest, oldest, and title');
-
-  const checkboxes = elements.filter((el) => el.type === 'input' && el.props?.type === 'checkbox');
-  const alphaCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择 Alpha');
-  assert(alphaCheckbox?.props.checked === true, 'selected chat renders checked');
-  assert(checkboxes.every((el) => el.props?.['aria-label'] !== '选择 Beta'), 'search filter hides non-matching chats');
-  const projectCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择此项目：项目一');
-  assert(projectCheckbox === undefined, 'archive project header removes the redundant project-selection checkbox');
-  assert(checkboxes.length === 2, 'selection mode keeps only the persistent mode toggle and visible chat checkbox');
-  alphaCheckbox?.props.onChange({ target: { checked: false } });
-  assert(selectedAfterRow?.size === 0, 'individual chat selection can be cleared');
-
-  const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
-  assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
-  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('移至回收站') && elementText(bulkBar).includes('永久删除') && !elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, recycle, and permanent deletion without clear');
-  assert(elements.some((el) => el.type === 'button' && elementText(el) === '全部导出'), 'global export-all remains visible alongside selected export');
-
-  const formsBeforeExport = createdElements.filter((element) => element.tagName === 'FORM').length;
-  const bulkExport = collectElements(bulkBar).find((el) => el.type === 'button' && elementText(el) === '导出选中项');
-  bulkExport?.props.onClick();
-  const bulkExportForms = createdElements.filter((element) => element.tagName === 'FORM');
-  const bulkExportInput = bulkExportForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(bulkExport?.props.disabled !== true, 'selected export is enabled when the selected scope is idle');
-  assert(bulkExportForms.length === formsBeforeExport + 1 && bulkExportInput?.value === '["session-a"]', 'selected export submits ids in archive-list order');
-
-  const requests = [];
-  const savedFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options) => {
-    requests.push({ url, options });
-    return { ok: true, status: 200, json: async () => ({ archivedSessionIds: ['session-b'] }) };
-  };
-  const bulkButtons = collectElements(bulkBar).filter((el) => el.type === 'button');
-  const bulkUnarchive = bulkButtons.find((button) => elementText(button) === '取消归档');
-  await bulkUnarchive?.props.onClick();
-
-  const alertDialog = elements.find((el) => el.props?.role === 'alertdialog');
-  const dialogTitle = elements.find((el) => el.props?.id === 'dac-confirm-title');
-  const dialogBody = elements.find((el) => el.props?.id === 'dac-confirm-body');
-  assert(alertDialog?.props['aria-labelledby'] === 'dac-confirm-title' && dialogTitle !== undefined, 'confirmation dialog has an accessible title');
-  assert(alertDialog?.props['aria-describedby'] === 'dac-confirm-body' && dialogBody !== undefined, 'confirmation dialog has an accessible description');
-  let boundaryEscapePrevented = false;
-  let boundaryEscapeStopped = false;
-  let boundaryEscapeStoppedImmediately = false;
-  alertDialog?.props.onKeyDown?.({
-    key: 'Escape',
-    preventDefault: () => { boundaryEscapePrevented = true; },
-    stopPropagation: () => { boundaryEscapeStopped = true; },
-    nativeEvent: { stopImmediatePropagation: () => { boundaryEscapeStoppedImmediately = true; } },
-  });
-  assert(boundaryEscapePrevented && boundaryEscapeStopped && boundaryEscapeStoppedImmediately, 'confirmation dialog contains Escape at the alertdialog boundary');
-
-  let cancelFocuses = 0;
-  let destructiveFocuses = 0;
-  let restoredFocuses = 0;
-  let fallbackFocuses = 0;
-  const previousFocus = { focus: () => { restoredFocuses += 1; documentMock.activeElement = previousFocus; } };
-  const fallbackFocus = { focus: () => { fallbackFocuses += 1; documentMock.activeElement = fallbackFocus; } };
-  const cancelControl = { focus: () => { cancelFocuses += 1; documentMock.activeElement = cancelControl; } };
-  const destructiveControl = { focus: () => { destructiveFocuses += 1; documentMock.activeElement = destructiveControl; } };
-  const cancelButton = elements.find((el) => el.type === 'button' && elementText(el) === '取消');
-  const destructiveButton = elements.find((el) => el.type === 'button' && elementText(el) === '移至回收站' && el.props?.className === 'dac-btn-danger');
-  const pageHeading = elements.find((el) => el.props?.className === 'dac-title');
-  if (alertDialog?.props.ref) alertDialog.props.ref.current = { querySelectorAll: () => [cancelControl, destructiveControl] };
-  if (cancelButton?.props.ref) cancelButton.props.ref.current = cancelControl;
-  if (destructiveButton?.props.ref) destructiveButton.props.ref.current = destructiveControl;
-  if (pageHeading?.props.ref) pageHeading.props.ref.current = fallbackFocus;
-  documentMock.activeElement = previousFocus;
-  documentMock.contains = (node) => node !== previousFocus;
-  const modalEffect = [...renderedEffects].reverse().find(({ deps }) => deps?.length === 3 && typeof deps[0] === 'function');
-  const cleanupModal = modalEffect?.effect();
-  assert(cancelFocuses === 1, 'confirmation dialog moves initial focus to cancel');
-  documentMock.activeElement = destructiveControl;
-  let trappedForward = false;
-  documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => { trappedForward = true; } });
-  assert(trappedForward && documentMock.activeElement === cancelControl, 'confirmation dialog traps forward tab focus');
-  let confirmEscapePrevented = false;
-  let confirmEscapeStopped = false;
-  let confirmEscapeStoppedImmediately = false;
-  documentListeners.get('keydown')?.({
-    key: 'Escape',
-    preventDefault: () => { confirmEscapePrevented = true; },
-    stopPropagation: () => { confirmEscapeStopped = true; },
-    stopImmediatePropagation: () => { confirmEscapeStoppedImmediately = true; },
-  });
-  assert(confirmEscapePrevented && confirmEscapeStopped && confirmEscapeStoppedImmediately, 'confirmation dialog isolates Escape from same-target host settings listeners');
-  cleanupModal?.();
-  assert(restoredFocuses === 0 && fallbackFocuses === 1, 'dialog falls back to page heading when its trigger was removed');
-  documentMock.contains = () => true;
-
-  globalThis.fetch = savedFetch;
-  Object.assign(moduleTable.react, savedHooks);
-  assert(requests[0]?.url === '/plugins/dsh-archived-chats/unarchive-all', 'bulk unarchive uses the batch endpoint');
-  assert(JSON.parse(requests[0]?.options.body ?? '{}').sessionIds.join(',') === 'session-a', 'bulk unarchive sends exactly the selected ids');
-}
-
 console.log('\n[11c] client half — archive insights UI');
 {
   const savedHooks = { ...moduleTable.react };
@@ -2907,15 +2716,15 @@ console.log('\n[11c] client half — archive insights UI');
   };
   const states = [];
   const effectRecords = [];
-  // Positional pins into ArchivedChatsSection's useState order: sessions,
-  // tagFilter, metadataStatus, archiveTrashStatus, stats, metadataEdit, metaBusy.
-  states[0] = { value: archivedRows, setter: null };
-  states[17] = { value: '', setter: null };
-  states[18] = { value: 'ready', setter: null };
-  states[19] = { value: 'ready', setter: null };
-  states[20] = { value: statsFixture, setter: null };
-  states[21] = { value: null, setter: null };
-  states[22] = { value: false, setter: null };
+	// Positional pins into ArchivedChatsSection's useState order: sessions,
+	// tagFilter, metadataStatus, archiveTrashStatus, stats, metadataEdit, metaBusy.
+	states[0] = { value: archivedRows, setter: null };
+	states[15] = { value: '', setter: null };
+	states[16] = { value: 'ready', setter: null };
+	states[17] = { value: 'ready', setter: null };
+	states[18] = { value: statsFixture, setter: null };
+	states[19] = { value: null, setter: null };
+	states[20] = { value: false, setter: null };
   const setterAt = (index) => (next) => {
     states[index].value = typeof next === 'function' ? next(states[index].value) : next;
   };
@@ -2967,7 +2776,7 @@ console.log('\n[11c] client half — archive insights UI');
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
-  states[14].value = null;
+	states[13].value = null;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -2978,16 +2787,17 @@ console.log('\n[11c] client half — archive insights UI');
   const moreMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
   assert(moreMenu === undefined, 'archive header has no duplicate more menu');
 
-  const summary = elements.find((el) => el.props?.className === 'dac-summary');
-  assert(summary !== undefined, 'summary strip rendered below the title');
-  assert(elementText(summary).includes('3 个聊天'), 'summary reports the archived chat count');
-  assert(elementText(summary).includes('1.5 KB'), 'summary reports the measured total size');
-  assert(elementText(summary).includes('部分会话无法统计'), 'summary flags unavailable measurements');
+  const summary = elements.find((el) => el.props?.className === 'dac-summary dac-filter-summary');
+  assert(summary === undefined, 'archive filters omit the redundant global count and size');
+  assert(elements.filter((el) => el.type === 'select' && ['所有项目', '全部标签'].includes(el.props?.['aria-label'])).length === 2 && elements.some((el) => el.type === 'summary' && el.props?.['aria-label'] === '全部聊天'), 'filters consist of combined type/sort, project and tag entries');
+  const filtersWithSummary = elements.find((el) => el.props?.className === 'dac-filters');
+  assert(filtersWithSummary?.props.children.filter(Boolean).length === 3, 'archive has exactly three filter entries');
+  assert(elements.findIndex((el) => el.props?.className === 'dac-search') < elements.indexOf(filtersWithSummary), 'search appears above filters and summary');
 
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-  states[23].value = {
+	states[21].value = {
     token: 'token-ui',
     nonce: 'nonce-ui',
     package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
@@ -2998,7 +2808,7 @@ console.log('\n[11c] client half — archive insights UI');
     selectedIds: ['new-session'],
     result: null,
   };
-  states[24].value = false;
+	states[22].value = false;
   tree = renderSection();
   elements = collectElements(tree);
   const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
@@ -3021,8 +2831,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoreRequests[0]?.options.headers['x-dsh-archived-chats'] === '1', 'import confirmation sends the guard header');
   assert(JSON.parse(restoreRequests[0]?.options.body ?? '{}').sessionIds.join(',') === 'new-session', 'import confirmation sends only selected non-conflicting IDs');
   globalThis.fetch = savedImportFetch;
-  states[23].value = null;
-  states[20].value = statsFixture;
+	states[21].value = null;
+	states[18].value = statsFixture;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3031,12 +2841,12 @@ console.log('\n[11c] client half — archive insights UI');
   assert(tagSelect?.props.value === '', 'tag filter defaults to the non-colliding no-filter sentinel');
   const importantOptions = tagSelect?.props.children.filter((option) => String(option.props.children).toLowerCase() === 'important') ?? [];
   assert(importantOptions.length === 1, 'tag filter options de-duplicate labels case-insensitively');
-  states[17].value = 'all';
+	states[15].value = 'all';
   tree = renderSection();
   elements = collectElements(tree);
   const filteredRows = elements.filter(isRow);
   assert(filteredRows.length === 1 && elementText(filteredRows[0]).includes('Beta'), 'selecting the literal all tag renders only sessions carrying that tag');
-  states[17].value = '';
+	states[15].value = '';
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3048,37 +2858,32 @@ console.log('\n[11c] client half — archive insights UI');
   const rows = elements.filter(isRow);
   const alphaRow = rows.find((row) => elementText(row).includes('Alpha'));
   assert(alphaRow !== undefined && elementText(alphaRow).includes('1 KB'), 'per-row formatted size rendered');
+  const alphaDate = collectElements(alphaRow).find((el) => el.props?.className === 'dac-row-date');
+  assert(alphaDate !== undefined && !elementText(alphaDate).includes('创建于') && !String(alphaDate.props?.title).includes('创建于'),
+    'archive row shows the creation time without a redundant label');
   const gammaRow = rows.find((row) => elementText(row).includes('Gamma'));
   assert(gammaRow !== undefined && elementText(gammaRow).includes('—'), 'unavailable session size renders the dash');
 
-  const rowMenu = collectElements(alphaRow).find((el) => el.type === 'details');
-  assert(rowMenu !== undefined && rowMenu.props.open !== true, 'secondary row actions are collapsed by default');
   const rowActions = collectElements(alphaRow).find((el) => el.props?.className === 'dac-row-actions');
-  assert(rowActions.props.children.filter((el) => el?.type === 'button').length === 3, 'row exposes preview, unarchive, and permanent delete beside its menu');
+  const rowActionChildren = rowActions.props.children.filter(Boolean);
+  assert(rowActionChildren.every((el) => el?.type === 'button') && rowActionChildren.length === 4,
+    'row exposes preview, metadata edit, permanent delete, and unarchive without a More menu');
+  const alphaEdit = editButtonsIn(alphaRow)[0];
+  assert(alphaEdit?.props.className === 'dac-iconbtn' && elementText(alphaEdit) === '', 'metadata editing uses a named icon button');
+  assert(rowActionChildren[1] === alphaEdit, 'metadata edit is the second row action after preview');
+  assert(!collectElements(alphaRow).some((el) => el.type === 'details')
+    && !elements.some((el) => el.type === 'button' && el.props?.['aria-label'] === '导出本条'),
+  'archive rows remove the single-chat export and row More menu');
   const quickDelete = collectElements(rowActions).find((el) => el.type === 'button' && el.props?.['aria-label'] === '永久删除');
   assert(quickDelete?.props.className === 'dac-iconbtn dac-danger', 'row exposes permanent delete as a danger icon button');
-  const rowActionChildren = rowActions.props.children.filter(Boolean);
   assert(rowActionChildren.indexOf(quickDelete) < rowActionChildren.findIndex((el) => el?.props?.className === 'dac-unarchive'), 'quick permanent delete appears immediately before unarchive');
-  assert(elementText(rowMenu).includes('编辑标签与备注') && elementText(rowMenu).includes('导出本条') && !elementText(rowMenu).includes('永久删除'), 'row menu contains secondary actions without duplicating quick permanent delete');
-  let menuFocuses = 0;
-  rowMenu.props.ref.current = { open: true, querySelector: () => ({ focus: () => { menuFocuses += 1; } }) };
-  rowMenu.props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
-  assert(rowMenu.props.ref.current.open === false && menuFocuses === 1, 'Escape closes the row menu and restores its trigger focus');
-  rowMenu.props.ref.current.open = true;
-  collectElements(rowMenu).find((el) => el.props?.className === 'dac-menu dac-row-menu').props.onClickCapture({ target: { closest: () => ({}) } });
-  assert(rowMenu.props.ref.current.open === false && menuFocuses === 2, 'menu actions close the disclosure and establish a stable dialog return target');
-  const alphaExport = collectElements(rowMenu).find((el) => el.type === 'button' && el.props?.['aria-label'] === '导出本条');
-  const formsBeforeRow = createdElements.filter((element) => element.tagName === 'FORM').length;
-  alphaExport?.props.onClick();
-  const rowForms = createdElements.filter((element) => element.tagName === 'FORM');
-  const rowInput = rowForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(alphaExport !== undefined && alphaExport.props.disabled !== true, 'each idle row menu exposes an enabled single-chat export');
-  assert(rowForms.length === formsBeforeRow + 1 && rowInput?.value === '["session-a"]', 'row export submits exactly that session');
   const styleText = headChildren.find((child) => child.id === 'dsh-archived-chats-css')?.textContent ?? '';
   assert(styleText.includes('.dac-iconbtn{') && styleText.includes('width:28px;height:28px'), 'row icon dimensions remain stable');
-  assert(styleText.includes('.dac-bulk-actions{width:100%;flex-wrap:wrap}'), 'narrow bulk export actions wrap without overlap');
+  assert(styleText.includes('.dac-action-trigger{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;')
+    && styleText.includes('.dac-unarchive{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;')
+    && styleText.includes('.dac-btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--dsw-alias-state-error-primary);border-radius:9px;'),
+  'archive and Recycle Bin text actions share the Delete all corner radius');
 
-  const alphaEdit = editButtonsIn(alphaRow)[0];
   assert(alphaEdit !== undefined, 'row exposes a metadata edit action');
   assert(alphaEdit?.props.disabled !== true, 'edit action enabled when metadata is ready');
   let editFocuses = 0;
@@ -3118,11 +2923,11 @@ console.log('\n[11c] client half — archive insights UI');
     stopPropagation: () => { stoppedEscape = true; },
   });
   assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
-  assert(states[21].value === null, 'metadata Escape cancels only the metadata editor state');
+	assert(states[19].value === null, 'metadata Escape cancels only the metadata editor state');
   cleanupMeta?.();
   assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
 
-  states[21].value = archivedRows[0];
+	states[19].value = archivedRows[0];
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3166,7 +2971,7 @@ console.log('\n[11c] client half — archive insights UI');
   // Exercise the real MetadataDialog with persistent hooks so token semantics,
   // IME input, and effect cleanup are verified across actual re-renders.
   const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
-  states[21].value = commaTagSession;
+	states[19].value = commaTagSession;
   const rawSectionTree = renderSection();
   const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
   assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
@@ -3252,8 +3057,8 @@ console.log('\n[11c] client half — archive insights UI');
   assert(restoredDirectFocus === 1 && documentMock.activeElement === returnControl, 'metadata dialog restores focus only when it unmounts');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
-  states[18].value = 'unavailable';
-  states[21].value = null;
+	states[16].value = 'unavailable';
+	states[19].value = null;
   tree = renderSection();
   elements = collectElements(tree);
   const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
@@ -3263,22 +3068,22 @@ console.log('\n[11c] client half — archive insights UI');
 
   // An unreadable recycle catalog means the listing cannot be trusted to exclude
   // already-deleted chats, so it has to be labelled rather than shown as normal.
-  states[18].value = 'ready';
-  states[19].value = 'unavailable';
+	states[16].value = 'ready';
+	states[17].value = 'unavailable';
   tree = renderSection();
   elements = collectElements(tree);
   const trashWarn = elements.filter((el) => el.props?.className === 'dac-warn');
   assert(trashWarn.length === 1 && elementText(trashWarn[0]).includes('回收站目录无法读取'),
     'an unreadable recycle catalog is surfaced on the archived list');
   assert(elements.filter(isRow).length === 3, 'the warning never hides rows');
-  states[19].value = 'ready';
+	states[17].value = 'ready';
   tree = renderSection();
   assert(collectElements(tree).filter((el) => el.props?.className === 'dac-warn').length === 0,
     'a readable recycle catalog shows no warning');
 
   // Statistics failure never removes rows or lifecycle actions.
-  states[20].value = { status: 'error', summary: null, sessions: {} };
-  states[18].value = 'ready';
+	states[18].value = { status: 'error', summary: null, sessions: {} };
+	states[16].value = 'ready';
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.filter(isRow).length === 3, 'statistics failure keeps all rows rendered');
@@ -3607,27 +3412,6 @@ console.log('\n[11f] client half — recycle navigation and management');
   const savedFetch = globalThis.fetch;
   const requests = [];
   const archiveRows = [{ id: 'archive-a', title: 'Archived Alpha', createdAt: 10, origin: null, workspaceId: 'ws-1', workspaceTitle: '项目一' }];
-  const historyPayload = {
-    generatedAt: '2026-08-26T01:00:00.000Z',
-    sessions: [
-      {
-        sessionId: 'history-a', title: 'History Alpha', workspace: { id: 'ws-1', title: '项目一' }, scope: 'archived',
-        versions: [
-          { snapshotId: 'history-newer', createdAt: '2026-08-26T00:00:00.000Z', totalBytes: 2048, attachmentCount: 2, state: 'history' },
-          { snapshotId: 'history-older', createdAt: '2026-08-25T00:00:00.000Z', totalBytes: 1024, attachmentCount: 0, state: 'recycle-protection' },
-        ],
-      },
-      {
-        sessionId: 'history-only', title: null, workspace: null, scope: 'history-only',
-        versions: [{ snapshotId: 'history-orphan', createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 512, attachmentCount: 0, state: 'history' }],
-      },
-    ],
-    degraded: [{ snapshotId: 'history-degraded', code: 'snapshot-hash-mismatch' }],
-  };
-  let servedHistoryPayload = historyPayload;
-  let historyRestorePreparation = 0;
-  let failNextHistoryRestore = false;
-  const historyRestoredCallbacks = [];
   let lineagePayload = { roots: [], diagnostics: [], nodeCount: 0 };
   let recycleRows = [
     {
@@ -3638,6 +3422,22 @@ console.log('\n[11f] client half — recycle navigation and management');
     {
       sessionId: 'trash-b', state: 'degraded', trashedAt: '2026-08-24T02:03:04.000Z', title: 'Trash Beta',
       createdAt: 20, workspace: null, snapshotBytes: 0, snapshotAttachmentCount: 0, liveDisposition: 'parked',
+    },
+    {
+      sessionId: 'legacy:history-newer', state: 'trashed', sourceKind: 'legacy-snapshot', legacySnapshotId: 'history-newer',
+      sourceSessionId: 'history-a', restorable: true, trashedAt: '2026-08-26T00:00:00.000Z', title: 'Legacy Alpha',
+      createdAt: 1787702400000, workspace: { id: 'ws-1', title: '项目一' }, snapshotBytes: 2048,
+      snapshotAttachmentCount: 2, liveDisposition: 'cold',
+    },
+    {
+      sessionId: 'legacy:history-degraded', state: 'degraded', sourceKind: 'legacy-snapshot', legacySnapshotId: 'history-degraded',
+      sourceSessionId: null, restorable: false, trashedAt: '2026-08-25T00:00:00.000Z', title: null,
+      createdAt: null, workspace: null, snapshotBytes: 0, snapshotAttachmentCount: 0, liveDisposition: 'cold',
+    },
+    {
+      sessionId: 'trash-project-purge', state: 'trashed', trashedAt: '2026-08-24T03:04:05.000Z', title: 'Trash Project Purge',
+      createdAt: 30, workspace: { id: 'ws-2', title: '项目二' }, snapshotBytes: 512,
+      snapshotAttachmentCount: 1, liveDisposition: 'cold',
     },
   ];
   const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
@@ -3684,63 +3484,6 @@ console.log('\n[11f] client half — recycle navigation and management');
       messages: [{ index: 0, role: 'user', segments: [{ kind: 'text', text: 'Old local message' }] }],
       total: 1, nextOffset: null,
     });
-    if (path.endsWith('/history/restore/preview')) {
-      historyRestorePreparation += 1;
-      return responseFor({
-        token: `secret-token-${historyRestorePreparation}`,
-        nonce: `secret-nonce-${historyRestorePreparation}`,
-        expiresAt: '2026-08-26T01:05:00.000Z',
-        snapshot: { snapshotId: 'history-newer', sourceSessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z', title: 'History Alpha', totalBytes: 2048, attachmentCount: 2 },
-        destination: { sessionId: 'restored-copy', archived: true },
-        warnings: [{ id: 'restored-copy', reason: 'workspace-unresolved' }],
-      });
-    }
-    if (path.endsWith('/history/restore')) {
-      if (failNextHistoryRestore) {
-        failNextHistoryRestore = false;
-        return { ok: false, status: 410, json: async () => ({ error: 'history-restore-expired' }) };
-      }
-      return responseFor({ restored: ['restored-copy'], sourceSessionId: 'history-a', snapshotId: 'history-newer', warnings: [] });
-    }
-    if (path.endsWith('/history/delete-all')) {
-      const deleted = [];
-      const skipped = [];
-      let freedBytes = 0;
-      servedHistoryPayload = {
-        ...servedHistoryPayload,
-        sessions: servedHistoryPayload.sessions.map((session) => ({
-          ...session,
-          versions: session.versions.filter((version) => {
-            if (version.state === 'recycle-protection') {
-              skipped.push({ snapshotId: version.snapshotId, reason: 'history-snapshot-protected' });
-              return true;
-            }
-            deleted.push(version.snapshotId);
-            freedBytes += version.totalBytes;
-            return false;
-          }),
-        })).filter((session) => session.versions.length > 0),
-      };
-      skipped.push(...servedHistoryPayload.degraded.map((item) => ({ snapshotId: item.snapshotId, reason: 'history-snapshot-degraded' })));
-      return responseFor({ deleted, freedBytes, skipped, failed: [] });
-    }
-    if (path.endsWith('/history/delete')) {
-      const snapshotId = JSON.parse(options.body).snapshotId;
-      let freedBytes = 0;
-      servedHistoryPayload = {
-        ...servedHistoryPayload,
-        sessions: servedHistoryPayload.sessions.map((session) => ({
-          ...session,
-          versions: session.versions.filter((version) => {
-            if (version.snapshotId !== snapshotId) return true;
-            freedBytes = version.totalBytes;
-            return false;
-          }),
-        })).filter((session) => session.versions.length > 0),
-      };
-      return responseFor({ deleted: [snapshotId], freedBytes });
-    }
-    if (path.endsWith('/history')) return responseFor(servedHistoryPayload);
     if (path.endsWith('/preview')) return responseFor({ session: { id: 'trash-a', title: 'Trash Alpha' }, messages: [], total: 0, nextOffset: null });
     return responseFor({});
   };
@@ -3761,283 +3504,30 @@ console.log('\n[11f] client half — recycle navigation and management');
 
   tabs.find((tab) => elementText(tab) === t('tab.insights'))?.props.onClick();
   tree = harness.render({ t, refreshSidebar: () => {} });
-  const legacyStorageElement = findComponentElement(tree, 'StorageRetentionPanel');
-  const legacyStorageHarness = createHookHarness(legacyStorageElement.type);
-  legacyStorageHarness.render(legacyStorageElement.props);
+  const storageElement = findComponentElement(tree, 'StorageRetentionPanel');
+  const legacyStorageHarness = createHookHarness(storageElement.type);
+  legacyStorageHarness.render(storageElement.props);
   legacyStorageHarness.flushEffects();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  let legacyStorageTree = legacyStorageHarness.render(legacyStorageElement.props);
-  assert(findComponentElement(legacyStorageTree, 'HistoryPanel') === undefined, 'legacy data starts collapsed under Storage');
-  assert(collectElements(legacyStorageTree).filter((item) => item.type === 'input' && item.props.type === 'number').length === 1,
-    'Storage exposes only recycle retention and no multi-version policies');
-  collectElements(legacyStorageTree).find((item) => item.type === 'button' && elementText(item) === t('legacy.title'))?.props.onClick();
-  legacyStorageTree = legacyStorageHarness.render(legacyStorageElement.props);
-  const historyPanelElement = findComponentElement(legacyStorageTree, 'HistoryPanel');
-  assert(historyPanelElement?.props?.active === true, 'Storage legacy entry mounts the recovery panel on demand');
-  let legacyChanges = 0;
-  const HistoryPanel = clientExports.__test.HistoryPanel;
-  if (typeof HistoryPanel !== 'function') {
-    assert(false, 'client exposes the history panel behavior for verification');
-  } else {
-    const historyPreviewSelections = [];
-    const historyHarness = createHookHarness(HistoryPanel);
-    const historyProps = {
-      active: true,
-      t,
-      onPreview: (session, version) => historyPreviewSelections.push({ session, version }),
-      onRestored: async (result) => { historyRestoredCallbacks.push(result); },
-      onChanged: async () => { legacyChanges += 1; await historyPanelElement.props.onChanged(); },
-    };
-    historyHarness.render(historyProps);
-    historyHarness.flushEffects();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    let historyTree = historyHarness.render(historyProps);
-    let historyElements = collectElements(historyTree);
-    assert(requests.filter((request) => request.path.endsWith('/history')).length === 1,
-      'first History activation loads the safe inventory once');
-    assert(elementText(historyTree).includes('归档不再创建历史版本')
-      && elementText(historyTree).includes('History Alpha')
-      && elementText(historyTree).includes('1 份旧版数据'),
-    'History explains local versions and groups them by safe session metadata');
-    assert(!historyElements.some((element) => element.type === 'button' && elementText(element) === '预览'),
-      'History timelines are collapsed by default');
-    assert(historyElements.some((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目'),
-      'History search is scoped to safe title and workspace fields');
-    assert(elementText(historyTree).includes('history-degraded')
-      && !elementText(historyTree).includes('snapshot-hash-mismatch:'),
-    'degraded history stays opaque and never guesses session ownership');
-    historyElements.find((element) => element.type === 'button'
-      && element.props?.['aria-label'] === '展开旧版数据: History Alpha')?.props.onClick();
-    historyTree = historyHarness.render(historyProps);
-    historyElements = collectElements(historyTree);
-    const historyTimes = historyElements.filter((element) => element.type === 'time').map((element) => element.props?.dateTime);
-    assert(historyTimes.join(',') === '2026-08-26T00:00:00.000Z'
-      && elementText(historyTree).includes('2 KB')
-      && elementText(historyTree).includes('2 个附件')
-      && !historyElements.some((element) => element.props?.['data-snapshot-id'] === 'history-older'),
-    'expanded History timeline keeps newest-first order and renders bounded version metadata');
-    historyElements.find((element) => element.type === 'button' && elementText(element) === '预览')?.props.onClick();
-    assert(historyPreviewSelections[0]?.session?.sessionId === 'history-a'
-      && historyPreviewSelections[0]?.version?.snapshotId === 'history-newer',
-    'History preview action selects the exact safe snapshot identity');
-    const historySearch = historyElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目');
-    historySearch?.props.onChange({ target: { value: '项目一' } });
-    historyTree = historyHarness.render(historyProps);
-    assert(elementText(historyTree).includes('History Alpha') && !elementText(historyTree).includes('未命名聊天'),
-      'History search matches safe workspace titles and removes unrelated groups');
-    collectElements(historyTree).find((element) => element.type === 'input' && element.props?.placeholder === '搜索聊天或项目')?.props.onChange({ target: { value: '' } });
-    historyTree = historyHarness.render(historyProps);
-
-    const restoreButton = historyElements.find((element) => element.type === 'button' && elementText(element) === '恢复旧版数据');
-    restoreButton?.props.onClick();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    let historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    const firstPrepareRequest = requests.find((request) => request.path.endsWith('/history/restore/preview'));
-    assert(JSON.stringify(JSON.parse(firstPrepareRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer' })
-      && historyRestoreDialog?.props?.title === '恢复旧版数据为归档副本？'
-      && String(historyRestoreDialog?.props?.body).includes('History Alpha')
-      && String(historyRestoreDialog?.props?.body).includes('restored-copy')
-      && String(historyRestoreDialog?.props?.body).includes('不会覆盖原聊天')
-      && !JSON.stringify(historyTree).includes('secret-token-1')
-      && !JSON.stringify(historyTree).includes('secret-nonce-1'),
-    'History restore prepares before confirmation and renders no token values');
-    historyRestoreDialog?.props?.onCancel();
-    historyTree = historyHarness.render(historyProps);
-    assert(findComponentElement(historyTree, 'ConfirmDialog') === undefined
-      && requests.filter((request) => request.path.endsWith('/history/restore')).length === 0,
-    'cancelling History restore performs no restore request');
-
-    collectElements(historyTree).find((element) => element.type === 'button' && elementText(element) === '恢复旧版数据')?.props.onClick();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    await historyRestoreDialog?.props?.onConfirm();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    const restoreRequest = requests.find((request) => request.path.endsWith('/history/restore'));
-    assert(JSON.stringify(JSON.parse(restoreRequest?.options?.body ?? '{}')) === JSON.stringify({ token: 'secret-token-2', nonce: 'secret-nonce-2' })
-      && historyRestoredCallbacks[0]?.restored?.[0] === 'restored-copy'
-      && requests.filter((request) => request.path.endsWith('/history')).length === 2
-      && findComponentElement(historyTree, 'ConfirmDialog') === undefined
-      && elementText(historyTree).includes('restored-copy'),
-    'successful History restore refreshes inventory, closes confirmation, and announces the new copy');
-    assert(legacyChanges === 1, 'legacy recovery refreshes parent storage measurements');
-
-    collectElements(historyTree).find((element) => element.type === 'button' && elementText(element) === '恢复旧版数据')?.props.onClick();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    failNextHistoryRestore = true;
-    await historyRestoreDialog?.props?.onConfirm();
-    historyTree = historyHarness.render(historyProps);
-    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    assert(historyRestoreDialog?.props?.confirmLabel === '重新准备'
-      && String(historyRestoreDialog?.props?.body).includes('请重新准备')
-      && !JSON.stringify(historyTree).includes('secret-token-3'),
-    'failed History restore keeps a safe dialog available for fresh preparation');
-    await historyRestoreDialog?.props?.onConfirm();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    historyRestoreDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    assert(historyRestorePreparation === 4 && historyRestoreDialog?.props?.confirmLabel === '创建副本',
-      'History restore retry obtains a fresh confirmation before another write');
-    historyRestoreDialog?.props?.onCancel();
-
-    historyTree = historyHarness.render(historyProps);
-    historyElements = collectElements(historyTree);
-    assert(!historyElements.some((element) => element.type === 'input' && element.props?.type === 'checkbox'),
-      'History deletion adds no selection checkboxes');
-    const clearHistoryButton = historyElements.find((element) => element.type === 'button' && elementText(element) === '清空旧版数据');
-    assert(clearHistoryButton !== undefined && clearHistoryButton.props.disabled !== true,
-      'History exposes one direct clear action when ordinary versions exist');
-    clearHistoryButton?.props.onClick();
-    historyTree = historyHarness.render(historyProps);
-    let historyDeleteDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    assert(historyDeleteDialog?.props?.title === '清空所有旧版数据？'
-      && String(historyDeleteDialog?.props?.body).includes('2 份旧版数据')
-      && String(historyDeleteDialog?.props?.body).includes('2 个会话')
-      && String(historyDeleteDialog?.props?.body).includes('2.5 KB')
-      && String(historyDeleteDialog?.props?.body).includes('永久删除')
-      && String(historyDeleteDialog?.props?.body).includes('原聊天不会被删除')
-      && String(historyDeleteDialog?.props?.body).includes('回收站保护和无法读取的版本将跳过'),
-    'History clear confirmation summarizes scope, bytes, irreversibility, and skipped protection');
-    historyDeleteDialog?.props?.onCancel();
-    assert(!requests.some((request) => request.path.endsWith('/history/delete-all')),
-      'cancelling History clear performs no deletion');
-
-    historyTree = historyHarness.render(historyProps);
-    historyElements = collectElements(historyTree);
-    const ordinaryDelete = historyElements.find((element) => element.type === 'button'
-      && element.props?.['data-snapshot-id'] === 'history-newer' && elementText(element) === '删除');
-    const protectedDelete = historyElements.find((element) => element.type === 'button'
-      && element.props?.['data-snapshot-id'] === 'history-older' && elementText(element) === '删除');
-    assert(ordinaryDelete?.props.disabled !== true
-      && protectedDelete === undefined,
-    'Legacy data enables ordinary deletion and excludes active recycle protection');
-    ordinaryDelete?.props.onClick();
-    historyTree = historyHarness.render(historyProps);
-    historyDeleteDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    assert(historyDeleteDialog?.props?.title === '删除这个旧版数据？'
-      && String(historyDeleteDialog?.props?.body).includes('History Alpha')
-      && String(historyDeleteDialog?.props?.body).includes('2 KB')
-      && String(historyDeleteDialog?.props?.body).includes('删除后无法恢复')
-      && String(historyDeleteDialog?.props?.body).includes('原聊天不会被删除'),
-    'single History deletion requires an irreversible warning confirmation');
-    await historyDeleteDialog?.props?.onConfirm();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    const deleteRequest = requests.find((request) => request.path.endsWith('/history/delete'));
-    assert(deleteRequest?.options?.body === '{"snapshotId":"history-newer"}'
-      && !elementText(historyTree).includes('2 KB'),
-    'confirmed single History deletion removes only the selected version and refreshes inventory');
-    assert(legacyChanges === 2, 'legacy deletion refreshes parent storage measurements');
-
-    collectElements(historyTree).find((element) => element.type === 'button' && elementText(element) === '清空旧版数据')?.props.onClick();
-    historyTree = historyHarness.render(historyProps);
-    historyDeleteDialog = findComponentElement(historyTree, 'ConfirmDialog');
-    await historyDeleteDialog?.props?.onConfirm();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    historyTree = historyHarness.render(historyProps);
-    assert(requests.some((request) => request.path.endsWith('/history/delete-all') && request.options.body === '{}')
-      && elementText(historyTree).includes('回收站保护')
-      && !elementText(historyTree).includes('仅历史保留'),
-    'History clear deletes remaining ordinary versions while retaining recycle protection');
-    assert(legacyChanges === 3, 'legacy clear refreshes parent storage measurements');
-    historyHarness.unmount();
-  }
-
+  const legacyStorageTree = legacyStorageHarness.render(storageElement.props);
+  assert(findComponentElement(legacyStorageTree, 'HistoryPanel') === undefined
+    && !collectElements(legacyStorageTree).some((item) => item.type === 'button' && elementText(item) === '旧版数据'),
+  'Storage no longer exposes a separate legacy-data entry');
+  assert(collectElements(legacyStorageTree).filter((item) => item.type === 'select' && item.props['aria-label'] === t('retention.recycleAge')).length === 1,
+    'Storage exposes only Recycle Bin retention and no multi-version policies');
   legacyStorageHarness.unmount();
-  servedHistoryPayload = { generatedAt: '2026-08-26T02:00:00.000Z', sessions: [], degraded: [] };
-  const emptyHistoryHarness = createHookHarness(HistoryPanel);
-  const emptyHistoryProps = { active: true, t, onPreview: () => {}, onRestored: async () => {} };
-  emptyHistoryHarness.render(emptyHistoryProps);
-  emptyHistoryHarness.flushEffects();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const emptyHistoryTree = emptyHistoryHarness.render(emptyHistoryProps);
-  assert(elementText(emptyHistoryTree).includes('没有需要迁移的旧版数据'), 'empty legacy data explains there is nothing to migrate');
-  emptyHistoryHarness.unmount();
-  servedHistoryPayload = historyPayload;
+  assert(requests.filter((request) => request.path.endsWith('/history')).length === 0,
+    'removing the standalone History UI avoids legacy inventory requests');
 
-  historyPanelElement?.props?.onPreview?.(historyPayload.sessions[0], historyPayload.sessions[0].versions[0]);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  tree = harness.render({ t, refreshSidebar: () => {} });
-  const historyPreviewDialog = findComponentElement(tree, 'PreviewDialog');
-  const historyPreviewRequest = requests.find((request) => request.path.endsWith('/history/preview'));
-  assert(historyPreviewRequest?.options?.headers?.['x-dsh-archived-chats'] === '1'
-    && JSON.stringify(JSON.parse(historyPreviewRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', offset: 0, limit: 50 })
-    && historyPreviewDialog?.props?.preview?.scope === 'history',
-  'History preview uses the guarded snapshot route and reuses the conversation dialog');
-  assert(typeof historyPanelElement?.props?.onRestored === 'function', 'History panel wires successful restore to archive and sidebar refresh');
-  if (historyPreviewDialog !== undefined) {
-    const previewHarness = createHookHarness(historyPreviewDialog.type);
-    const historyDialogTree = previewHarness.render(historyPreviewDialog.props);
-    assert(elementText(historyDialogTree).includes('只读')
-      && elementText(historyDialogTree).includes('2026')
-      && elementText(historyDialogTree).includes('Old local message'),
-    'History preview visibly identifies the read-only snapshot timestamp');
-    previewHarness.unmount();
-  }
   const historyImageRef = { attachmentId: 'image-history', sha256: 'a'.repeat(64), bytes: 13, mediaType: 'image/png', width: 10, height: 10 };
   const historyImageSignal = new AbortController().signal;
   await clientExports.__test.fetchHistoryImage?.('history-newer', historyImageRef, historyImageSignal);
   const historyImageRequest = requests.find((request) => request.path.endsWith('/history/preview/image'));
   assert(historyImageRequest?.options?.signal === historyImageSignal
     && JSON.stringify(JSON.parse(historyImageRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', attachment: historyImageRef }),
-  'History image helper forwards cancellation and the complete snapshot-scoped descriptor');
-  historyPreviewDialog?.props?.onCancel?.();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  'legacy Recycle Bin previews keep snapshot-scoped image loading');
 
   const StorageRetentionPanel = clientExports.__test.StorageRetentionPanel;
-  {
-    const healthyFetch = globalThis.fetch;
-    let failInsights = true;
-    let finishInsights;
-    let deferInsights = false;
-    globalThis.fetch = async (url, options) => {
-      if (!String(url).endsWith('/insights')) return healthyFetch(url, options);
-      if (failInsights) return { ok: false, status: 503, json: async () => ({ error: 'insights unavailable' }) };
-      if (deferInsights) return new Promise((resolve) => { finishInsights = resolve; });
-      return responseFor(storageInsightsPayload);
-    };
-    const recoveryStorage = createHookHarness(StorageRetentionPanel);
-    const recoveryProps = { t, onPreview: () => {}, onRestored: async () => {} };
-    let recoveryTree = recoveryStorage.render(recoveryProps);
-    collectElements(recoveryTree).find((item) => item.type === 'button' && elementText(item) === t('legacy.title'))?.props.onClick();
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    const loadingLegacyIndex = recoveryTree.props.children.findIndex((item) => item?.type?.name === 'HistoryPanel');
-    assert(loadingLegacyIndex >= 0, 'legacy data remains accessible while storage measurements load');
-    recoveryStorage.flushEffects();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    let recoveryChild = findComponentElement(recoveryTree, 'HistoryPanel');
-    assert(elementText(recoveryTree).includes(t('insights.error')) && recoveryChild?.props.active === true
-      && recoveryTree.props.children.indexOf(recoveryChild) === loadingLegacyIndex,
-    'insights 503 leaves legacy recovery mounted at the same child position');
-    failInsights = false;
-    await recoveryChild.props.onChanged();
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    const policyInput = collectElements(recoveryTree).find((item) => item.type === 'input' && item.props.type === 'number');
-    assert(policyInput !== undefined, 'successful legacy refresh recovers storage policy after initial insights failure');
-    policyInput?.props.onChange({ target: { value: '42' } });
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    recoveryChild = findComponentElement(recoveryTree, 'HistoryPanel');
-    deferInsights = true;
-    const updating = recoveryChild.props.onChanged();
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    assert(recoveryTree.props.children.findIndex((item) => item?.type?.name === 'HistoryPanel') === loadingLegacyIndex,
-      'in-flight legacy storage refresh keeps the recovery panel mounted');
-    finishInsights(responseFor({ ...storageInsightsPayload, summary: { ...storageInsightsPayload.summary, totalMeasuredBytes: 8192 } }));
-    await updating;
-    recoveryTree = recoveryStorage.render(recoveryProps);
-    assert(elementText(recoveryTree).includes('8 KB')
-      && collectElements(recoveryTree).find((item) => item.type === 'input' && item.props.type === 'number')?.props.value === 42
-      && recoveryTree.props.children.findIndex((item) => item?.type?.name === 'HistoryPanel') === loadingLegacyIndex,
-    'legacy mutation refreshes measured totals while preserving unsaved policy and mounted recovery panel');
-    recoveryStorage.unmount();
-    globalThis.fetch = healthyFetch;
-  }
-
   if (typeof StorageRetentionPanel !== 'function') {
     assert(false, 'client exposes the storage and retention panel behavior for verification');
   } else {
@@ -4059,7 +3549,7 @@ console.log('\n[11f] client half — recycle navigation and management');
     assert(storageElements.some((element) => element.props?.role === 'note' && elementText(element).includes('归档列表为空')),
       'storage view explains why retained snapshots can remain without archived chats');
     assert(!storageText.includes('Alpha 归档') && !storageText.includes('snapshot-active')
-      && storageText.includes('保存不会删除数据'),
+      && storageText.includes('自动永久删除'),
       'storage view keeps unbounded directory and snapshot rows out of the policy layout');
 
     const sessionDetailsButton = storageElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看会话目录明细');
@@ -4146,59 +3636,73 @@ console.log('\n[11f] client half — recycle navigation and management');
         'snapshot detail search filters by snapshot identity');
       snapshotHarness.unmount();
     }
-    // A saved policy must not make later cleanup failures look successful or expire.
-    const retentionFetch = globalThis.fetch;
-    const retentionSetTimeout = globalThis.setTimeout;
-    const retentionClearTimeout = globalThis.clearTimeout;
-    const retentionTimers = new Map();
-    let nextRetentionTimer = 0;
-    let previewFails = true;
-    globalThis.setTimeout = (callback, delay) => {
-      const id = ++nextRetentionTimer;
-      retentionTimers.set(id, { callback, delay });
-      return id;
-    };
-    globalThis.clearTimeout = (id) => retentionTimers.delete(id);
-    globalThis.fetch = async (url, options) => {
-      if (String(url).endsWith('/retention/policy')) return responseFor({ policy: storageInsightsPayload.policy });
-      if (String(url).endsWith('/retention/preview')) {
-        if (previewFails) throw new Error('preview unavailable');
-        return responseFor({ token: 'token', nonce: 'nonce', candidates: [] });
-      }
-      if (String(url).endsWith('/retention/apply')) return responseFor({ applied: [], failed: [{ key: 'snapshot-a', reason: 'cleanup refused' }] });
-      return retentionFetch(url, options);
-    };
-    const renderRetention = () => {
-      const result = storageHarness.render({ t });
-      storageHarness.flushEffects();
-      return result;
-    };
-    const retentionAction = (label) => collectElements(renderRetention()).find((element) => element.type === 'button' && elementText(element) === label);
-    try {
-      await retentionAction('保存策略').props.onClick();
-      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-toast' && elementText(element) === '策略已保存'), 'policy save success uses a transient success toast');
-      assert(retentionTimers.size === 1 && [...retentionTimers.values()][0].delay === 3000, 'only policy save success schedules its three-second dismissal');
-      [...retentionTimers.values()][0].callback();
-      renderRetention();
-      assert(!elementText(renderRetention()).includes('策略已保存'), 'policy success toast disappears when its timer fires');
-      await retentionAction('保存策略').props.onClick();
-      renderRetention();
-      await retentionAction('预览清理').props.onClick();
-      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-notice' && elementText(element) === 'preview unavailable'), 'preview failure after policy save uses a persistent notice instead of a success toast');
-      assert(retentionTimers.size === 0, 'preview failure cancels the prior success timer and schedules no dismissal');
-      await retentionAction('保存策略').props.onClick();
-      renderRetention();
-      previewFails = false;
-      await retentionAction('预览清理').props.onClick();
-      await findComponentElement(renderRetention(), 'RetentionPreviewDialog').props.onApply();
-      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-notice' && elementText(element).includes('cleanup refused')), 'partial cleanup failure after saving preserves actionable failure details in a notice');
-      assert(retentionTimers.size === 0, 'cleanup results remain visible without an automatic dismissal');
-    } finally {
-      storageHarness.unmount();
-      globalThis.fetch = retentionFetch;
-      globalThis.setTimeout = retentionSetTimeout;
-      globalThis.clearTimeout = retentionClearTimeout;
+    const policyElements = () => collectElements(storageHarness.render({ t }));
+    const chooseDays = (value) => policyElements().find((el) => el.type === 'select' && el.props['aria-label'] === t('retention.recycleAge')).props.onChange({ target: { value } });
+    const customInput = () => policyElements().find((el) => el.type === 'input' && el.props.type === 'number');
+    const saveDays = () => policyElements().find((el) => el.type === 'button' && elementText(el) === '保存策略');
+    assert(!customInput(), 'disabled retention does not show a numeric field');
+    chooseDays('custom');
+    assert(customInput() && saveDays().props.disabled, 'blank custom retention cannot be saved');
+    for (const invalid of ['0', '-1', '1.5', '3651', '']) {
+      customInput().props.onChange({ target: { value: invalid } });
+      assert(saveDays().props.disabled && customInput().props['aria-invalid'], `custom retention rejects ${invalid}`);
     }
+    customInput().props.onChange({ target: { value: '42' } });
+    assert(!saveDays().props.disabled, 'valid custom retention can be saved');
+    const beforePolicyFetch = globalThis.fetch;
+    const savedDayValues = [];
+    let previewFails = false;
+    let saveFails = false;
+    globalThis.fetch = async (url, options) => {
+      if (String(url).endsWith('/retention/policy/preview')) {
+        if (previewFails) throw new Error('preview unavailable');
+        const proposed = JSON.parse(options.body);
+        const previous = storageInsightsPayload.policy;
+        return responseFor({ policy: proposed, confirmationRequired: proposed.recycleAutoDelete && (!previous.recycleAutoDelete || proposed.recycleMaxAgeDays < previous.recycleMaxAgeDays), token: 'policy-token', nonce: 'policy-nonce', candidates: [{ sessionId: 'expired', title: 'Expired chat' }] });
+      }
+      if (String(url).endsWith('/retention/policy')) {
+        if (saveFails) throw new Error('save unavailable');
+        const body = JSON.parse(options.body);
+        const policy = body.policy ?? body;
+        if (policy.recycleAutoDelete && (!storageInsightsPayload.policy.recycleAutoDelete || policy.recycleMaxAgeDays < storageInsightsPayload.policy.recycleMaxAgeDays)) {
+          assert(body.confirmation?.token === 'policy-token' && body.confirmation?.nonce === 'policy-nonce', 'UI sends server-issued confirmation for enabling or shortening');
+        }
+        savedDayValues.push(policy.recycleMaxAgeDays);
+        storageInsightsPayload = { ...storageInsightsPayload, policy };
+        return responseFor({ policy });
+      }
+      return beforePolicyFetch(url, options);
+    };
+    await saveDays().props.onClick();
+    let policyDialog = findComponentElement(storageHarness.render({ t }), 'ConfirmDialog');
+    assert(policyDialog && savedDayValues.length === 0 && elementText(policyDialog.props.body).includes('Expired chat') && elementText(policyDialog.props.body).includes('1'), 'enabling previews affected chats and count before any setting is saved');
+    policyDialog?.props.onCancel();
+    assert(savedDayValues.length === 0 && !findComponentElement(storageHarness.render({ t }), 'ConfirmDialog'), 'canceling leaves automatic cleanup disabled');
+    await saveDays().props.onClick();
+    policyDialog = findComponentElement(storageHarness.render({ t }), 'ConfirmDialog');
+    await policyDialog?.props.onConfirm();
+    assert(customInput()?.props.value === 42, 'saved nonpreset period reloads as custom without losing its value');
+    for (const preset of ['7', '30', '90', '']) {
+      chooseDays(preset);
+      assert(!customInput(), 'preset and disabled modes hide custom input');
+      await saveDays().props.onClick();
+      const confirmation = findComponentElement(storageHarness.render({ t }), 'ConfirmDialog');
+      assert(Boolean(confirmation) === (preset === '7'), 'only shortening the enabled period asks again');
+      await confirmation?.props.onConfirm();
+    }
+    assert(JSON.stringify(savedDayValues) === '[42,7,30,90,null]', 'custom, presets and disabled save the correct numeric or null policy values');
+    assert(storageInsightsPayload.policy.recycleAutoDelete === false, 'disabled mode persists an explicit false opt-in');
+    chooseDays('7'); previewFails = true;
+    await saveDays().props.onClick();
+    assert(policyElements().some((el) => el.props?.className === 'dac-notice' && elementText(el) === 'preview unavailable'), 'failed confirmation preview is a persistent error and never saves');
+    previewFails = false;
+    await saveDays().props.onClick();
+    saveFails = true;
+    await findComponentElement(storageHarness.render({ t }), 'ConfirmDialog')?.props.onConfirm();
+    assert(policyElements().some((el) => el.props?.className === 'dac-notice' && elementText(el) === 'save unavailable') && storageInsightsPayload.policy.recycleAutoDelete === false, 'failed confirmed save leaves cleanup disabled and reports the error');
+    assert(!policyElements().some((el) => el.type === 'button' && elementText(el) === '查看可清理项'), 'automatic cleanup has no extra manual preview gate');
+    storageHarness.unmount();
+    globalThis.fetch = beforePolicyFetch;
 
     storageInsightsPayload = {
       ...storageInsightsPayload,
@@ -4421,111 +3925,157 @@ console.log('\n[11f] client half — recycle navigation and management');
 
   tabs.find((tab) => elementText(tab) === t('tab.trash'))?.props.onClick();
 
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  let recycleSidebarRefreshes = 0;
+  const recycleProps = { t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } };
+  tree = harness.render(recycleProps);
   harness.flushEffects();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  tree = harness.render(recycleProps);
   harness.flushEffects();
   elements = collectElements(tree);
   assert(requests.filter((request) => request.path.endsWith('/trash')).length === 1, 'first Recycle Bin activation loads trash once');
   assert(elements.some((element) => element.type === 'button' && element.props?.role === 'tab' && element.props?.['aria-selected'] === true && elementText(element) === '回收站'), 'Recycle Bin tab becomes selected');
-  assert(elementText(tree).includes('Trash Alpha') && elementText(tree).includes('项目一'), 'recycle row renders title and original project');
-  assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 个附件'), 'recycle row renders snapshot bytes and attachment count');
-  assert(elementText(tree).includes('保护快照可用') && elementText(tree).includes('快照降级'), 'recycle rows render ready and degraded statuses');
 
-  let recycleCheckboxes = elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(recycleCheckboxes.length === 0, 'recycle rows hide all selection checkboxes by default');
-  assert(!elements.some((element) => element.type === 'button' && ['恢复选中项', '永久删除选中项'].includes(elementText(element))), 'recycle selected-item actions are hidden by default');
-  const startRecycleSelection = elements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  assert(startRecycleSelection !== undefined, 'recycle toolbar exposes an on-demand selection trigger');
-  startRecycleSelection?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  const trashHead = elements.find((element) => element.props?.className === 'dac-head');
+  const trashTabs = elements.find((element) => element.props?.className === 'dac-tabs');
+  const emptyButton = collectElements(trashHead).find((element) => element.type === 'button' && elementText(element) === '清空回收站');
+  assert(elementText(trashHead).startsWith('会话档案') && emptyButton !== undefined
+    && !collectElements(trashTabs).some((element) => elementText(element) === '清空回收站'),
+  'Empty Recycle Bin action sits at the top right of the page-title row');
+  assert(!elements.some((element) => element.type === 'input' && element.props?.type === 'checkbox')
+    && !elements.some((element) => element.type === 'button' && elementText(element) === '批量选择')
+    && !elements.some((element) => element.props?.className === 'dac-bulkbar'),
+  'Recycle Bin removes batch-selection controls, row checkboxes, and bulk bars');
+
+  assert(elementText(tree).includes('Trash Alpha') && elementText(tree).includes('Legacy Alpha') && elementText(tree).includes('项目一'),
+    'Recycle Bin renders ordinary chats and readable legacy snapshots in their original project');
+  assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 KB') && elementText(tree).includes('2 个附件'),
+    'Recycle Bin renders bounded snapshot size and attachment metadata');
+  assert(elementText(tree).includes('保护快照可用') && elementText(tree).includes('旧版恢复副本') && elementText(tree).includes('快照降级'),
+    'Recycle Bin distinguishes ordinary, legacy-copy, and degraded states');
+
+  const visibleTrashRows = elements.filter((element) => element.props?.className === 'dac-row dac-trash-row');
+  const trashRowActionButtons = visibleTrashRows.flatMap((row) => collectElements(row).filter((element) => element.type === 'button'));
+  const restoreIconButtons = trashRowActionButtons.filter((button) => button.props?.['aria-label'] === '恢复');
+  const purgeIconButtons = trashRowActionButtons.filter((button) => button.props?.['aria-label'] === '永久删除');
+  assert(restoreIconButtons.length === visibleTrashRows.length && purgeIconButtons.length === visibleTrashRows.length
+    && [...restoreIconButtons, ...purgeIconButtons].every((button) => elementText(button) === '' && button.props.className.includes('dac-iconbtn')),
+  'Recycle Bin row restore and permanent-delete actions use named icon buttons');
+
+  const trashGroup = (title) => collectElements(harness.render(recycleProps)).find((element) => element.props?.className === 'dac-group dac-trash-group'
+    && elementText(element).includes(title));
+  const openTrashGroupMenu = (title) => {
+    const group = trashGroup(title);
+    collectElements(group).find((element) => element.type === 'button' && element.props?.['aria-label'] === `更多聊天操作: ${title}`)?.props.onClick();
+    return collectElements(trashGroup(title));
+  };
+  let trashMenuElements = openTrashGroupMenu('项目一');
+  assert(trashMenuElements.filter((element) => element.props?.role === 'menuitem').map(elementText).join(',') === '全部恢复,全部永久删除',
+    'Recycle Bin project menu orders restore before permanent deletion');
+  trashMenuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部永久删除')?.props.onClick();
+  let groupPurgeDialog = findComponentElement(harness.render(recycleProps), 'ConfirmDialog');
+  assert(groupPurgeDialog?.props.title === '永久删除回收站中的会话？', 'Recycle Bin project purge requires irreversible confirmation');
+  groupPurgeDialog?.props.onCancel();
+
+  trashMenuElements = openTrashGroupMenu('项目二');
+  trashMenuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部永久删除')?.props.onClick();
+  groupPurgeDialog = findComponentElement(harness.render(recycleProps), 'ConfirmDialog');
+  await groupPurgeDialog?.props.onConfirm();
+  assert(requests.some((request) => request.path.endsWith('/trash/purge')
+      && request.options.body === '{"sessionIds":["trash-project-purge"]}')
+    && !elementText(harness.render(recycleProps)).includes('Trash Project Purge'),
+  'Recycle Bin project purge permanently deletes exactly that project');
+
+  trashMenuElements = openTrashGroupMenu('未分组');
+  await trashMenuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部恢复')?.props.onClick();
+  const projectRestoreRequest = requests.findLast((request) => request.path.endsWith('/trash/restore'));
+  const afterProjectRestoreText = elementText(harness.render(recycleProps));
+  assert(projectRestoreRequest?.options.body === '{"sessionIds":["trash-b"]}',
+    `Recycle Bin project restore targets only restorable chats (got ${projectRestoreRequest?.options.body ?? 'no request'})`);
+  assert(!afterProjectRestoreText.includes('Trash Beta') && afterProjectRestoreText.includes('快照降级'),
+    'Recycle Bin project restore removes restored chats and retains unrestorable snapshots');
+
+  tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  recycleCheckboxes = elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(recycleCheckboxes.some((element) => element.props?.['aria-label'] === '选择全部回收站会话'), 'recycle selection mode exposes the global checkbox');
-  assert(recycleCheckboxes.some((element) => element.props?.['aria-label'] === '选择回收站会话: Trash Alpha'), 'recycle selection mode exposes row checkboxes');
-  assert(elements.some((element) => element.type === 'button' && elementText(element) === '恢复选中项')
-    && elements.some((element) => element.type === 'button' && elementText(element) === '永久删除选中项'), 'recycle selection mode exposes selected-item actions');
-  const finishRecycleSelection = elements.find((element) => element.type === 'button' && elementText(element) === '完成');
-  finishRecycleSelection?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
-  elements = collectElements(tree);
-  assert(!elements.some((element) => element.type === 'input' && element.props?.type === 'checkbox'), 'finishing recycle selection hides every checkbox');
-  assert(!elements.some((element) => element.type === 'button' && ['恢复选中项', '永久删除选中项'].includes(elementText(element))), 'finishing recycle selection hides selected-item actions');
+
+  const degradedLegacyRow = elements.find((element) => element.props?.className === 'dac-row dac-trash-row'
+    && element.props?.children && elementText(element).includes('未命名会话') && elementText(element).includes('快照降级'));
+  const degradedActions = collectElements(degradedLegacyRow).filter((element) => element.type === 'button');
+  assert(degradedActions.find((element) => element.props?.['aria-label'] === '查看对话 未命名会话')?.props.disabled === true
+    && degradedActions.find((element) => element.props?.['aria-label'] === '恢复')?.props.disabled === true
+    && degradedActions.find((element) => element.props?.['aria-label'] === '永久删除')?.props.disabled !== true,
+  'unreadable legacy snapshots disable preview and restore while retaining permanent deletion');
 
   const collapseProject = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '折叠' && elementText(element).includes('项目一'));
-  assert(collapseProject?.props['aria-expanded'] === true, 'recycle project group starts expanded');
+  assert(collapseProject?.props['aria-expanded'] === true, 'Recycle Bin project group starts expanded');
   collapseProject?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  assert(!elements.some((element) => element.props?.['data-session-id'] === 'trash-a'), 'collapsing a recycle group hides its rows');
-  assert(JSON.parse(storageMap.get('dsh-archived-chats:collapsed') ?? '{}')['trash:ws-1'] === true, 'recycle collapse preference uses a tab-specific key');
-  const expandProject = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '展开' && elementText(element).includes('项目一'));
-  expandProject?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  assert(!elementText(tree).includes('Trash Alpha') && !elementText(tree).includes('Legacy Alpha'), 'collapsing a Recycle Bin project hides every row in that project');
+  assert(JSON.parse(storageMap.get('dsh-archived-chats:collapsed') ?? '{}')['trash:ws-1'] === true, 'Recycle Bin collapse preference uses a tab-specific key');
+  elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '展开' && elementText(element).includes('项目一'))?.props.onClick();
+  tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  assert(elements.some((element) => element.props?.['data-session-id'] === 'trash-a'), 'expanding a recycle group restores its rows');
 
-  const previewButton = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Trash Alpha');
-  await previewButton?.props.onClick();
+  const ordinaryPreview = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Trash Alpha');
+  await ordinaryPreview?.props.onClick();
   const previewRequest = requests.findLast((request) => request.path.endsWith('/preview'));
-  assert(JSON.parse(previewRequest?.options.body ?? '{}').scope === 'trash', 'recycle preview is explicitly trash-scoped');
+  assert(JSON.parse(previewRequest?.options.body ?? '{}').scope === 'trash', 'ordinary Recycle Bin preview is explicitly trash-scoped');
+  findComponentElement(harness.render(recycleProps), 'PreviewDialog')?.props.onCancel();
 
-  const restoreButton = elements.find((element) => element.type === 'button' && elementText(element) === '恢复' && element.props?.['data-session-id'] === 'trash-a');
-  const recycleFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ restored: [], failed: [{ id: 'trash-a', reason: 'trash-state-conflict' }] }) });
-  await restoreButton?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
-  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('状态已变化'), 'restore renders the structured conflict reason instead of a raw HTTP status');
-  assert(elementText(tree).includes('Trash Alpha'), 'failed restore retains its recycle row');
-  globalThis.fetch = recycleFetch;
-  await restoreButton?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
+  tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  assert(requests.some((request) => request.path.endsWith('/trash/restore') && request.options.body === '{"sessionIds":["trash-a"]}'), 'row restore targets exactly one recycle record');
-  assert(!elements.some((element) => element.props?.['data-session-id'] === 'trash-a' && elementText(element) === '恢复')
-    && elements.some((element) => element.props?.['data-session-id'] === 'trash-b' && elementText(element) === '恢复'), 'restore removes only the Host-confirmed row');
+  const legacyPreview = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Legacy Alpha');
+  await legacyPreview?.props.onClick();
+  tree = harness.render(recycleProps);
+  const historyPreviewRequest = requests.findLast((request) => request.path.endsWith('/history/preview'));
+  const legacyPreviewDialog = findComponentElement(tree, 'PreviewDialog');
+  assert(JSON.stringify(JSON.parse(historyPreviewRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', offset: 0, limit: 50 })
+    && legacyPreviewDialog?.props?.preview?.scope === 'history',
+  'readable legacy rows use the guarded snapshot preview in the shared read-only dialog');
+  legacyPreviewDialog?.props.onCancel();
 
-  let recycleSidebarRefreshes = 0;
-  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
+  tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  const purgeButton = elements.find((element) => element.type === 'button' && elementText(element) === '永久删除');
-  purgeButton?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
-  const purgeDialog = findComponentElement(tree, 'ConfirmDialog');
-  assert(purgeDialog?.props.title === '永久删除回收站中的会话？', 'permanent purge opens a distinct accessible confirmation');
-  assert(String(purgeDialog?.props.body).includes('原会话和保护快照'), 'permanent purge copy names original and snapshot removal');
-  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ purged: [], failed: [{ id: 'trash-b', reason: 'purge-unsupported' }] }) });
-  await purgeDialog?.props.onConfirm();
-  tree = harness.render({ t, refreshSidebar: () => { recycleSidebarRefreshes += 1; } });
-  assert(!elementText(tree).includes('HTTP 409') && elementText(tree).includes('不支持永久删除'), 'purge renders the missing capability and keeps failed rows');
-  globalThis.fetch = recycleFetch;
-  await purgeDialog?.props.onConfirm();
-  assert(recycleSidebarRefreshes === 1, 'permanent purge re-baselines the sidebar so no deleted ungrouped chat remains');
+  const legacyRestore = elements.find((element) => element.type === 'button'
+    && element.props?.['data-session-id'] === 'legacy:history-newer' && element.props?.['aria-label'] === '恢复');
+  await legacyRestore?.props.onClick();
+  tree = harness.render(recycleProps);
+  elements = collectElements(tree);
+  assert(requests.some((request) => request.path.endsWith('/trash/restore')
+      && request.options.body === '{"sessionIds":["legacy:history-newer"]}')
+    && !elementText(tree).includes('Legacy Alpha')
+    && recycleSidebarRefreshes === 3,
+  'legacy restore sends its virtual Recycle Bin id, creates a new archive copy, and refreshes archive consumers');
 
-  recycleRows = [{
-    sessionId: 'trash-empty', state: 'trashed', trashedAt: '2026-08-24T03:04:05.000Z', title: 'Trash Empty',
-    createdAt: 30, workspace: null, snapshotBytes: 256, snapshotAttachmentCount: 0, liveDisposition: 'cold',
-  }];
-  let emptySidebarRefreshes = 0;
-  const emptyHarness = createHookHarness(clientCalls.slotRegister[0].component);
-  const emptyProps = { t, refreshSidebar: () => { emptySidebarRefreshes += 1; } };
-  emptyHarness.render(emptyProps);
-  emptyHarness.flushEffects();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  let emptyTree = emptyHarness.render(emptyProps);
-  const emptyTabs = collectElements(emptyTree).filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  emptyTabs.find((tab) => elementText(tab) === t('tab.trash'))?.props.onClick();
-  emptyTree = emptyHarness.render(emptyProps);
-  emptyHarness.flushEffects();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  emptyTree = emptyHarness.render(emptyProps);
-  collectElements(emptyTree).find((element) => element.type === 'button' && elementText(element) === '清空回收站')?.props.onClick();
-  emptyTree = emptyHarness.render(emptyProps);
-  const emptyDialog = findComponentElement(emptyTree, 'ConfirmDialog');
-  await emptyDialog?.props.onConfirm();
-  assert(emptySidebarRefreshes === 1, 'emptying Recycle Bin re-baselines the sidebar after every confirmed purge');
-  emptyHarness.unmount();
+  const degradedPurge = elements.find((element) => element.type === 'button'
+    && element.props?.['data-session-id'] === 'legacy:history-degraded' && element.props?.['aria-label'] === '永久删除');
+  degradedPurge?.props.onClick();
+  tree = harness.render(recycleProps);
+  let purgeDialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(purgeDialog?.props.title === '永久删除回收站中的会话？'
+    && String(purgeDialog?.props.body).includes('原会话和保护快照')
+    && String(purgeDialog?.props.body).includes('保护快照不可用'),
+  'degraded legacy purge uses the same explicit irreversible confirmation');
+  await purgeDialog?.props.onConfirm();
+  tree = harness.render(recycleProps);
+  assert(requests.some((request) => request.path.endsWith('/trash/purge')
+      && request.options.body === '{"sessionIds":["legacy:history-degraded"]}')
+    && recycleSidebarRefreshes === 4,
+  'single legacy purge targets exactly that Recycle Bin item');
+
+  elements = collectElements(tree);
+  const currentHead = elements.find((element) => element.props?.className === 'dac-head');
+  collectElements(currentHead).find((element) => element.type === 'button' && elementText(element) === '清空回收站')?.props.onClick();
+  tree = harness.render(recycleProps);
+  purgeDialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(purgeDialog?.props.title === '清空回收站？'
+    && purgeDialog?.props.body === '这将永久删除回收站中所有工作区的会话和保护快照。',
+  'Empty Recycle Bin confirmation names every workspace chat and protection snapshot');
+  await purgeDialog?.props.onConfirm();
+  assert(requests.some((request) => request.path.endsWith('/trash/empty') && request.options.body === '{}')
+    && recycleSidebarRefreshes === 5,
+  'confirmed Empty Recycle Bin uses the authority endpoint and refreshes the sidebar');
 
   harness.unmount();
   globalThis.fetch = savedFetch;
@@ -4577,6 +4127,16 @@ console.log('\n[11g] client half — permanent deletion and recoverable project 
     return collectElements(projectHarness.render({ t, refreshSidebar: () => {} }));
   };
   let menuElements = openMenu();
+  const projectMenuLabels = menuElements.filter((element) => element.props?.role === 'menuitem').map(elementText);
+  assert(projectMenuLabels.join(',') === '全部导出,全部取消归档,全部永久删除,全部移至回收站',
+    'archive project menu follows the requested action order');
+  const formsBeforeProjectExport = createdElements.filter((element) => element.tagName === 'FORM').length;
+  menuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部导出')?.props.onClick();
+  const projectExportForms = createdElements.filter((element) => element.tagName === 'FORM');
+  const projectExportInput = projectExportForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
+  assert(projectExportForms.length === formsBeforeProjectExport + 1 && projectExportInput?.value === '["undo-a"]',
+    'archive project export submits every archived chat in that project');
+  menuElements = openMenu();
   const permanentProjectAction = menuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部永久删除');
   assert(permanentProjectAction !== undefined, 'project menu includes permanent deletion alongside recoverable move');
   permanentProjectAction?.props.onClick();
@@ -4608,7 +4168,11 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
     const path = String(url);
     requests.push({ path, options });
     const payload = path.endsWith('/workspace-archive/workspaces')
-      ? { ok: true, workspaces: [{ id: 'workspace-1', title: 'Project One', eligibleCount: 2, liveCount: 1 }] }
+      ? { ok: true, workspaces: [
+          { id: 'workspace-1', title: 'Project One', eligibleCount: 2, liveCount: 1 },
+          { id: 'workspace-2', title: 'Project Two', eligibleCount: 1, liveCount: 0 },
+          { id: 'workspace-empty', title: 'Empty Project', eligibleCount: 0, liveCount: 0 },
+        ] }
       : path.endsWith('/workspace-archive/preview')
         ? { ok: true, token: 'token-1', nonce: 'nonce-1', workspace: { id: 'workspace-1', title: 'Project One' }, sessions: [{ id: 'session-title', title: 'Safe title' }, { id: 'session-fallback', title: null }], skipped: [{ id: 'session-live', reason: 'session-live' }, { id: 'session-archived', reason: 'session-archived' }] }
         : path.endsWith('/workspace-archive/apply')
@@ -4624,25 +4188,65 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
 	  assert(typeof clientExports.__test.fetchWorkspaceArchiveWorkspaces === 'function'
 	    && typeof clientExports.__test.previewWorkspaceArchive === 'function'
 	    && typeof clientExports.__test.applyWorkspaceArchive === 'function', 'workspace bulk archive exposes guarded request helpers');
-	  let chosenWorkspace = null;
-	  if (typeof Chooser === 'function') {
+		  const chosenWorkspaces = [];
+		  if (typeof Chooser === 'function') {
 	    const chooserHarness = createHookHarness(Chooser);
 	    const chooserProps = {
 	      t,
-	      onChoose: (workspace) => { chosenWorkspace = workspace; },
+		      onChoose: (workspaces) => { chosenWorkspaces.push(workspaces); },
 	      onClose: () => {},
 	    };
 	    chooserHarness.render(chooserProps);
 	    chooserHarness.flushEffects();
 	    await new Promise((resolve) => setTimeout(resolve, 0));
-	    const chooserTree = chooserHarness.render(chooserProps);
-	    const chooserElements = collectElements(chooserTree);
-	    const workspaceChoice = chooserElements.find((element) => element.props?.['data-workspace-archive-choice'] === 'workspace-1');
-	    assert(elementText(chooserTree).includes('Project One') && elementText(chooserTree).includes('2'), 'workspace chooser lists safe workspace titles and eligible counts');
-	    workspaceChoice?.props.onClick();
-	    assert(chosenWorkspace?.id === 'workspace-1' && chosenWorkspace?.title === 'Project One', 'workspace chooser passes only the selected workspace summary into confirmation');
-	    chooserHarness.unmount();
-	  }
+		    let chooserTree = chooserHarness.render(chooserProps);
+		    let chooserElements = collectElements(chooserTree);
+		    let chooseConfirm = chooserElements.find((element) => element.props?.['data-workspace-archive-choose-confirm'] === '1');
+		    const workspaceChoice = chooserElements.find((element) => element.props?.['data-workspace-archive-choice'] === 'workspace-1');
+		    let selectAll = chooserElements.find((element) => element.props?.['data-workspace-archive-select-all'] === '1');
+		    assert(elementText(chooserTree).includes('Project One') && elementText(chooserTree).includes('Project Two') && elementText(chooserTree).includes('2'), 'workspace chooser lists safe workspace titles and eligible counts');
+		    assert(!elementText(chooserTree).includes('Empty Project'), 'workspace chooser hides workspaces without archiveable chats');
+		    assert(chooseConfirm?.props.disabled === true && selectAll?.props.checked === false && workspaceChoice?.props.checked === false,
+		      'workspace chooser starts with every checkbox clear and its bottom-right confirmation disabled');
+		    const chooserDialog = chooserElements.find((element) => element.props?.role === 'dialog');
+		    let chooserFocusableSelector = '';
+		    const chooserFirst = { focus: () => { documentMock.activeElement = chooserFirst; } };
+		    const chooserLast = { focus: () => { documentMock.activeElement = chooserLast; } };
+		    chooserDialog.props.ref.current = {
+		      contains: (node) => node === chooserFirst || node === chooserLast,
+		      querySelectorAll: (selector) => { chooserFocusableSelector = selector; return [chooserFirst, chooserLast]; },
+		    };
+		    documentMock.activeElement = chooserLast;
+		    documentListeners.get('keydown')?.({ key: 'Tab', shiftKey: false, preventDefault: () => {} });
+		    assert(chooserFocusableSelector.includes('input:not([disabled])'), 'workspace chooser includes its checkboxes in the modal focus trap');
+		    selectAll?.props.onChange(true);
+		    chooserTree = chooserHarness.render(chooserProps);
+		    chooserElements = collectElements(chooserTree);
+		    selectAll = chooserElements.find((element) => element.props?.['data-workspace-archive-select-all'] === '1');
+		    assert(selectAll?.props.checked === true
+		      && chooserElements.filter((element) => element.props?.['data-workspace-archive-choice']).every((element) => element.props.checked === true),
+		    'the first Select all click checks every visible workspace');
+		    selectAll?.props.onChange(false);
+		    chooserTree = chooserHarness.render(chooserProps);
+		    chooserElements = collectElements(chooserTree);
+		    chooseConfirm = chooserElements.find((element) => element.props?.['data-workspace-archive-choose-confirm'] === '1');
+		    assert(chooserElements.filter((element) => element.props?.['data-workspace-archive-choice']).every((element) => element.props.checked === false)
+		      && chooseConfirm?.props.disabled === true,
+		    'clicking Select all again clears every workspace and disables confirmation');
+		    const singleChoice = chooserElements.find((element) => element.props?.['data-workspace-archive-choice'] === 'workspace-1');
+		    singleChoice?.props.onChange(true);
+		    chooserTree = chooserHarness.render(chooserProps);
+		    chooserElements = collectElements(chooserTree);
+		    chooseConfirm = chooserElements.find((element) => element.props?.['data-workspace-archive-choose-confirm'] === '1');
+		    chooseConfirm?.props.onClick();
+		    assert(chosenWorkspaces[0]?.length === 1 && chosenWorkspaces[0][0]?.id === 'workspace-1', 'workspace chooser submits a single selection only from the bottom-right confirmation');
+		    chooserElements.find((element) => element.props?.['data-workspace-archive-select-all'] === '1')?.props.onChange(true);
+		    chooserTree = chooserHarness.render(chooserProps);
+		    chooserElements = collectElements(chooserTree);
+		    chooserElements.find((element) => element.props?.['data-workspace-archive-choose-confirm'] === '1')?.props.onClick();
+		    assert(chosenWorkspaces[1]?.map((workspace) => workspace.id).join(',') === 'workspace-1,workspace-2', 'workspace chooser Select all submits every visible eligible workspace');
+		    chooserHarness.unmount();
+		  }
 	  const harness = createHookHarness(Dialog);
   const props = {
     t,
@@ -4665,6 +4269,15 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
     && workspaceStyle.includes('.dac-workspace-dialog .dac-preview-head strong{font-size:24px;line-height:32px}')
     && workspaceStyle.includes('.dac-workspace-copy{margin:0;color:var(--dsw-alias-label-secondary);font-size:16px;line-height:26px'),
   'workspace confirmation uses the approved spacious scoped card typography');
+	  assert(workspaceStyle.includes('.dac-checkbox{width:16px;height:16px;'), 'workspace and import checkboxes keep a stable named size');
+	  assert(workspaceStyle.includes('.dac-workspace-choice-all{grid-template-columns:auto minmax(0,1fr);border:0;background:transparent'),
+	    'workspace Select all stays visually unboxed');
+	  assert(workspaceStyle.includes('.dac-workspace-choice-all:hover{background:transparent}')
+	    && workspaceStyle.includes('.dac-workspace-choice-all:focus-within{outline:0}')
+	    && workspaceStyle.includes('.dac-workspace-choice-all .dac-checkbox:focus-visible{outline:2px solid'),
+	    'workspace Select all remains unboxed while its checkbox keeps a keyboard focus indicator');
+	  assert(workspaceStyle.includes('.dac-workspace-actions .dac-btn,.dac-workspace-actions .dac-btn-danger,.dac-workspace-actions .dac-btn-primary{min-width:80px;border-radius:9px;font-size:14px;line-height:20px;padding:7px 14px}'),
+	    'workspace dialog footer actions use the compact approved dimensions');
   assert(workspaceStyle.includes('.dac-workspace-actions .dac-btn{border:0;')
     && workspaceStyle.includes('.dac-workspace-actions .dac-btn-danger{border:0;background:var(--dsw-alias-interactive-bg-hover-danger)')
     && workspaceStyle.includes('@media (max-width:480px){.dac-workspace-dialog{width:calc(100vw - 32px)')
@@ -4703,6 +4316,97 @@ console.log('\n[11h] client half — workspace bulk archive dialog');
   assert(dictionaries?.zh?.['workspaceArchive.action'] === '归档会话'
     && dictionaries?.en?.['workspaceArchive.action'] === 'Archive chats', 'workspace archive has matched approved menu action labels');
   harness.unmount();
+
+	  const multiPreviewBodies = [];
+	  const multiApplyBodies = [];
+	  let multiApplied = null;
+	  let multiClosed = 0;
+	  globalThis.fetch = async (url, options = {}) => {
+	    const path = String(url);
+	    if (path.endsWith('/workspace-archive/preview')) {
+	      const workspaceId = JSON.parse(options.body).workspaceId;
+	      multiPreviewBodies.push(workspaceId);
+	      const sessions = workspaceId === 'workspace-empty' ? [] : workspaceId === 'workspace-2' ? [{ id: 'two-a' }, { id: 'two-b' }] : [{ id: 'one-a' }];
+	      return { ok: true, status: 200, json: async () => ({ token: `${workspaceId}-token`, nonce: `${workspaceId}-nonce`, workspace: { id: workspaceId, title: workspaceId }, sessions, skipped: [] }) };
+	    }
+	    if (path.endsWith('/workspace-archive/apply')) {
+	      const body = JSON.parse(options.body);
+	      multiApplyBodies.push(body);
+	      const id = body.token.replace('-token', '');
+	      return { ok: true, status: 200, json: async () => ({ workspace: { id, title: id }, archived: [`${id}-archived`], skipped: [], failed: [], snapshots: [] }) };
+	    }
+	    return { ok: true, status: 200, json: async () => ({}) };
+	  };
+	  const multiHarness = createHookHarness(Dialog);
+	  const multiProps = {
+	    t,
+	    workspaces: [
+	      { id: 'workspace-1', title: 'Project One' },
+	      { id: 'workspace-empty', title: 'Empty Project' },
+	      { id: 'workspace-2', title: 'Project Two' },
+	    ],
+	    onClose: () => { multiClosed += 1; },
+	    onApplied: async (result) => { multiApplied = result; },
+	    onEmpty: () => {},
+	    restoreFocus: () => {},
+	  };
+	  multiHarness.render(multiProps); multiHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+	  tree = multiHarness.render(multiProps); elements = collectElements(tree);
+	  assert(multiPreviewBodies.join(',') === 'workspace-1,workspace-empty,workspace-2'
+	    && elementText(tree).includes('归档 3 个会话？')
+	    && !elementText(tree).includes(t('workspaceArchive.empty')),
+	  'multi-workspace confirmation prepares every selection, sums nonempty previews, and omits the old empty popup');
+	  await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+	  assert(multiApplyBodies.map((body) => body.token).join(',') === 'workspace-1-token,workspace-2-token'
+	    && multiApplied?.archived?.join(',') === 'workspace-1-archived,workspace-2-archived'
+	    && multiClosed === 1,
+	  'multi-workspace confirmation consumes each nonempty workspace credential and reports one aggregated success');
+	  multiHarness.unmount();
+
+	  const partialApplyBodies = [];
+	  let partialApplied = null;
+	  let partialClosed = 0;
+	  globalThis.fetch = async (url, options = {}) => {
+	    const path = String(url);
+	    const body = JSON.parse(options.body ?? '{}');
+	    if (path.endsWith('/workspace-archive/preview')) {
+	      return { ok: true, status: 200, json: async () => ({
+	        token: `${body.workspaceId}-token`,
+	        nonce: `${body.workspaceId}-nonce`,
+	        workspace: { id: body.workspaceId, title: body.workspaceId },
+	        sessions: [{ id: `${body.workspaceId}-chat`, title: `${body.workspaceId} chat` }],
+	        skipped: [],
+	      }) };
+	    }
+	    if (path.endsWith('/workspace-archive/apply')) {
+	      partialApplyBodies.push(body);
+	      const id = body.token.replace('-token', '');
+	      if (id === 'workspace-2') return { ok: false, status: 503, json: async () => ({ error: 'archive-failed' }) };
+	      return { ok: true, status: 200, json: async () => ({ workspace: { id, title: id }, archived: [`${id}-archived`], skipped: [], failed: [], snapshots: [] }) };
+	    }
+	    return { ok: true, status: 200, json: async () => ({}) };
+	  };
+	  const partialHarness = createHookHarness(Dialog);
+	  const partialProps = {
+	    t,
+	    workspaces: ['workspace-1', 'workspace-2', 'workspace-3'].map((id) => ({ id, title: id })),
+	    onClose: () => { partialClosed += 1; },
+	    onApplied: async (result) => { partialApplied = result; },
+	    onEmpty: () => {},
+	    restoreFocus: () => {},
+	  };
+	  partialHarness.render(partialProps); partialHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
+	  tree = partialHarness.render(partialProps); elements = collectElements(tree);
+	  await elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.onClick();
+	  tree = partialHarness.render(partialProps);
+	  assert(partialApplyBodies.map((body) => body.token).join(',') === 'workspace-1-token,workspace-2-token,workspace-3-token'
+	    && partialApplied?.archived?.join(',') === 'workspace-1-archived,workspace-3-archived'
+	    && elementText(tree).includes('workspace-2 chat')
+	    && elementText(tree).includes(t('workspaceArchive.reason.archive-failed'))
+	    && partialClosed === 0,
+	  'multi-workspace confirmation preserves earlier success, records a failed workspace, and continues after a thrown apply');
+	  partialHarness.unmount();
+
   globalThis.fetch = async () => ({ ok: false, status: 501, json: async () => ({ error: 'workspace-archive-unsupported' }) });
   const legacyHarness = createHookHarness(Dialog);
   legacyHarness.render(props);
@@ -4804,15 +4508,19 @@ console.log('\n[11i] client half — workspace archive recovery and completed co
       ? { token: 'empty-token', nonce: 'empty-nonce', workspace: { id: 'empty', title: 'Empty workspace' }, sessions: [], skipped: [] }
       : {},
   });
+  let emptyReturns = 0;
+  let emptyRestoreFocuses = 0;
   const emptyHarness = createHookHarness(Dialog);
-  const emptyProps = { ...props, workspaceId: 'empty', workspaceTitle: 'Empty workspace' };
+  const emptyProps = { ...props, workspaceId: 'empty', workspaceTitle: 'Empty workspace', onEmpty: () => { emptyReturns += 1; }, restoreFocus: () => { emptyRestoreFocuses += 1; } };
   emptyHarness.render(emptyProps); emptyHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
   tree = emptyHarness.render(emptyProps); elements = collectElements(tree);
-  assert(elementText(tree).includes(t('workspaceArchive.empty'))
+  assert(emptyReturns === 1
+    && !elementText(tree).includes(t('workspaceArchive.empty'))
     && elements.find((element) => element.props?.['data-workspace-archive-apply'] === '1')?.props.disabled === true
     && !elements.some((element) => element.props?.['data-workspace-archive-skipped-live'] === '1'),
-  'empty preparation explains the state, cannot apply, and omits a zero live-skip count');
+  'an empty preparation returns to the chooser without rendering the obsolete empty popup');
   emptyHarness.unmount();
+	  assert(emptyRestoreFocuses === 0, 'returning an empty preparation to the chooser preserves the original settings trigger for the chooser to restore later');
 
   let doubleApplyCalls = 0;
   let releaseApply;
@@ -5016,11 +4724,11 @@ console.log('\n[11j] client half — workspace archive final coverage');
   pageTree = pageHarness.render(pageProps);
   const chooser = findComponentElement(pageTree, 'WorkspaceArchiveChooserDialog');
   assert(chooser !== undefined, 'settings trigger opens the workspace chooser without a Host workspace-menu slot');
-  chooser.props.onChoose({ id: 'workspace-settings', title: 'Settings Project' });
+  chooser.props.onChoose([{ id: 'workspace-settings', title: 'Settings Project' }, { id: 'workspace-two', title: 'Second Project' }]);
   pageTree = pageHarness.render(pageProps);
   const refreshDialog = findComponentElement(pageTree, 'WorkspaceArchiveDialog');
-  assert(refreshDialog?.props.workspaceId === 'workspace-settings' && refreshDialog?.props.workspaceTitle === 'Settings Project',
-    'the settings-owned chooser opens confirmation for the selected workspace');
+  assert(refreshDialog?.props.workspaces?.map((workspace) => workspace.id).join(',') === 'workspace-settings,workspace-two',
+    'the settings-owned chooser opens one confirmation for every selected workspace');
   const findTab = (label) => pageElements.find((element) => element.type === 'button' && element.props?.role === 'tab' && elementText(element) === label);
   const archivedTab = findTab(t('tab.archived'));
   const insightsTab = findTab(t('tab.insights'));
@@ -5035,7 +4743,7 @@ console.log('\n[11j] client half — workspace archive final coverage');
   const insightsAfter = findComponentElement(pageTree, 'StorageRetentionPanel')?.props.key;
   assert(stateRequests >= 2 && sidebarAttempts === 1 && workspaceRefreshes === 1
     && insightsBefore === 'insights-0' && insightsAfter === 'insights-1',
-  'workspace apply refreshes independent consumers despite failures and remounts Storage and its legacy data panel');
+  'workspace apply refreshes independent consumers despite failures and remounts Storage');
   const dialogHarness = createHookHarness(Dialog);
   dialogHarness.render(refreshDialog.props);
   dialogHarness.flushEffects();

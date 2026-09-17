@@ -178,6 +178,34 @@ test('prepare binds a Host-generated destination and restore consumes the token 
   );
 });
 
+test('restore lifecycle callbacks guard ownership and retire the source only after commit', async () => {
+  const item = await fixture({ withAttachment: false });
+  const prepared = await item.service.prepare(SNAPSHOT_ID);
+  const callbackCalls = [];
+  const restored = await item.service.restore(prepared.token, prepared.nonce, {
+    beforeRestore: async () => {
+      callbackCalls.push('before');
+      assert.equal(item.ids.has(DESTINATION_ID), false);
+    },
+    afterCommit: async (result) => {
+      callbackCalls.push('after');
+      assert.deepEqual(result.restored, [DESTINATION_ID]);
+      assert.equal(item.ids.has(DESTINATION_ID), true);
+      assert.equal(item.registry.archivedSessionIds.includes(DESTINATION_ID), true);
+    },
+  });
+  assert.deepEqual(restored.restored, [DESTINATION_ID]);
+  assert.deepEqual(callbackCalls, ['before', 'after']);
+
+  const rollback = await fixture({ withAttachment: false });
+  const rollbackPrepared = await rollback.service.prepare(SNAPSHOT_ID);
+  await assert.rejects(rollback.service.restore(rollbackPrepared.token, rollbackPrepared.nonce, {
+    afterCommit: async () => { throw Object.assign(new Error('index unavailable'), { code: 'legacy-index-unavailable' }); },
+  }), { code: 'legacy-index-unavailable' });
+  assert.equal(rollback.ids.has(DESTINATION_ID), false);
+  assert.deepEqual(rollback.registry.archivedSessionIds, [SOURCE_ID]);
+});
+
 test('wrong nonce, expiry, and changed manifest fail before persistence writes', async () => {
   const wrong = await fixture();
   const wrongPrepared = await wrong.service.prepare(SNAPSHOT_ID);
