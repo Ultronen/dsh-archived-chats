@@ -45,8 +45,8 @@ dsh plugin --profile web update dsh-archived-chats
 ```
 
 <p align="center">
-  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="带旧版快照时间和合成图片的原生只读预览"></a>
-  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="空间与策略中的会话目录、保护快照和保留策略"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="支持全选并明确确认的多工作区归档选择器"></a>
+  <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="启用回收站自动清理前的确认"></a>
 </p>
 
 ## 核心能力
@@ -96,19 +96,19 @@ dsh plugin --profile web update dsh-archived-chats
 <br>
 <table>
   <tr>
-    <td><img src="assets/screenshots/preview-01.png" alt="会话档案总览和四个管理视图"><br><sub>归档总览</sub></td>
+    <td><img src="assets/screenshots/preview-01.png" alt="包含搜索、筛选、标签、单行备注和当前操作的最新版归档页"><br><sub>归档总览</sub></td>
     <td><img src="assets/screenshots/preview-02.png" alt="全文搜索、筛选、标签与命中摘要"><br><sub>全文搜索</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-03.png" alt="带已存储图片的原生只读快照预览"><br><sub>原生只读预览</sub></td>
-    <td><img src="assets/screenshots/preview-04.png" alt="已有快照统一进入回收站"><br><sub>统一回收站</sub></td>
+    <td><img src="assets/screenshots/preview-03.png" alt="仅展示可归档项并支持全选的多工作区归档选择器"><br><sub>工作区归档选择器</sub></td>
+    <td><img src="assets/screenshots/preview-04.png" alt="带已存储图片的旧版快照原生只读预览"><br><sub>原生只读预览</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-05.png" alt="清空回收站前的不可恢复确认"><br><sub>清空回收站确认</sub></td>
-    <td><img src="assets/screenshots/preview-06.png" alt="回收站单条与工作区恢复和永久删除操作"><br><sub>回收站操作</sub></td>
+    <td><img src="assets/screenshots/preview-05.png" alt="包含旧版快照及单条和工作区操作的统一回收站"><br><sub>统一回收站</sub></td>
+    <td><img src="assets/screenshots/preview-06.png" alt="清空所有工作区回收站前的不可恢复确认"><br><sub>清空回收站确认</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-07.png" alt="空间分账和保留策略控件"><br><sub>空间与策略</sub></td>
+    <td><img src="assets/screenshots/preview-07.png" alt="空间与策略中启用自动清理前的确认"><br><sub>自动清理确认</sub></td>
     <td><img src="assets/screenshots/preview-08.png" alt="来源与分支中的分叉、子代理和回收状态"><br><sub>来源与分支</sub></td>
   </tr>
 </table>
