@@ -26,7 +26,7 @@
 
 </div>
 
-会话档案为 DeepSeek Harness 中归档后从侧边栏消失的聊天提供统一入口。你可以按工作区浏览全部归档聊天、全文搜索对话、查看已验证的本地历史，并通过明确且可恢复的流程恢复或删除它们。
+会话档案为 DeepSeek Harness 中归档后从侧边栏消失的聊天提供统一入口。你可以按工作区浏览全部归档聊天、全文搜索对话、从回收站恢复已删除的聊天，并通过明确且可恢复的流程恢复或删除它们。
 
 > 原「已归档的聊天」现已更名为「会话档案 / Session Archive」。包名、仓库、安装命令和本地数据位置均未改变，现有用户无需迁移数据。
 
@@ -45,7 +45,7 @@ dsh plugin --profile web update dsh-archived-chats
 ```
 
 <p align="center">
-  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="带历史快照时间和合成图片的原生只读预览"></a>
+  <a href="assets/screenshots/preview-03.png"><img src="assets/screenshots/preview-03.png" width="49%" alt="带旧版快照时间和合成图片的原生只读预览"></a>
   <a href="assets/screenshots/preview-07.png"><img src="assets/screenshots/preview-07.png" width="49%" alt="空间与策略中的会话目录、保护快照和保留策略"></a>
 </p>
 
@@ -56,15 +56,17 @@ dsh plugin --profile web update dsh-archived-chats
 | **浏览与搜索** | 按工作区浏览归档聊天，全文搜索消息和工具结果，并支持筛选、排序、标签与备注。 |
 | **归档整个工作区** | 从 **设置 → 会话档案** 打开工作区选择器，再用一次确认归档其中全部符合条件的聊天；空白的新会话窗口不会计入，工作区及其目录保持不变。 |
 | **原生只读预览** | 以原生对话布局展示 Markdown、思考过程、工具活动、JSON、代码和可用的已存储图片，并提供响应式轮次导航。 |
-| **本地历史版本** | 归档后保存已验证版本，支持只读快照预览、确认删除、清空历史，以及不覆盖来源的 **恢复为副本**。 |
+| **旧版数据** | 已有快照保留在 **空间与策略 → 旧版数据**，支持只读预览、恢复为归档副本或确认删除；归档不再生成版本。 |
 | **备份与恢复** | 导出 JSON + Markdown ZIP，并通过预览优先、冲突安全的流程导入；已有会话 ID 永不覆盖。 |
 | **可恢复删除** | 带保护快照的回收站支持立即撤销、两级恢复，以及单独确认的永久删除。 |
-| **空间与关系** | 空间分账、预览优先的保留策略，以及用于分叉和子代理树的只读「来源与分支」。 |
+| **空间与关系** | 空间分账、预览优先的回收站保留天数策略，以及用于分叉和子代理树的只读「来源与分支」。 |
+
+四个主视图为 **已归档**、**回收站**、**空间与策略** 和 **来源与分支**。升级会保留已有快照；独立历史版本标签与归档时自动抓取已取消。
 
 ## 安全设计
 
 - **数据只在本机：** 插件元数据、回收记录、策略和已验证快照均保存在 `$DSH_HOME/plugin-data/archived-chats/`，不会上传或云同步。
-- **不静默覆盖：** 导入和历史恢复只创建或选择无冲突 ID，绝不覆盖已有会话。
+- **不静默覆盖：** 导入和旧版数据恢复只创建或选择无冲突 ID，绝不覆盖已有会话。
 - **删除必须明确：** 普通移除会在快照保护后进入回收站；只有经过确认的永久删除操作才会物理清除。
 - **不自动清理：** 保留策略的保存与执行分离，每次清理都从短效预览和明确选择开始。
 - **确认工作区归档：** 插件在后台准备精确集合，再显示一次包含工作区与会话数量的确认。只有检查到真实 `turn/start` 的会话才符合条件；空白的新会话窗口及无法确认内容的会话都会跳过。5 分钟有效、只能使用一次的凭据不会纳入之后新建的聊天；运行中的聊天只会跳过，绝不停止或移动。
@@ -76,14 +78,14 @@ dsh plugin --profile web update dsh-archived-chats
 
 | Host 能力 | 插件行为 |
 | --- | --- |
-| 归档与会话读取 | 浏览、搜索、预览、历史清单、空间分账和会话血缘。 |
+| 归档与会话读取 | 浏览、搜索、预览、旧版数据清单、空间分账和会话血缘。 |
 | `settings.section` + 公开 `archiveSession` | 插件自己的设置页提供工作区选择器和一次确认归档流程，不依赖工作区菜单扩展 slot；缺少归档能力时，准备请求返回 `workspace-archive-unsupported`，且不作任何修改。 |
 | 附件读取 | 对话和快照预览可显示已存储图片；缺少时文本内容仍可阅读。 |
 | 会话独立日志位置 | 回收站永久删除使用持久化后端公开的 `locate(meta)` 能力。后端不提供会话独立位置时不支持永久删除；失败的条目保留在列表中并显示具体原因。 |
-| 公开会话 writer | ZIP 导入、**恢复为副本** 和原件丢失时的快照回退，都通过 Host 公开的 `create` / `append` / `locate` 能力写入；Host 提供专用恢复入口时优先使用。 |
+| 公开会话 writer | ZIP 导入、旧版数据恢复 和原件丢失时的快照回退，都通过 Host 公开的 `create` / `append` / `locate` 能力写入；Host 提供专用恢复入口时优先使用。 |
 | 缺少写入能力 | 操作返回 `restore-unsupported`，不会写入或覆盖数据。 |
 
-降级到不显示历史版本或不识别回收快照的版本前，请备份 `$DSH_HOME/plugin-data/archived-chats/`。
+降级到不显示旧版数据或不识别回收快照的版本前，请备份 `$DSH_HOME/plugin-data/archived-chats/`。
 
 ## 演示预览
 
@@ -94,15 +96,15 @@ dsh plugin --profile web update dsh-archived-chats
 <br>
 <table>
   <tr>
-    <td><img src="assets/screenshots/preview-01.png" alt="会话档案总览和五个管理视图"><br><sub>归档总览</sub></td>
+    <td><img src="assets/screenshots/preview-01.png" alt="会话档案总览和四个管理视图"><br><sub>归档总览</sub></td>
     <td><img src="assets/screenshots/preview-02.png" alt="全文搜索、筛选、标签与命中摘要"><br><sub>全文搜索</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-03.png" alt="带已存储图片的原生只读历史预览"><br><sub>原生只读预览</sub></td>
-    <td><img src="assets/screenshots/preview-04.png" alt="带恢复为副本与删除操作的历史时间线"><br><sub>历史时间线</sub></td>
+    <td><img src="assets/screenshots/preview-03.png" alt="带已存储图片的原生只读旧版数据预览"><br><sub>原生只读预览</sub></td>
+    <td><img src="assets/screenshots/preview-04.png" alt="带恢复和删除操作的旧版数据"><br><sub>旧版数据</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-05.png" alt="清空普通历史前的不可恢复确认"><br><sub>清空历史确认</sub></td>
+    <td><img src="assets/screenshots/preview-05.png" alt="清空旧版数据前的不可恢复确认"><br><sub>清空旧版数据确认</sub></td>
     <td><img src="assets/screenshots/preview-06.png" alt="保护快照、恢复和永久删除"><br><sub>回收站</sub></td>
   </tr>
   <tr>
@@ -132,7 +134,7 @@ Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收�
 npm test
 ```
 
-测试覆盖 Host 与浏览器行为、导出导入、历史版本、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。测试只使用隔离临时数据，不读取真实会话。
+测试覆盖 Host 与浏览器行为、导出导入、旧版数据恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。测试只使用隔离临时数据，不读取真实会话。
 
 ## 卸载
 
