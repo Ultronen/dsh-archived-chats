@@ -8,6 +8,7 @@ const policy = {
   historicalSnapshotMaxAgeDays: null,
   snapshotQuotaBytes: null,
   recycleMaxAgeDays: 7,
+  recycleAutoDelete: false,
 };
 
 const insightSnapshots = [

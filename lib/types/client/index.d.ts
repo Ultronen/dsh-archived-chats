@@ -2,20 +2,23 @@
  * Browser client entry — the Session Archive settings section with a workspace
  * chooser and one-confirmation bulk archive flow. The flow stays inside the
  * plugin-owned Settings surface and requires no workspace-row extension slot.
- * The searchable manager includes Archived, History, Recycle Bin, Storage &
- * Retention, and Origins & Branches views. History versions are
- * local, read-only previews and restore only as new archived copies. Removing an archived chat from
- * this plugin moves it to recoverable trash and
- * exposes immediate Undo. The recycle view has independent selection, scoped
- * read-only previews, original/snapshot restore, guarded permanent purge and
- * empty operations, degraded-state warnings, responsive rows, and accessible
- * confirmation dialogs, all localized in English and 中文.
+ * The searchable manager includes Archived, Recycle Bin, Storage & Retention,
+ * and Origins & Branches views. Existing legacy snapshots appear in the
+ * Recycle Bin and restore only as new archived copies. Removing an archived
+ * chat moves it to recoverable trash and exposes immediate Undo. The recycle
+ * view provides scoped read-only previews, original/snapshot restore, guarded
+ * permanent purge and empty operations, degraded-state warnings, responsive
+ * rows, and accessible confirmation dialogs, all localized in English and 中文.
  */
 export type RecycleRecordState = 'trashed' | 'purge-pending' | 'degraded';
 export type RecycleLiveDisposition = 'cold' | 'disposed' | 'parked';
 
 export interface RecycleSessionRow {
   sessionId: string;
+  sourceKind?: 'legacy-snapshot';
+  legacySnapshotId?: string;
+  sourceSessionId?: string | null;
+  restorable?: boolean;
   state: RecycleRecordState;
   trashedAt: string;
   purgeRequestedAt: string | null;
@@ -45,6 +48,8 @@ export interface RetentionPolicy {
   historicalSnapshotMaxAgeDays: number | null;
   snapshotQuotaBytes: number | null;
   recycleMaxAgeDays: number | null;
+  /** Explicit opt-in; legacy policies load as false. */
+  recycleAutoDelete: boolean;
 }
 
 export type HistoryScope = 'archived' | 'recycled' | 'history-only';

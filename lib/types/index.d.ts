@@ -29,13 +29,50 @@
  * snapshots before the irreversible session delete so a failure never strands
  * a record whose session is already gone.
  * Startup migrates legacy pending deletions into recoverable trash and retries
- * only records carrying durable `purge-pending` intent.
+ * only records carrying durable `purge-pending` intent. Published legacy
+ * snapshots are projected into the same recycle authority; restoring one
+ * creates a new archived copy and never overwrites its source chat.
  */
+export type RecycleRecordState = 'trashed' | 'purge-pending' | 'degraded';
+export type RecycleLiveDisposition = 'cold' | 'disposed' | 'parked';
+
+export interface RecycleSessionRow {
+  sessionId: string;
+  sourceKind?: 'legacy-snapshot';
+  legacySnapshotId?: string;
+  sourceSessionId?: string | null;
+  restorable?: boolean;
+  state: RecycleRecordState;
+  trashedAt: string;
+  purgeRequestedAt: string | null;
+  title: string | null;
+  createdAt: number | null;
+  origin: string | null;
+  workspace: { id: string | null; title: string | null } | null;
+  wasArchived: boolean;
+  tags: string[];
+  note: string;
+  metadataUpdatedAt: string | null;
+  snapshotId: string | null;
+  snapshotBytes: number;
+  snapshotAttachmentCount: number;
+  liveDisposition: RecycleLiveDisposition;
+}
+
+export interface RecycleSummary {
+  count: number;
+  snapshotBytes: number;
+  degradedCount: number;
+  purgePendingCount: number;
+}
+
 export interface RetentionPolicy {
   historicalSnapshotsPerSession: number;
   historicalSnapshotMaxAgeDays: number | null;
   snapshotQuotaBytes: number | null;
   recycleMaxAgeDays: number | null;
+  /** Explicit opt-in; legacy policies load as false. */
+  recycleAutoDelete: boolean;
 }
 
 export type HistoryScope = 'archived' | 'recycled' | 'history-only';

@@ -29,6 +29,7 @@ test('missing retention file loads conservative defaults', async () => {
     historicalSnapshotMaxAgeDays: null,
     snapshotQuotaBytes: null,
     recycleMaxAgeDays: null,
+    recycleAutoDelete: false,
   });
 });
 
@@ -43,6 +44,7 @@ test('retention policy validation accepts exact boundaries and rejects broadened
     historicalSnapshotMaxAgeDays: 1,
     snapshotQuotaBytes: 1024 * 1024,
     recycleMaxAgeDays: 3650,
+    recycleAutoDelete: false,
   });
   assert.equal(normalizeRetentionPolicy({ ...DEFAULT_RETENTION_POLICY, historicalSnapshotsPerSession: 20 }).historicalSnapshotsPerSession, 20);
   assert.equal(normalizeRetentionPolicy({ ...DEFAULT_RETENTION_POLICY, snapshotQuotaBytes: 8 * 1024 ** 4 }).snapshotQuotaBytes, 8 * 1024 ** 4);
@@ -79,11 +81,11 @@ test('retention store writes atomically with private modes and serializes saves'
     assert.equal((await stat(path)).mode & 0o777, 0o600);
   }
   assert.deepEqual(await readdir(root), ['retention.json']);
-  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { version: 1, policy: second });
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { version: 2, policy: second });
 });
 
 test('retention store preserves malformed or unsupported source bytes', async () => {
-  for (const source of ['{broken', JSON.stringify({ version: 2, policy: DEFAULT_RETENTION_POLICY })]) {
+  for (const source of ['{broken', JSON.stringify({ version: 3, policy: DEFAULT_RETENTION_POLICY })]) {
     const { path, store } = await storeFixture();
     await writeFile(path, source, 'utf8');
     assert.equal((await store.load()).status, 'unavailable');
@@ -174,7 +176,7 @@ test('existing retention documents remain readable without selecting legacy snap
   const source = JSON.stringify({ version: 1, policy: legacyPolicy });
   await writeFile(path, source, 'utf8');
   const loaded = await store.load();
-  assert.deepEqual(loaded, { status: 'ready', policy: legacyPolicy });
+  assert.deepEqual(loaded, { status: 'ready', policy: { ...legacyPolicy, recycleAutoDelete: false } });
   const plan = planRetention({
     inventory: {
       summary: { snapshotBytes: 2 * 1024 * 1024 },
@@ -185,4 +187,30 @@ test('existing retention documents remain readable without selecting legacy snap
   });
   assert.deepEqual(plan.candidates, []);
   assert.equal(await readFile(path, 'utf8'), source);
+});
+
+test('major upgrade resets every version-one cleanup policy to disabled', async () => {
+  const { path, store } = await storeFixture();
+  const legacy = { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: 7, recycleAutoDelete: true };
+  for (const policy of [legacy, { ...legacy, recycleAutoDelete: false }, { ...legacy, recycleAutoDelete: undefined }]) {
+    const storedPolicy = policy.recycleAutoDelete === undefined
+      ? Object.fromEntries(Object.entries(policy).filter(([, value]) => value !== undefined))
+      : policy;
+    const source = JSON.stringify({ version: 1, policy: storedPolicy });
+    await writeFile(path, source);
+    const loaded = await store.load();
+    assert.equal(loaded.status, 'ready');
+    assert.equal(loaded.policy.recycleAutoDelete, false);
+    assert.equal(loaded.policy.recycleMaxAgeDays, 7);
+    assert.equal(await readFile(path, 'utf8'), source, 'loading does not rewrite user data');
+  }
+
+  const enabled = await store.save({ ...legacy, recycleAutoDelete: true });
+  assert.equal(enabled.recycleAutoDelete, true);
+  assert.equal((await store.load()).policy.recycleAutoDelete, true);
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).version, 2);
+  for (const value of ['true', 1, null]) {
+    assert.throws(() => normalizeRetentionPolicy({ ...legacy, recycleAutoDelete: value }), { code: 'retention-policy-invalid' });
+  }
+  assert.throws(() => normalizeRetentionPolicy({ ...legacy, recycleMaxAgeDays: null, recycleAutoDelete: true }), { code: 'retention-policy-invalid' });
 });

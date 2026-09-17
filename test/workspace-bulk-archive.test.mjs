@@ -102,7 +102,6 @@ test('lists and previews only safe workspace and cold-session fields in stable d
 
   assert.deepEqual(await item.service.listWorkspaces(), [
     { id: 'workspace-a', title: 'Workspace A', eligibleCount: 2, liveCount: 1 },
-    { id: 'workspace-b', title: 'Workspace B', eligibleCount: 0, liveCount: 0 },
   ]);
   const preview = await item.service.preview('workspace-a');
 
@@ -129,7 +128,6 @@ test('blank new-session windows are never counted or prepared as archiveable con
 
   assert.deepEqual(await item.service.listWorkspaces(), [
     { id: 'workspace-a', title: 'Workspace A', eligibleCount: 1, liveCount: 0 },
-    { id: 'workspace-b', title: 'Workspace B', eligibleCount: 0, liveCount: 0 },
   ]);
   const preview = await item.service.preview('workspace-a');
   assert.deepEqual(preview.sessions.map(({ id }) => id), ['real-conversation']);
