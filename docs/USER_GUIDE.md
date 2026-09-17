@@ -38,7 +38,11 @@ Closing the preview cancels outstanding image and page requests. Preview never e
 - Each chat supports up to 8 tags, each limited to 24 Unicode characters, plus one note of up to 2,000 Unicode characters.
 - Tag matching is case-insensitive; rows show up to three tag chips and collapse the remainder into `+N`.
 - Tags and notes stay in local `metadata.json`. Unarchiving keeps them; completed physical deletion removes them.
-- **Select multiple** reveals checkboxes only when needed. Select individual chats, a filtered result set, or a whole workspace for export, unarchive, or Recycle Bin actions.
+- Each project has one select-all checkbox to the left of its chat count. Checking it selects that project's currently visible chats. A dash means partial selection; click it to select the remainder, then uncheck to clear that project. Other projects keep their selections. Empty lists hide selection controls.
+- Selecting chats reveals row checkboxes and a toolbar showing the selected count, with export, unarchive, Recycle Bin, and permanent-delete actions. Clearing the last selection automatically hides the toolbar and row checkboxes; no Done or Clear button is needed.
+- Search and filter changes clear selection; sorting and export preserve it. Batch actions affect selected chats only: successful items leave the list, while failures remain selected for retry. Permanent-delete confirmation shows the exact count.
+- The row delete icon sits immediately before Unarchive and opens permanent-delete confirmation for that chat. The row menu contains tag and note editing and single-chat export. Project menus offer Unarchive all, Move all to Recycle Bin, and Delete all permanently, including chats in that project hidden by filters.
+- The header’s **Export all** always exports the entire archive, regardless of search, filters, or selection. The batch toolbar’s **Export selected** exports selected chats only.
 
 ## History versions
 
@@ -86,7 +90,7 @@ Restore has two levels:
 1. If the original session remains intact, restore removes only the recycle marker.
 2. If the original is missing, the plugin uses a validated snapshot through the public `create` / `append` capability and never overwrites an existing ID.
 
-Only the Recycle Bin exposes **Delete permanently** and **Empty Recycle Bin**. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from History. Interrupted purges retry on startup.
+The Recycle Bin provides **Delete permanently** and **Empty Recycle Bin**. Archived chats can also be permanently deleted after confirmation from a row, project menu, or batch actions. Permanent purge records crash-recovery intent first, then removes that source's validated snapshots, and deletes the original session last. Ordering matters: anything that fails before the original is deleted leaves the chat intact and completable on the next attempt, instead of a recycle entry whose chat is already gone. A snapshot elsewhere in the store that cannot be verified never blocks a purge — it is skipped, reported, and remains reclaimable from History. Interrupted purges retry on startup.
 
 On a current Host that exposes handle-based reads without physical session locations, browsing, export, and protection snapshots for ordinary sessions remain available. Session-directory accounting is shown as unavailable, while restore writes and permanent deletion report that the Host capability is unsupported. Purge refusal occurs before changing the recycle record, protection snapshots, pending markers, or a live session. Forked sessions with inherited history are not captured into snapshots yet because the current snapshot schema cannot retain the inherited cut; archive still completes and reports the version-save failure in its result.
 

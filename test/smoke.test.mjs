@@ -2409,7 +2409,7 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['history.clear'] === '清空历史版本'
     && zhDict['history.clearTitle'] === '清空所有历史版本？',
   'Chinese History preview, restore, and deletion copy is localized');
-  assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export backup', 'English row export action is localized');
+  assert(clientCalls.localeRegister[0].dicts.en['export.row'] === 'Export this chat', 'English row export action is localized');
   assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
     && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
   'English session archive label and page title are localized');
@@ -2660,121 +2660,101 @@ console.log('\n[11b] client half — selection mode and preview request lifecycl
     { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
     { id: 'session-c', title: 'Gamma', createdAt: 30, origin: null, workspaceId: 'ws-2', workspaceTitle: '项目二' },
   ];
-  globalThis.fetch = async (url) => {
-    return {
-      ok: true,
-      status: 200,
-      json: async () => String(url).endsWith('/state')
-        ? { metadataStatus: 'ready', sessions: archivedRows }
-        : String(url).endsWith('/delete-all')
-          ? { trashed: ['session-b'], failed: [] }
-          : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} },
-    };
+  let failBeta = false;
+  const mutations = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    const ids = options.body ? JSON.parse(options.body).sessionIds ?? [] : [];
+    if (options.method === 'POST') mutations.push({ path, body: JSON.parse(options.body) });
+    return { ok: true, status: 200, json: async () => path.endsWith('/state')
+      ? { metadataStatus: 'ready', sessions: archivedRows }
+      : path.endsWith('/delete-all')
+        ? { trashed: ids.filter((id) => !failBeta || id !== 'session-b'), failed: failBeta ? [{ sessionId: 'session-b', error: 'locked' }] : [] }
+        : { summary: { sessionCount: 3, totalBytes: 0, unavailableCount: 0 }, sessions: {} } };
   };
-
   const t = clientCtx.locale.bind('settings.archived-chats');
   const harness = createHookHarness(clientCalls.slotRegister[0].component);
-  harness.render({ t, refreshSidebar: () => {} });
-  harness.flushEffects();
+  const render = () => harness.render({ t, refreshSidebar: () => {} });
+  const elements = () => collectElements(render());
+  const input = (label) => elements().find((element) => element.type === 'input' && element.props?.['aria-label'] === label);
+  const master = (name = '项目一') => input(`全选当前显示的聊天：${name}`);
+  const check = (element, checked) => element?.props.onChange({ target: { checked } });
+  const bulk = () => elements().find((element) => element.props?.className === 'dac-bulkbar');
+  const bulkAction = (text) => collectElements(bulk()).find((element) => element.type === 'button' && elementText(element) === text);
+  const search = (value) => elements().find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容')?.props.onChange({ target: { value } });
+  render(); harness.flushEffects();
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  const defaultTree = harness.render({ t, refreshSidebar: () => {} });
-  const defaultElements = collectElements(defaultTree);
-	  const defaultCheckboxes = defaultElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-	  const startSelection = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量选择');
-	  const workspaceArchiveEntry = defaultElements.find((element) => element.type === 'button' && elementText(element) === '批量归档工作区');
-	  assert(defaultCheckboxes.length === 0, 'archive list hides every selection checkbox by default');
-	  assert(startSelection !== undefined, 'archive list exposes a batch-selection trigger');
-	  assert(workspaceArchiveEntry !== undefined, 'archive settings exposes workspace bulk archive without a Host menu slot');
-	  workspaceArchiveEntry?.props.onClick({ currentTarget: { focus: () => {} } });
-	  const workspaceArchiveFlow = findComponentElement(harness.render({ t, refreshSidebar: () => {} }), 'WorkspaceArchiveChooserDialog');
-	  assert(workspaceArchiveFlow !== undefined, 'the settings-owned workspace action opens the plugin workspace chooser');
-  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '空间与策略'), 'archive manager exposes Storage & Retention tab');
-  assert(defaultElements.some((element) => element.type === 'button' && elementText(element) === '来源与分支'), 'archive manager names the relationship view by its user-visible purpose');
+  assert(master() !== undefined && master('项目二') !== undefined, 'each project has one persistent select-all checkbox');
+  assert(input('选择 Alpha') === undefined && bulk() === undefined, 'unselected archive hides row checkboxes and batch actions');
+  const sides = elements().filter((element) => element.props?.className === 'dac-group-side');
+  assert(sides.length === 2 && sides.every((side) => collectElements(side).filter((element) => element.type === 'input').length === 1), 'each project select-all sits beside its own chat count');
+  assert(!elements().some((element) => elementText(element) === '更多' || elementText(element) === '选择当前结果'), 'duplicate header controls stay removed');
+  const workspaceArchiveEntry = elements().find((element) => element.type === 'button' && elementText(element) === '批量归档工作区');
+  workspaceArchiveEntry?.props.onClick({ currentTarget: { focus: () => {} } });
+  assert(findComponentElement(render(), 'WorkspaceArchiveChooserDialog') !== undefined, 'settings workspace action still opens its chooser');
+  findComponentElement(render(), 'WorkspaceArchiveChooserDialog')?.props.onClose();
 
-  const moreTrigger = defaultElements.find((element) => element.type === 'button' && elementText(element) === '更多');
-  moreTrigger?.props.onClick();
-  const openMenuTree = harness.render({ t, refreshSidebar: () => {} });
-  const openMenuElements = collectElements(openMenuTree);
-  const actionPopover = openMenuElements.find((element) => element.props?.className === 'dac-action-menu');
-  const actionContainer = openMenuElements.find((element) => element.props?.className === 'dac-head-actions');
-  const renderedMoreTrigger = openMenuElements.find((element) => element.type === 'button' && elementText(element) === '更多');
-  let triggerFocuses = 0;
-  if (renderedMoreTrigger?.props.ref) renderedMoreTrigger.props.ref.current = { focus: () => { triggerFocuses += 1; } };
-  let menuEscapePrevented = false;
-  let menuEscapeStopped = false;
-  actionContainer?.props.onKeyDown?.({
-    key: 'Escape',
-    preventDefault: () => { menuEscapePrevented = true; },
-    stopPropagation: () => { menuEscapeStopped = true; },
-  });
-  const escapedMenuTree = harness.render({ t, refreshSidebar: () => {} });
-  assert(actionPopover?.props.role === undefined && collectElements(actionPopover).every((element) => element.props?.role !== 'menuitem'), 'compact action popovers use ordinary button disclosure semantics');
-  assert(menuEscapePrevented && menuEscapeStopped && triggerFocuses === 1, 'action popover contains Escape and restores focus to its trigger');
-  assert(!collectElements(escapedMenuTree).some((element) => element.props?.className === 'dac-action-menu'), 'Escape closes only the open action popover');
+  check(master(), true);
+  assert(input('选择 Alpha')?.props.checked && input('选择 Beta')?.props.checked && !input('选择 Gamma')?.props.checked, 'one master click selects its project and leaves other projects unselected');
+  assert(elementText(bulk()).includes('已选择 2 个聊天'), 'first master click immediately opens an accurate batch action bar');
+  check(input('选择 Alpha'), false);
+  assert(master()?.props['aria-checked'] === 'mixed' && !master()?.props.checked, 'partial project selection displays the mixed state');
+  check(master(), true);
+  assert(master()?.props.checked === true && input('选择 Alpha')?.props.checked, 'clicking a mixed master completes project selection');
+  check(master(), false);
+  assert(input('选择 Alpha') === undefined && bulk() === undefined && master()?.props.checked === false, 'clearing the last selected project closes batch mode automatically');
 
-  startSelection?.props.onClick();
-  const selectionTree = harness.render({ t, refreshSidebar: () => {} });
-  const selectionElements = collectElements(selectionTree);
-  const selectionCheckboxes = selectionElements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  const finishSelection = selectionElements.find((element) => element.type === 'button' && elementText(element) === '完成');
-  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择当前结果'), 'selection mode exposes the visible-results checkbox');
-  assert(selectionCheckboxes.some((element) => element.props?.['aria-label'] === '选择 Alpha'), 'selection mode exposes chat checkboxes');
-  assert(finishSelection !== undefined, 'selection mode exposes a completion action');
+  check(master(), true);
+  check(master('项目二'), true);
+  check(master(), false);
+  assert(input('选择 Gamma')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'clearing one project preserves selections in another project');
+  check(input('选择 Gamma'), false);
+  assert(bulk() === undefined && input('选择 Gamma') === undefined, 'clearing the final row exits selection mode');
 
-  const selectionSearch = selectionElements.find((element) => element.type === 'input' && element.props?.placeholder === '搜索标题、标签、备注和聊天内容');
-  selectionSearch?.props.onChange({ target: { value: 'no visible results' } });
-  const emptySelectionTree = harness.render({ t, refreshSidebar: () => {} });
-  assert(collectElements(emptySelectionTree).some((element) => element.type === 'button' && elementText(element) === '完成'), 'selection mode can finish when filters have no visible results');
-  selectionSearch?.props.onChange({ target: { value: '' } });
+  check(master(), true);
+  search('Alpha');
+  assert(bulk() === undefined, 'search changes clear previously selected chats immediately');
+  check(master(), true);
+  assert(elementText(bulk()).includes('已选择 1 个聊天') && !input('选择 Beta'), 'filtered project select-all selects only visible matching chats');
+  bulkAction('导出选中项')?.props.onClick();
+  assert(input('选择 Alpha')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'export preserves the selected chats');
+  const exportForm = createdElements.filter((element) => element.tagName === 'FORM').at(-1);
+  assert(exportForm?.children.find((element) => element.tagName === 'INPUT')?.value === '["session-a"]', 'filtered export excludes hidden and other-project chats');
+  elements().find((element) => element.type === 'button' && elementText(element) === '全部导出')?.props.onClick();
+  const globalExportForm = createdElements.filter((element) => element.tagName === 'FORM').at(-1);
+  assert(globalExportForm?.children.find((element) => element.tagName === 'INPUT')?.value === '["session-a","session-b","session-c"]', 'header export-all includes every archived chat regardless of filters and selection');
+  assert(input('选择 Alpha')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'global export-all preserves selection');
+  search('');
+  for (const [label, value, reset] of [['全部聊天', 'normal', 'all'], ['所有项目', 'ws-1', 'all'], ['全部标签', 'absent-tag', '']]) {
+    check(master(), true);
+    const change = (next) => elements().find((element) => element.type === 'select' && element.props?.['aria-label'] === label)?.props.onChange({ target: { value: next } });
+    change(value);
+    assert(bulk() === undefined, `${label} filter clears hidden selections`);
+    change(reset);
+  }
+  check(master(), true);
+  elements().find((element) => element.type === 'select' && element.props?.['aria-label'] === '排序方式')?.props.onChange({ target: { value: 'oldest' } });
+  assert(elementText(bulk()).includes('已选择 2 个聊天'), 'sorting preserves selections because the visible scope is unchanged');
+  assert(bulkAction('永久删除') !== undefined && bulkAction('全部永久删除') === undefined, 'batch permanent-delete wording describes only the selected scope');
+  bulkAction('永久删除')?.props.onClick();
+  let dialog = findComponentElement(render(), 'ConfirmDialog');
+  assert(String(dialog?.props.body).includes('共 2 个聊天'), 'permanent-delete confirmation states the exact selected count');
+  dialog?.props.onCancel();
+  assert(mutations.length === 0 && elementText(bulk()).includes('已选择 2 个聊天'), 'cancelling deletion preserves selection and sends no mutation');
 
-  finishSelection?.props.onClick();
-  const finishedTree = harness.render({ t, refreshSidebar: () => {} });
-  const finishedCheckboxes = collectElements(finishedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(finishedCheckboxes.length === 0, 'completing selection mode hides the checkboxes again');
-
-  const restartSelection = collectElements(finishedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  restartSelection?.props.onClick();
-  const restartedTree = harness.render({ t, refreshSidebar: () => {} });
-  const alphaCheckbox = collectElements(restartedTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
-  alphaCheckbox?.props.onChange({ target: { checked: true } });
-  const selectedTree = harness.render({ t, refreshSidebar: () => {} });
-  const selectedBulkBar = collectElements(selectedTree).find((element) => element.props?.className === 'dac-bulkbar');
-  const selectedExport = collectElements(selectedBulkBar).find((element) => element.type === 'button' && elementText(element) === '导出选中项');
-  selectedExport?.props.onClick();
-  const exportedTree = harness.render({ t, refreshSidebar: () => {} });
-  const exportedCheckboxes = collectElements(exportedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(exportedCheckboxes.length === 0, 'successful bulk export exits selection mode');
-
-  const restartForUnarchive = collectElements(exportedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  restartForUnarchive?.props.onClick();
-  const unarchiveSelectionTree = harness.render({ t, refreshSidebar: () => {} });
-  const unarchiveCheckbox = collectElements(unarchiveSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Alpha');
-  unarchiveCheckbox?.props.onChange({ target: { checked: true } });
-  const unarchiveBulkTree = harness.render({ t, refreshSidebar: () => {} });
-  const unarchiveBulkBar = collectElements(unarchiveBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
-  const selectedUnarchive = collectElements(unarchiveBulkBar).find((element) => element.type === 'button' && elementText(element) === '取消归档');
-  await selectedUnarchive?.props.onClick();
-  const unarchivedTree = harness.render({ t, refreshSidebar: () => {} });
-  const unarchivedCheckboxes = collectElements(unarchivedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(unarchivedCheckboxes.length === 0, 'successful bulk unarchive exits selection mode');
-
-  const restartForDelete = collectElements(unarchivedTree).find((element) => element.type === 'button' && elementText(element) === '批量选择');
-  restartForDelete?.props.onClick();
-  const deleteSelectionTree = harness.render({ t, refreshSidebar: () => {} });
-  const deleteCheckbox = collectElements(deleteSelectionTree).find((element) => element.type === 'input' && element.props?.['aria-label'] === '选择 Beta');
-  deleteCheckbox?.props.onChange({ target: { checked: true } });
-  const deleteBulkTree = harness.render({ t, refreshSidebar: () => {} });
-  const deleteBulkBar = collectElements(deleteBulkTree).find((element) => element.props?.className === 'dac-bulkbar');
-  const selectedDelete = collectElements(deleteBulkBar).find((element) => element.type === 'button' && elementText(element) === '移至回收站');
-  selectedDelete?.props.onClick();
-  const deleteConfirmTree = harness.render({ t, refreshSidebar: () => {} });
-  const confirmDelete = collectElements(deleteConfirmTree).find((element) => element.type === 'button' && element.props?.className === 'dac-btn-danger');
-  await confirmDelete?.props.onClick();
-  const deletedTree = harness.render({ t, refreshSidebar: () => {} });
-  const deletedCheckboxes = collectElements(deletedTree).filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-  assert(deletedCheckboxes.length === 0, 'successful bulk delete exits selection mode');
-
+  failBeta = true;
+  bulkAction('移至回收站')?.props.onClick();
+  await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+  assert(mutations.at(-1)?.body.sessionIds.join(',') === 'session-a,session-b', 'batch move targets only the selected project');
+  assert(input('选择 Alpha') === undefined && input('选择 Beta')?.props.checked && elementText(bulk()).includes('已选择 1 个聊天'), 'partial success removes successes and retains failed chats selected');
+  failBeta = false;
+  bulkAction('移至回收站')?.props.onClick();
+  await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+  assert(bulk() === undefined && input('选择 Gamma') === undefined && master('项目二')?.props.checked === false, 'successful retry closes batch actions and preserves unselected projects');
+  check(master('项目二'), true);
+  await bulkAction('取消归档')?.props.onClick();
+  assert(bulk() === undefined && !elements().some((element) => element.type === 'input' && element.props?.type === 'checkbox'), 'successful unarchive leaves no selection control in the empty list');
   harness.unmount();
 
   const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
@@ -2854,7 +2834,7 @@ console.log('\n[11c] client half — bulk selection workflow');
     { id: 'session-b', title: 'Beta', createdAt: 20, origin: 'subagent', workspaceId: 'ws-1', workspaceTitle: '项目一' },
   ];
   let stateCall = 0;
-  let selectedAfterGroup = null;
+  let selectedAfterRow = null;
   const renderedEffects = [];
   moduleTable.react.useState = (initial) => {
     const value = typeof initial === 'function' ? initial() : initial;
@@ -2865,11 +2845,9 @@ console.log('\n[11c] client half — bulk selection workflow');
         ? 'Alpha'
       : index === 12
           ? { title: '将选中的已归档聊天移至回收站？', body: '这将把选中的 1 个已归档聊天移至回收站', ids: ['session-a'] }
-          : index === 25
-            ? true
           : value instanceof Set ? new Set(['session-a']) : value;
     const setter = value instanceof Set
-      ? (next) => { selectedAfterGroup = typeof next === 'function' ? next(current) : next; }
+      ? (next) => { selectedAfterRow = typeof next === 'function' ? next(current) : next; }
       : () => {};
     return [current, setter];
   };
@@ -2890,14 +2868,15 @@ console.log('\n[11c] client half — bulk selection workflow');
   assert(alphaCheckbox?.props.checked === true, 'selected chat renders checked');
   assert(checkboxes.every((el) => el.props?.['aria-label'] !== '选择 Beta'), 'search filter hides non-matching chats');
   const projectCheckbox = checkboxes.find((el) => el.props?.['aria-label'] === '选择此项目：项目一');
-  assert(projectCheckbox?.props['aria-checked'] === 'mixed', 'project selection includes chats hidden by filters');
-  projectCheckbox?.props.onChange({ target: { checked: true } });
-  assert([...selectedAfterGroup ?? []].sort().join(',') === 'session-a,session-b', 'project selection selects hidden chats in the project');
+  assert(projectCheckbox === undefined, 'archive project header removes the redundant project-selection checkbox');
+  assert(checkboxes.length === 2, 'selection mode keeps only the persistent mode toggle and visible chat checkbox');
+  alphaCheckbox?.props.onChange({ target: { checked: false } });
+  assert(selectedAfterRow?.size === 0, 'individual chat selection can be cleared');
 
   const bulkBar = elements.find((el) => el.props?.className === 'dac-bulkbar');
   assert(elementText(bulkBar).includes('已选择 1 个聊天'), 'bulk bar reports the selected count');
-  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('移至回收站') && elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, recycle, and clear actions');
-  assert(!elements.some((el) => el.type === 'button' && elementText(el) === '全部导出'), 'top-level export all is hidden while the selection bar is active');
+  assert(elementText(bulkBar).includes('导出选中项') && elementText(bulkBar).includes('取消归档') && elementText(bulkBar).includes('移至回收站') && elementText(bulkBar).includes('永久删除') && !elementText(bulkBar).includes('清除'), 'bulk bar exposes export, unarchive, recycle, and permanent deletion without clear');
+  assert(elements.some((el) => el.type === 'button' && elementText(el) === '全部导出'), 'global export-all remains visible alongside selected export');
 
   const formsBeforeExport = createdElements.filter((element) => element.tagName === 'FORM').length;
   const bulkExport = collectElements(bulkBar).find((el) => el.type === 'button' && elementText(el) === '导出选中项');
@@ -3045,9 +3024,9 @@ console.log('\n[11c] client half — archive insights UI');
   let tree = renderSection();
   let elements = collectElements(tree);
   const importTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导入备份');
-  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '导出备份');
+  const exportTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '全部导出');
   const moreTrigger = elements.find((el) => el.type === 'button' && elementText(el) === '更多');
-  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger !== undefined, 'top actions expose direct backup import, direct backup export, and more');
+  assert(importTrigger !== undefined && exportTrigger !== undefined && moreTrigger === undefined, 'top actions expose direct backup import and direct backup export without duplicate more');
   assert(
     !elements.some((el) => /Codex|Claude|JSONL/.test(elementText(el)))
       && !elements.some((el) => el.type === 'input' && String(el.props?.accept).includes('.jsonl')),
@@ -3077,8 +3056,7 @@ console.log('\n[11c] client half — archive insights UI');
   tree = renderSection();
   elements = collectElements(tree);
   const moreMenu = elements.find((el) => el.props?.className === 'dac-action-menu');
-  const deleteAllMenuItem = collectElements(moreMenu).find((el) => el.type === 'button' && elementText(el) === '全部移至回收站');
-  assert(deleteAllMenuItem?.props.className === 'dac-action-menu-item dac-danger', 'recycle all is a danger item inside the more menu');
+  assert(moreMenu === undefined, 'archive header has no duplicate more menu');
 
   const summary = elements.find((el) => el.props?.className === 'dac-summary');
   assert(summary !== undefined, 'summary strip rendered below the title');
@@ -3153,12 +3131,28 @@ console.log('\n[11c] client half — archive insights UI');
   const gammaRow = rows.find((row) => elementText(row).includes('Gamma'));
   assert(gammaRow !== undefined && elementText(gammaRow).includes('—'), 'unavailable session size renders the dash');
 
-  const alphaExport = collectElements(alphaRow).find((el) => el.type === 'button' && el.props?.['aria-label'] === '导出备份');
+  const rowMenu = collectElements(alphaRow).find((el) => el.type === 'details');
+  assert(rowMenu !== undefined && rowMenu.props.open !== true, 'secondary row actions are collapsed by default');
+  const rowActions = collectElements(alphaRow).find((el) => el.props?.className === 'dac-row-actions');
+  assert(rowActions.props.children.filter((el) => el?.type === 'button').length === 3, 'row exposes preview, unarchive, and permanent delete beside its menu');
+  const quickDelete = collectElements(rowActions).find((el) => el.type === 'button' && el.props?.['aria-label'] === '永久删除');
+  assert(quickDelete?.props.className === 'dac-iconbtn dac-danger', 'row exposes permanent delete as a danger icon button');
+  const rowActionChildren = rowActions.props.children.filter(Boolean);
+  assert(rowActionChildren.indexOf(quickDelete) < rowActionChildren.findIndex((el) => el?.props?.className === 'dac-unarchive'), 'quick permanent delete appears immediately before unarchive');
+  assert(elementText(rowMenu).includes('编辑标签与备注') && elementText(rowMenu).includes('导出本条') && !elementText(rowMenu).includes('永久删除'), 'row menu contains secondary actions without duplicating quick permanent delete');
+  let menuFocuses = 0;
+  rowMenu.props.ref.current = { open: true, querySelector: () => ({ focus: () => { menuFocuses += 1; } }) };
+  rowMenu.props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert(rowMenu.props.ref.current.open === false && menuFocuses === 1, 'Escape closes the row menu and restores its trigger focus');
+  rowMenu.props.ref.current.open = true;
+  collectElements(rowMenu).find((el) => el.props?.className === 'dac-menu dac-row-menu').props.onClickCapture({ target: { closest: () => ({}) } });
+  assert(rowMenu.props.ref.current.open === false && menuFocuses === 2, 'menu actions close the disclosure and establish a stable dialog return target');
+  const alphaExport = collectElements(rowMenu).find((el) => el.type === 'button' && el.props?.['aria-label'] === '导出本条');
   const formsBeforeRow = createdElements.filter((element) => element.tagName === 'FORM').length;
   alphaExport?.props.onClick();
   const rowForms = createdElements.filter((element) => element.tagName === 'FORM');
   const rowInput = rowForms.at(-1)?.children.find((element) => element.tagName === 'INPUT');
-  assert(alphaExport !== undefined && alphaExport.props.disabled !== true, 'each idle row exposes an enabled export icon');
+  assert(alphaExport !== undefined && alphaExport.props.disabled !== true, 'each idle row menu exposes an enabled single-chat export');
   assert(rowForms.length === formsBeforeRow + 1 && rowInput?.value === '["session-a"]', 'row export submits exactly that session');
   const styleText = headChildren.find((child) => child.id === 'dsh-archived-chats-css')?.textContent ?? '';
   assert(styleText.includes('.dac-iconbtn{') && styleText.includes('width:28px;height:28px'), 'row icon dimensions remain stable');
@@ -4167,7 +4161,59 @@ console.log('\n[11f] client half — recycle navigation and management');
         'snapshot detail search filters by snapshot identity');
       snapshotHarness.unmount();
     }
-    storageHarness.unmount();
+    // A saved policy must not make later cleanup failures look successful or expire.
+    const retentionFetch = globalThis.fetch;
+    const retentionSetTimeout = globalThis.setTimeout;
+    const retentionClearTimeout = globalThis.clearTimeout;
+    const retentionTimers = new Map();
+    let nextRetentionTimer = 0;
+    let previewFails = true;
+    globalThis.setTimeout = (callback, delay) => {
+      const id = ++nextRetentionTimer;
+      retentionTimers.set(id, { callback, delay });
+      return id;
+    };
+    globalThis.clearTimeout = (id) => retentionTimers.delete(id);
+    globalThis.fetch = async (url, options) => {
+      if (String(url).endsWith('/retention/policy')) return responseFor({ policy: storageInsightsPayload.policy });
+      if (String(url).endsWith('/retention/preview')) {
+        if (previewFails) throw new Error('preview unavailable');
+        return responseFor({ token: 'token', nonce: 'nonce', candidates: [] });
+      }
+      if (String(url).endsWith('/retention/apply')) return responseFor({ applied: [], failed: [{ key: 'snapshot-a', reason: 'cleanup refused' }] });
+      return retentionFetch(url, options);
+    };
+    const renderRetention = () => {
+      const result = storageHarness.render({ t });
+      storageHarness.flushEffects();
+      return result;
+    };
+    const retentionAction = (label) => collectElements(renderRetention()).find((element) => element.type === 'button' && elementText(element) === label);
+    try {
+      await retentionAction('保存策略').props.onClick();
+      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-toast' && elementText(element) === '策略已保存'), 'policy save success uses a transient success toast');
+      assert(retentionTimers.size === 1 && [...retentionTimers.values()][0].delay === 3000, 'only policy save success schedules its three-second dismissal');
+      [...retentionTimers.values()][0].callback();
+      renderRetention();
+      assert(!elementText(renderRetention()).includes('策略已保存'), 'policy success toast disappears when its timer fires');
+      await retentionAction('保存策略').props.onClick();
+      renderRetention();
+      await retentionAction('预览清理').props.onClick();
+      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-notice' && elementText(element) === 'preview unavailable'), 'preview failure after policy save uses a persistent notice instead of a success toast');
+      assert(retentionTimers.size === 0, 'preview failure cancels the prior success timer and schedules no dismissal');
+      await retentionAction('保存策略').props.onClick();
+      renderRetention();
+      previewFails = false;
+      await retentionAction('预览清理').props.onClick();
+      await findComponentElement(renderRetention(), 'RetentionPreviewDialog').props.onApply();
+      assert(collectElements(renderRetention()).some((element) => element.props?.className === 'dac-notice' && elementText(element).includes('cleanup refused')), 'partial cleanup failure after saving preserves actionable failure details in a notice');
+      assert(retentionTimers.size === 0, 'cleanup results remain visible without an automatic dismissal');
+    } finally {
+      storageHarness.unmount();
+      globalThis.fetch = retentionFetch;
+      globalThis.setTimeout = retentionSetTimeout;
+      globalThis.clearTimeout = retentionClearTimeout;
+    }
 
     storageInsightsPayload = {
       ...storageInsightsPayload,
@@ -4501,7 +4547,7 @@ console.log('\n[11f] client half — recycle navigation and management');
   Object.assign(moduleTable.react, savedHooks);
 }
 
-console.log('\n[11g] client half — archive move exposes immediate undo');
+console.log('\n[11g] client half — permanent deletion and recoverable project move');
 {
   const savedHooks = { ...moduleTable.react };
   const savedFetch = globalThis.fetch;
@@ -4513,7 +4559,7 @@ console.log('\n[11g] client half — archive move exposes immediate undo');
     requests.push({ path, options });
     if (path.endsWith('/state')) return responseFor({ metadataStatus: 'ready', sessions: archived });
     if (path.endsWith('/stats')) return responseFor({ summary: { sessionCount: 1, totalBytes: 0, unavailableCount: 0 }, sessions: {} });
-    if (path.endsWith('/delete-all')) return responseFor({ trashed: ['undo-a'], failed: [] });
+    if (path.endsWith('/delete-all')) return responseFor(JSON.parse(options.body).permanent ? { deleted: ['undo-a'], failed: [] } : { trashed: ['undo-a'], failed: [] });
     if (path.endsWith('/trash/restore')) return responseFor({ restored: ['undo-a'], failed: [], warnings: [] });
     return responseFor({});
   };
@@ -4524,21 +4570,44 @@ console.log('\n[11g] client half — archive move exposes immediate undo');
   await new Promise((resolve) => setTimeout(resolve, 0));
   let tree = harness.render({ t, refreshSidebar: () => {} });
   let elements = collectElements(tree);
-  const rowMove = elements.find((element) => element.type === 'button' && element.props?.className === 'dac-iconbtn dac-danger' && element.props?.['aria-label'] === '全部移至回收站');
-  rowMove?.props.onClick();
+  const rowDelete = elements.find((element) => element.type === 'button' && element.props?.className === 'dac-iconbtn dac-danger' && element.props?.['aria-label'] === '永久删除');
+  rowDelete?.props.onClick();
   tree = harness.render({ t, refreshSidebar: () => {} });
-  const moveDialog = findComponentElement(tree, 'ConfirmDialog');
-  assert(moveDialog?.props.body === '会自动创建保护快照，之后可从回收站恢复', 'archive move confirmation promises recoverability rather than permanent deletion');
-  await moveDialog?.props.onConfirm();
-  tree = harness.render({ t, refreshSidebar: () => {} });
-  elements = collectElements(tree);
-  const undo = elements.find((element) => element.type === 'button' && elementText(element) === '撤销');
-  assert(!elementText(tree).includes('Undo Alpha') && undo !== undefined, 'successful move removes the archived row and exposes Undo');
-  await undo?.props.onClick();
-  tree = harness.render({ t, refreshSidebar: () => {} });
-  assert(requests.some((request) => request.path.endsWith('/trash/restore') && request.options.body === '{"sessionIds":["undo-a"]}'), 'Undo calls the guarded recycle restore route');
-  assert(elementText(tree).includes('Undo Alpha') && !collectElements(tree).some((element) => element.type === 'button' && elementText(element) === '撤销'), 'successful Undo restores the archive row and clears the action');
+  const deleteDialog = findComponentElement(tree, 'ConfirmDialog');
+  assert(deleteDialog?.props.title === '直接永久删除已归档聊天？', 'single archive deletion opens the permanent-delete confirmation');
+  assert(String(deleteDialog?.props.body).includes('不会进入回收站'), 'single archive deletion explains that recovery is unavailable');
+  deleteDialog?.props.onCancel();
+  assert(!requests.some((request) => request.path.endsWith('/delete-all')), 'cancelling permanent deletion sends no mutation');
+  rowDelete?.props.onClick();
+  await findComponentElement(harness.render({ t, refreshSidebar: () => {} }), 'ConfirmDialog')?.props.onConfirm();
+  assert(!collectElements(harness.render({ t, refreshSidebar: () => {} })).some((element) => element.props?.className === 'dac-row'), 'successful single permanent deletion removes the row');
+  assert(requests.some((request) => request.path.endsWith('/delete-all') && request.options.body === '{"sessionIds":["undo-a"],"permanent":true}'), 'single archive deletion calls the permanent delete route');
   harness.unmount();
+  const projectHarness = createHookHarness(clientCalls.slotRegister[0].component);
+  projectHarness.render({ t, refreshSidebar: () => {} });
+  projectHarness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const openMenu = () => {
+    collectElements(projectHarness.render({ t, refreshSidebar: () => {} })).find((element) => element.type === 'button' && element.props?.['aria-label'] === '…')?.props.onClick();
+    return collectElements(projectHarness.render({ t, refreshSidebar: () => {} }));
+  };
+  let menuElements = openMenu();
+  const permanentProjectAction = menuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部永久删除');
+  assert(permanentProjectAction !== undefined, 'project menu includes permanent deletion alongside recoverable move');
+  permanentProjectAction?.props.onClick();
+  const projectDialog = findComponentElement(projectHarness.render({ t, refreshSidebar: () => {} }), 'ConfirmDialog');
+  assert(projectDialog?.props.title === '直接永久删除已归档聊天？', 'project permanent action opens irreversible confirmation');
+  projectDialog?.props.onCancel();
+  menuElements = openMenu();
+  menuElements.find((element) => element.props?.role === 'menuitem' && elementText(element) === '全部移至回收站')?.props.onClick();
+  await findComponentElement(projectHarness.render({ t, refreshSidebar: () => {} }), 'ConfirmDialog')?.props.onConfirm();
+  assert(requests.some((request) => request.path.endsWith('/delete-all') && JSON.parse(request.options.body).permanent !== true), 'project recycle action remains recoverable');
+  const undo = collectElements(projectHarness.render({ t, refreshSidebar: () => {} })).find((element) => element.type === 'button' && elementText(element) === '撤销');
+  assert(undo !== undefined, 'moving a project to the Recycle Bin exposes immediate undo');
+  await undo?.props.onClick();
+  assert(requests.some((request) => request.path.endsWith('/trash/restore')), 'undo restores the moved chat');
+  assert(collectElements(projectHarness.render({ t, refreshSidebar: () => {} })).some((element) => element.props?.className === 'dac-row'), 'undo returns the chat to the archive list');
+  projectHarness.unmount();
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
 }
