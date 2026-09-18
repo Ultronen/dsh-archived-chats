@@ -81,3 +81,16 @@ This release retires the standalone History feature and simplifies everyday use 
 Compatibility: `POST /history/capture` now returns `410 history-capture-retired`. Existing snapshot read, recovery, and deletion endpoints remain for migration. Custom clients must stop requesting historical captures.
 
 Validation: 236 automated tests, independent code review, desktop and 390px browser checks, storage-error recovery access, and local DSH runtime verification passed.
+## 1.3.2 — DSH 0.1.5 兼容验证 / DSH 0.1.5 compatibility verification
+
+### 中文
+
+- 将开发验证依赖更新到 `@deepseek-ai/dsh-session@0.1.5-rc.2`，并继续保留对旧版 DSH `>=0.1.0-rc.7` 的运行兼容范围。
+- 验证插件在 DeepSeek Harness `0.1.5-rc.2` 下可正常加载；本版不直接删除 Host 的 `session_projcache` 文件，因为宿主尚未提供安全的按会话 eviction API。
+- 增加兼容性测试，完整测试套件通过。
+
+### English
+
+- Update the development verification dependency to `@deepseek-ai/dsh-session@0.1.5-rc.2` while retaining the existing runtime compatibility range for DSH `>=0.1.0-rc.7`.
+- Verify that the plugin loads on DeepSeek Harness `0.1.5-rc.2`; this release does not unlink Host `session_projcache` files because the Host still exposes no safe per-session eviction API.
+- Add a compatibility assertion and keep the full test suite green.

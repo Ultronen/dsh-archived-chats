@@ -53,6 +53,7 @@ test('client bootstrap stays compatible with stable and alpha.2 through the loca
 
 test('host session API follows the DSH-provided stable or alpha package instead of bundling an old core', () => {
   assert.equal(packageManifest.dependencies?.['@deepseek-ai/dsh-session'], undefined);
+  assert.equal(packageManifest.devDependencies?.['@deepseek-ai/dsh-session'], '0.1.5-rc.2');
   assert.equal(
     packageManifest.peerDependencies?.['@deepseek-ai/dsh-session'],
     '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0',
