@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "DeepSeek Harness 会话档案：从设置中安全归档工作区会话，按工作区浏览和全文搜索归档聊天，原生只读预览对话、工具活动和已存储图片，管理标签备注与 ZIP 备份恢复；提供统一回收站、可选自动清理、空间分账和来源与分支，已有快照直接进入回收站。所有数据留在本机。 Session Archive for DeepSeek Harness: safely archive workspace chats from Settings; browse and full-text search archived chats; preview conversations, tool activity, and stored images read-only; manage tags, notes, and ZIP backup restore; provide a unified Recycle Bin, optional automatic cleanup, storage accounting, and Origins & Branches, with existing snapshots shown directly in the Recycle Bin. All data stays local.",
   "license": "MIT",
   "author": "Ultronen",
