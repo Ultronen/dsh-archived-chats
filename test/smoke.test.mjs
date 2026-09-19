@@ -5,7 +5,7 @@
  * (lib/client.js) under a mocked browser runtime for registration-level checks.
  * Run: node test/smoke.test.mjs
  */
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -318,8 +318,8 @@ services.attachments = {
   }),
 };
 
-// Seed an upgrade-era snapshot before the plugin starts. The current release
-// must surface it through Recycle Bin without requiring a legacy-data screen.
+// Seed upgrade-era snapshots before the plugin starts. They remain untouched
+// compatibility files and must never be projected into the Recycle Bin.
 const legacyStore = createSnapshotStore({ root: join(testHome, 'plugin-data', 'archived-chats', 'snapshots'), persistence, attachments: services.attachments });
 const seedLegacy = () => legacyStore.capture({ sessionId: 'session-a', archive: { title: 'Legacy Alpha', workspace: { id: 'ws-1', title: 'Project', path: '/ws/private' }, wasArchived: true, tags: [], note: 'keep this' }, liveDisposition: 'cold' });
 const capturedSnapshotId = (await seedLegacy()).snapshotId;
@@ -335,9 +335,12 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 34, `thirty-four archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
+assert(routes.size === 26, `twenty-six archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
+}
+for (const path of ['history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all']) {
+  assert(!routes.has(`/plugins/dsh-archived-chats/${path}`), `retired route /${path} is not registered`);
 }
 assert(!routes.has('/plugins/dsh-archived-chats/interop/inspect'), 'Codex / Claude import route is not registered');
 assert(!routes.has('/plugins/dsh-archived-chats/interop/export'), 'Codex / Claude export route is not registered');
@@ -494,85 +497,25 @@ console.log('\n[1a1] workspace archive late session binding');
 
 console.log('\n[1a0] storage insights, retention, and lineage routes');
 {
-  const historyCaptureGet = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('GET', {}));
-  assert(historyCaptureGet.status === 405, 'history capture rejects GET');
-  const historyCaptureMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('POST', {}, '{}'));
-  assert(historyCaptureMissingGuard.status === 403, 'history capture rejects missing guard');
-  const historyPreviewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/preview', mockReq('POST', {}, '{}'));
-  assert(historyPreviewMissingGuard.status === 403, 'history preview rejects missing guard');
-  const historyRestorePreviewMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/restore/preview', mockReq('POST', {}, '{}'));
-  assert(historyRestorePreviewMissingGuard.status === 403, 'history restore preview rejects missing guard');
-  const historyRestoreMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/restore', mockReq('POST', {}, '{}'));
-  assert(historyRestoreMissingGuard.status === 403, 'history restore rejects missing guard');
-  const historyDeleteMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/delete', mockReq('POST', {}, '{}'));
-  assert(historyDeleteMissingGuard.status === 403, 'history delete rejects missing guard');
-  const historyDeleteAllMissingGuard = await call(routes, '/plugins/dsh-archived-chats/history/delete-all', mockReq('POST', {}, '{}'));
-  assert(historyDeleteAllMissingGuard.status === 403, 'history clear rejects missing guard');
+  const upgradedTrash = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
+  assert(upgradedTrash.status === 200 && upgradedTrash.json().sessions.length === 0,
+    'upgrade-era snapshots do not appear in the Recycle Bin');
+  assert(upgradedTrash.json().summary.count === 0 && upgradedTrash.json().summary.snapshotBytes === 0,
+    'upgrade-era snapshots do not affect Recycle Bin totals');
 
-  const capturedHistory = await call(routes, '/plugins/dsh-archived-chats/history/capture', mockReq('POST', {
+  const clearedTrash = await call(routes, '/plugins/dsh-archived-chats/trash/empty', mockReq('POST', {
     'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ sessionId: 'session-a' })));
-  assert(capturedHistory.status === 410, 'retired capture route refuses new history versions');
-	const upgradedTrash = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
-	const legacyRowId = `legacy:${capturedSnapshotId}`;
-	const legacyRow = upgradedTrash.json().sessions.find((row) => row.sessionId === legacyRowId);
-	assert(upgradedTrash.status === 200 && legacyRow?.sourceKind === 'legacy-snapshot' && legacyRow.restorable === true,
-	  `upgrade snapshot appears as a restorable Recycle Bin item (got ${upgradedTrash.status})`);
-	assert(!JSON.stringify(upgradedTrash.json()).includes('/ws/'), 'Recycle Bin never exposes legacy workspace paths');
-	assert(!JSON.stringify(upgradedTrash.json()).includes('keep this'), 'Recycle Bin never exposes private legacy notes');
-
-  const historyPage = await call(routes, '/plugins/dsh-archived-chats/history/preview', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ snapshotId: capturedSnapshotId, offset: 0, limit: 50 })));
-  assert(historyPage.status === 200 && historyPage.json().snapshot.snapshotId === capturedSnapshotId,
-    `history preview answers 200 (got ${historyPage.status})`);
-  assert(historyPage.json().messages.some((message) => message.role === 'user'), 'history preview returns projected messages');
-
-  const historyImage = await call(routes, '/plugins/dsh-archived-chats/history/preview/image', mockReq('POST', {
-    'x-dsh-archived-chats': '1',
-  }, JSON.stringify({ snapshotId: capturedSnapshotId, attachment: archivedImageRef })));
-  assert(historyImage.status === 200 && historyImage.headers['content-type'] === 'image/png',
-    `history image answers 200 (got ${historyImage.status})`);
-  assert(historyImage.bytes().equals(archivedImageBytes), 'history image returns only verified snapshot bytes');
-
-	const restoredHistory = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', {
-	  'x-dsh-archived-chats': '1',
-	}, JSON.stringify({ sessionIds: [legacyRowId] })));
-	const restoredHistoryId = restoredHistory.json().created?.[0];
-	assert(restoredHistory.status === 200 && restoredHistory.json().restored?.includes(legacyRowId)
-	  && restoredHistoryId !== undefined && restoredHistoryId !== 'session-a',
-	  `Recycle Bin restores legacy data as a new archived session (got ${restoredHistory.status})`);
-	assert(workspaceState.archivedSessionIds.includes('session-a') && workspaceState.archivedSessionIds.includes(restoredHistoryId),
-	  'Recycle Bin restore preserves the source and registers the new copy');
-	const replayedHistoryRestore = await call(routes, '/plugins/dsh-archived-chats/trash/restore', mockReq('POST', {
-	  'x-dsh-archived-chats': '1',
-	}, JSON.stringify({ sessionIds: [legacyRowId] })));
-	assert(replayedHistoryRestore.status === 409, 'restored legacy item cannot be restored twice');
-
-	const recapturedRowId = `legacy:${purgeSnapshotId}`;
-	const deletedHistory = await call(routes, '/plugins/dsh-archived-chats/trash/purge', mockReq('POST', {
-	  'x-dsh-archived-chats': '1',
-	}, JSON.stringify({ sessionIds: [recapturedRowId] })));
-	assert(deletedHistory.status === 200 && deletedHistory.json().purged.includes(recapturedRowId),
-	  `Recycle Bin permanently deletes one exact legacy snapshot (got ${deletedHistory.status}: ${deletedHistory.body})`);
-
-	const clearedHistory = await call(routes, '/plugins/dsh-archived-chats/trash/empty', mockReq('POST', {
-	  'x-dsh-archived-chats': '1',
-	}, '{}'));
-	assert(clearedHistory.status === 200 && clearedHistory.json().purged.includes(`legacy:${clearSnapshotId}`),
-	  `empty Recycle Bin removes every remaining legacy snapshot (got ${clearedHistory.status}: ${clearedHistory.body})`);
-	const trashAfterClear = await call(routes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
-	assert(!trashAfterClear.json().sessions.some((row) => row.sourceKind === 'legacy-snapshot'),
-	  'empty Recycle Bin refreshes the unified inventory');
-
-  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter((id) => id !== restoredHistoryId);
-  await persistence.removeSession(restoredHistoryId);
-  const metadataAfterHistoryRestore = readMetadataStore();
-  delete metadataAfterHistoryRestore.sessions[restoredHistoryId];
-  writeFileSync(metadataFile, JSON.stringify(metadataAfterHistoryRestore), 'utf8');
+  }, '{}'));
+  assert(clearedTrash.status === 200 && clearedTrash.json().purged.length === 0,
+    'empty Recycle Bin acts only on chats explicitly moved there');
+  assert([capturedSnapshotId, purgeSnapshotId, clearSnapshotId].every((id) =>
+    existsSync(join(testHome, 'plugin-data', 'archived-chats', 'snapshots', id, 'manifest.json'))),
+  'empty Recycle Bin leaves old history snapshot files untouched');
 
   const insights = await call(routes, '/plugins/dsh-archived-chats/insights', mockReq('GET', {}));
   assert(insights.status === 200, `insights answers 200 (got ${insights.status})`);
+  assert(insights.json().summary.snapshotBytes === 0 && insights.json().snapshots.length === 0,
+    'upgrade-era snapshots do not affect storage insights or cleanup input');
   assert(insights.json().summary.sessionBytes >= 0, 'insights exposes measured session bytes');
   assert(!JSON.stringify(insights.json()).includes('workspacePath'), 'insights never exposes workspace paths');
 
@@ -2332,9 +2275,9 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['archiveNotice.view'] === '查看'
     && zhDict['archiveNotice.undo'] === '撤销',
   'Chinese archive success notice copy is localized');
-  assert(zhDict['trash.status.legacy'] === '旧版恢复副本'
+  assert(zhDict['trash.status.legacy'] === undefined
     && zhDict['trash.confirm.emptyBody'] === '这将永久删除回收站中所有工作区的会话和保护快照。',
-  'Chinese unified Recycle Bin copy is localized');
+  'Chinese Recycle Bin copy has no retired legacy state');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === undefined, 'single-chat export copy is removed');
   assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
     && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
@@ -2343,9 +2286,9 @@ console.log('\n[11] client half — settings section registration');
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
   'English archive success notice copy is localized');
-  assert(clientCalls.localeRegister[0].dicts.en['trash.status.legacy'] === 'Legacy recovery copy'
+  assert(clientCalls.localeRegister[0].dicts.en['trash.status.legacy'] === undefined
     && clientCalls.localeRegister[0].dicts.en['trash.confirm.emptyBody'] === 'This permanently deletes the chats and protection snapshots from every workspace in the Recycle Bin.',
-  'English unified Recycle Bin copy is localized');
+  'English Recycle Bin copy has no retired legacy state');
 	  assert(clientCalls.slotRegister.length === 2, `settings and shell overlay register exactly twice without requiring an unreleased Host slot (got ${clientCalls.slotRegister.length})`);
 	  const settingsRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'settings.section');
 	  const overlayRegistration = clientCalls.slotRegister.find((entry) => entry.meta?.name === 'shell.overlay');
@@ -3424,32 +3367,25 @@ console.log('\n[11f] client half — recycle navigation and management');
       createdAt: 20, workspace: null, snapshotBytes: 0, snapshotAttachmentCount: 0, liveDisposition: 'parked',
     },
     {
-      sessionId: 'legacy:history-newer', state: 'trashed', sourceKind: 'legacy-snapshot', legacySnapshotId: 'history-newer',
-      sourceSessionId: 'history-a', restorable: true, trashedAt: '2026-08-26T00:00:00.000Z', title: 'Legacy Alpha',
-      createdAt: 1787702400000, workspace: { id: 'ws-1', title: '项目一' }, snapshotBytes: 2048,
-      snapshotAttachmentCount: 2, liveDisposition: 'cold',
-    },
-    {
-      sessionId: 'legacy:history-degraded', state: 'degraded', sourceKind: 'legacy-snapshot', legacySnapshotId: 'history-degraded',
-      sourceSessionId: null, restorable: false, trashedAt: '2026-08-25T00:00:00.000Z', title: null,
-      createdAt: null, workspace: null, snapshotBytes: 0, snapshotAttachmentCount: 0, liveDisposition: 'cold',
-    },
-    {
       sessionId: 'trash-project-purge', state: 'trashed', trashedAt: '2026-08-24T03:04:05.000Z', title: 'Trash Project Purge',
       createdAt: 30, workspace: { id: 'ws-2', title: '项目二' }, snapshotBytes: 512,
       snapshotAttachmentCount: 1, liveDisposition: 'cold',
     },
+    {
+      sessionId: 'trash-empty', state: 'trashed', trashedAt: '2026-08-24T04:05:06.000Z', title: 'Trash Empty',
+      createdAt: 40, workspace: { id: 'ws-3', title: '项目三' }, snapshotBytes: 256,
+      snapshotAttachmentCount: 0, liveDisposition: 'cold',
+    },
   ];
   const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
   let storageInsightsPayload = {
-    summary: { sessionBytes: 3072, snapshotBytes: 3072, totalMeasuredBytes: 6144, duplicateSnapshotBytes: 0, sessionUnavailableCount: 0, degradedSnapshotCount: 0 },
+    summary: { sessionBytes: 3072, snapshotBytes: 1024, totalMeasuredBytes: 4096, duplicateSnapshotBytes: 0, sessionUnavailableCount: 0, degradedSnapshotCount: 0 },
     sessions: [
       { id: 'session-alpha', title: 'Alpha 归档', workspaceTitle: '项目一', scope: 'archive', status: 'ready', sizeBytes: 1024 },
       { id: 'session-beta', title: 'Beta 回收', workspaceTitle: '项目二', scope: 'trash', status: 'ready', sizeBytes: 2048 },
     ],
     snapshots: [
       { snapshotId: 'snapshot-active', sessionId: 'session-alpha', createdAt: '2026-08-24T00:00:00.000Z', totalBytes: 1024, sessionBytes: 1024, attachmentCount: 0, status: 'ready', active: true },
-      { snapshotId: 'snapshot-history', sessionId: 'session-beta', createdAt: '2026-08-23T00:00:00.000Z', totalBytes: 2048, sessionBytes: 2048, attachmentCount: 0, status: 'ready', active: false },
     ],
     policy: { historicalSnapshotsPerSession: 1, historicalSnapshotMaxAgeDays: null, snapshotQuotaBytes: null, recycleMaxAgeDays: null },
     candidateSummary: { snapshotCount: 0, recycleCount: 0, projectedSnapshotBytes: 1024 },
@@ -3477,13 +3413,6 @@ console.log('\n[11f] client half — recycle navigation and management');
     if (path.endsWith('/insights')) return responseFor(storageInsightsPayload);
     if (path.endsWith('/lineage')) return responseFor(lineagePayload);
     if (path.endsWith('/trash')) return responseFor({ trashStatus: 'ready', summary: { total: recycleRows.length }, sessions: recycleRows });
-    if (path.endsWith('/history/preview/image')) return { ...responseFor({}), blob: async () => new Blob(['history-image'], { type: 'image/png' }) };
-    if (path.endsWith('/history/preview')) return responseFor({
-      snapshot: { snapshotId: 'history-newer', sessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z' },
-      sessionId: 'history-a', createdAt: '2026-08-26T00:00:00.000Z',
-      messages: [{ index: 0, role: 'user', segments: [{ kind: 'text', text: 'Old local message' }] }],
-      total: 1, nextOffset: null,
-    });
     if (path.endsWith('/preview')) return responseFor({ session: { id: 'trash-a', title: 'Trash Alpha' }, messages: [], total: 0, nextOffset: null });
     return responseFor({});
   };
@@ -3500,7 +3429,7 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(tabs.map((tab) => elementText(tab)).join(',') === '归档,回收站,空间与策略,来源与分支',
     'archive manager renders Archived, Recycle Bin, Storage, and Lineage tabs in order');
   assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
-  assert(requests.filter((request) => request.path.endsWith('/history')).length === 0, 'History stays lazy before its first activation');
+  assert(requests.every((request) => !request.path.includes('/history')), 'retired History API is never requested');
 
   tabs.find((tab) => elementText(tab) === t('tab.insights'))?.props.onClick();
   tree = harness.render({ t, refreshSidebar: () => {} });
@@ -3516,16 +3445,10 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(collectElements(legacyStorageTree).filter((item) => item.type === 'select' && item.props['aria-label'] === t('retention.recycleAge')).length === 1,
     'Storage exposes only Recycle Bin retention and no multi-version policies');
   legacyStorageHarness.unmount();
-  assert(requests.filter((request) => request.path.endsWith('/history')).length === 0,
-    'removing the standalone History UI avoids legacy inventory requests');
-
-  const historyImageRef = { attachmentId: 'image-history', sha256: 'a'.repeat(64), bytes: 13, mediaType: 'image/png', width: 10, height: 10 };
-  const historyImageSignal = new AbortController().signal;
-  await clientExports.__test.fetchHistoryImage?.('history-newer', historyImageRef, historyImageSignal);
-  const historyImageRequest = requests.find((request) => request.path.endsWith('/history/preview/image'));
-  assert(historyImageRequest?.options?.signal === historyImageSignal
-    && JSON.stringify(JSON.parse(historyImageRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', attachment: historyImageRef }),
-  'legacy Recycle Bin previews keep snapshot-scoped image loading');
+  assert(requests.every((request) => !request.path.includes('/history')),
+    'storage never requests the retired History API');
+  assert(clientExports.__test.fetchHistoryPreview === undefined && clientExports.__test.fetchHistoryImage === undefined,
+    'client no longer exports retired History request helpers');
 
   const StorageRetentionPanel = clientExports.__test.StorageRetentionPanel;
   if (typeof StorageRetentionPanel !== 'function') {
@@ -3628,11 +3551,11 @@ console.log('\n[11f] client half — recycle navigation and management');
       let snapshotElements = collectElements(snapshotTree);
       const snapshotSearch = snapshotElements.find((element) => element.type === 'input' && element.props?.type === 'search');
       assert(elementText(snapshotTree).includes('回收站使用中的恢复快照')
-        && elementText(snapshotTree).includes('已保留的恢复快照'),
-      'snapshot detail dialog explains active and retained recovery states');
-      snapshotSearch?.props.onChange({ target: { value: 'snapshot-history' } });
+        && !elementText(snapshotTree).includes('已保留的恢复快照'),
+      'snapshot detail dialog lists only active Recycle Bin protection snapshots');
+      snapshotSearch?.props.onChange({ target: { value: 'snapshot-active' } });
       snapshotTree = snapshotHarness.render(detailsElement.props);
-      assert(!elementText(snapshotTree).includes('snapshot-active') && elementText(snapshotTree).includes('snapshot-history'),
+      assert(elementText(snapshotTree).includes('snapshot-active'),
         'snapshot detail search filters by snapshot identity');
       snapshotHarness.unmount();
     }
@@ -3947,12 +3870,13 @@ console.log('\n[11f] client half — recycle navigation and management');
     && !elements.some((element) => element.props?.className === 'dac-bulkbar'),
   'Recycle Bin removes batch-selection controls, row checkboxes, and bulk bars');
 
-  assert(elementText(tree).includes('Trash Alpha') && elementText(tree).includes('Legacy Alpha') && elementText(tree).includes('项目一'),
-    'Recycle Bin renders ordinary chats and readable legacy snapshots in their original project');
-  assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 KB') && elementText(tree).includes('2 个附件'),
+  assert(elementText(tree).includes('Trash Alpha') && elementText(tree).includes('Trash Beta')
+    && !elementText(tree).includes('Legacy Alpha') && elementText(tree).includes('项目一'),
+    'Recycle Bin renders only chats explicitly moved there');
+  assert(elementText(tree).includes('1.5 KB') && elementText(tree).includes('2 个附件'),
     'Recycle Bin renders bounded snapshot size and attachment metadata');
-  assert(elementText(tree).includes('保护快照可用') && elementText(tree).includes('旧版恢复副本') && elementText(tree).includes('快照降级'),
-    'Recycle Bin distinguishes ordinary, legacy-copy, and degraded states');
+  assert(elementText(tree).includes('保护快照可用') && !elementText(tree).includes('旧版恢复副本') && elementText(tree).includes('快照降级'),
+    'Recycle Bin distinguishes normal and degraded chat records without a legacy-copy state');
 
   const visibleTrashRows = elements.filter((element) => element.props?.className === 'dac-row dac-trash-row');
   const trashRowActionButtons = visibleTrashRows.flatMap((row) => collectElements(row).filter((element) => element.type === 'button'));
@@ -3992,26 +3916,18 @@ console.log('\n[11f] client half — recycle navigation and management');
   const afterProjectRestoreText = elementText(harness.render(recycleProps));
   assert(projectRestoreRequest?.options.body === '{"sessionIds":["trash-b"]}',
     `Recycle Bin project restore targets only restorable chats (got ${projectRestoreRequest?.options.body ?? 'no request'})`);
-  assert(!afterProjectRestoreText.includes('Trash Beta') && afterProjectRestoreText.includes('快照降级'),
-    'Recycle Bin project restore removes restored chats and retains unrestorable snapshots');
+  assert(!afterProjectRestoreText.includes('Trash Beta'),
+    'Recycle Bin project restore returns a degraded chat to the archive when its original still exists');
 
   tree = harness.render(recycleProps);
   elements = collectElements(tree);
-
-  const degradedLegacyRow = elements.find((element) => element.props?.className === 'dac-row dac-trash-row'
-    && element.props?.children && elementText(element).includes('未命名会话') && elementText(element).includes('快照降级'));
-  const degradedActions = collectElements(degradedLegacyRow).filter((element) => element.type === 'button');
-  assert(degradedActions.find((element) => element.props?.['aria-label'] === '查看对话 未命名会话')?.props.disabled === true
-    && degradedActions.find((element) => element.props?.['aria-label'] === '恢复')?.props.disabled === true
-    && degradedActions.find((element) => element.props?.['aria-label'] === '永久删除')?.props.disabled !== true,
-  'unreadable legacy snapshots disable preview and restore while retaining permanent deletion');
 
   const collapseProject = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '折叠' && elementText(element).includes('项目一'));
   assert(collapseProject?.props['aria-expanded'] === true, 'Recycle Bin project group starts expanded');
   collapseProject?.props.onClick();
   tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  assert(!elementText(tree).includes('Trash Alpha') && !elementText(tree).includes('Legacy Alpha'), 'collapsing a Recycle Bin project hides every row in that project');
+  assert(!elementText(tree).includes('Trash Alpha'), 'collapsing a Recycle Bin project hides every row in that project');
   assert(JSON.parse(storageMap.get('dsh-archived-chats:collapsed') ?? '{}')['trash:ws-1'] === true, 'Recycle Bin collapse preference uses a tab-specific key');
   elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '展开' && elementText(element).includes('项目一'))?.props.onClick();
   tree = harness.render(recycleProps);
@@ -4025,56 +3941,29 @@ console.log('\n[11f] client half — recycle navigation and management');
 
   tree = harness.render(recycleProps);
   elements = collectElements(tree);
-  const legacyPreview = elements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看对话 Legacy Alpha');
-  await legacyPreview?.props.onClick();
-  tree = harness.render(recycleProps);
-  const historyPreviewRequest = requests.findLast((request) => request.path.endsWith('/history/preview'));
-  const legacyPreviewDialog = findComponentElement(tree, 'PreviewDialog');
-  assert(JSON.stringify(JSON.parse(historyPreviewRequest?.options?.body ?? '{}')) === JSON.stringify({ snapshotId: 'history-newer', offset: 0, limit: 50 })
-    && legacyPreviewDialog?.props?.preview?.scope === 'history',
-  'readable legacy rows use the guarded snapshot preview in the shared read-only dialog');
-  legacyPreviewDialog?.props.onCancel();
-
-  tree = harness.render(recycleProps);
-  elements = collectElements(tree);
-  const legacyRestore = elements.find((element) => element.type === 'button'
-    && element.props?.['data-session-id'] === 'legacy:history-newer' && element.props?.['aria-label'] === '恢复');
-  await legacyRestore?.props.onClick();
+  const ordinaryRestore = elements.find((element) => element.type === 'button'
+    && element.props?.['data-session-id'] === 'trash-a' && element.props?.['aria-label'] === '恢复');
+  await ordinaryRestore?.props.onClick();
   tree = harness.render(recycleProps);
   elements = collectElements(tree);
   assert(requests.some((request) => request.path.endsWith('/trash/restore')
-      && request.options.body === '{"sessionIds":["legacy:history-newer"]}')
-    && !elementText(tree).includes('Legacy Alpha')
+      && request.options.body === '{"sessionIds":["trash-a"]}')
+    && !elementText(tree).includes('Trash Alpha')
     && recycleSidebarRefreshes === 3,
-  'legacy restore sends its virtual Recycle Bin id, creates a new archive copy, and refreshes archive consumers');
-
-  const degradedPurge = elements.find((element) => element.type === 'button'
-    && element.props?.['data-session-id'] === 'legacy:history-degraded' && element.props?.['aria-label'] === '永久删除');
-  degradedPurge?.props.onClick();
-  tree = harness.render(recycleProps);
-  let purgeDialog = findComponentElement(tree, 'ConfirmDialog');
-  assert(purgeDialog?.props.title === '永久删除回收站中的会话？'
-    && String(purgeDialog?.props.body).includes('原会话和保护快照')
-    && String(purgeDialog?.props.body).includes('保护快照不可用'),
-  'degraded legacy purge uses the same explicit irreversible confirmation');
-  await purgeDialog?.props.onConfirm();
-  tree = harness.render(recycleProps);
-  assert(requests.some((request) => request.path.endsWith('/trash/purge')
-      && request.options.body === '{"sessionIds":["legacy:history-degraded"]}')
-    && recycleSidebarRefreshes === 4,
-  'single legacy purge targets exactly that Recycle Bin item');
+  'ordinary restore returns the exact chat to the archive and refreshes archive consumers');
 
   elements = collectElements(tree);
   const currentHead = elements.find((element) => element.props?.className === 'dac-head');
   collectElements(currentHead).find((element) => element.type === 'button' && elementText(element) === '清空回收站')?.props.onClick();
   tree = harness.render(recycleProps);
-  purgeDialog = findComponentElement(tree, 'ConfirmDialog');
+  let purgeDialog = findComponentElement(tree, 'ConfirmDialog');
   assert(purgeDialog?.props.title === '清空回收站？'
     && purgeDialog?.props.body === '这将永久删除回收站中所有工作区的会话和保护快照。',
   'Empty Recycle Bin confirmation names every workspace chat and protection snapshot');
   await purgeDialog?.props.onConfirm();
   assert(requests.some((request) => request.path.endsWith('/trash/empty') && request.options.body === '{}')
-    && recycleSidebarRefreshes === 5,
+    && recycleSidebarRefreshes === 4
+    && !elementText(harness.render(recycleProps)).includes('Trash Empty'),
   'confirmed Empty Recycle Bin uses the authority endpoint and refreshes the sidebar');
 
   harness.unmount();
@@ -5042,7 +4931,7 @@ console.log('\n[16] host half — one unrecognized session header never costs a 
       return rows;
     };
     const statuses = {};
-    for (const route of ['state', 'lineage', 'insights', 'history']) {
+    for (const route of ['state', 'lineage', 'insights']) {
       statuses[route] = (await call(routes, `/plugins/dsh-archived-chats/${route}`, mockReq('GET', {}))).status;
     }
     assert(Object.values(statuses).every((status) => status === 200),
@@ -5053,7 +4942,7 @@ console.log('\n[16] host half — one unrecognized session header never costs a 
   workspaceState.archivedSessionIds = [...savedArchive, savedArchive[0]];
   persistence.list = savedList;
   const duplicated = {};
-  for (const route of ['state', 'lineage', 'insights', 'history']) {
+  for (const route of ['state', 'lineage', 'insights']) {
     duplicated[route] = (await call(routes, `/plugins/dsh-archived-chats/${route}`, mockReq('GET', {}))).status;
   }
   assert(Object.values(duplicated).every((status) => status === 200),
@@ -5155,19 +5044,17 @@ console.log('\n[18] host half — modern persistence reads work while unsupporte
     'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: id }),
   ));
   assert(moved.status === 200 && moved.json().trashed.includes(id), 'modern read-only session can enter the recycle bin with a protection snapshot');
-  const historyBefore = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  const snapshotsBefore = readdirSync(join(modernHome, 'plugin-data', 'archived-chats', 'snapshots')).filter((name) => name !== '.staging');
   const purge = await call(modernRoutes, '/plugins/dsh-archived-chats/trash/purge', mockReq(
     'POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [id] }),
   ));
   const trashAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/trash', mockReq('GET', {}));
-  const historyAfter = await call(modernRoutes, '/plugins/dsh-archived-chats/history', mockReq('GET', {}));
+  const snapshotsAfter = readdirSync(join(modernHome, 'plugin-data', 'archived-chats', 'snapshots')).filter((name) => name !== '.staging');
   assert(purge.status === 409 && purge.json().failed?.[0]?.reason === 'purge-unsupported',
     `modern read-only purge refuses with the stable capability code (got ${purge.status})`);
   assert(trashAfter.json().sessions[0]?.state === 'trashed', 'unsupported purge preserves the original recycle state');
-  const versionsBefore = historyBefore.json().sessions.flatMap((session) => session.versions);
-  const versionsAfter = historyAfter.json().sessions.flatMap((session) => session.versions);
-  assert(versionsBefore.length === 1 && versionsAfter.length === 1,
-    'unsupported purge preserves the protection snapshot');
+  assert(snapshotsBefore.length === 1 && snapshotsAfter.length === 1 && snapshotsAfter[0] === snapshotsBefore[0],
+    `unsupported purge preserves the protection snapshot (before ${JSON.stringify(snapshotsBefore)}, after ${JSON.stringify(snapshotsAfter)})`);
   assert(modernState.archivedSessionIds.includes(id) && modernWorkspace.sessionIds.has(id),
     'unsupported purge preserves the original session and workspace ownership');
   assert(disposeCalls === 0, 'unsupported purge never reaches live-session disposal');

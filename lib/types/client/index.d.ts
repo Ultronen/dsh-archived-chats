@@ -3,10 +3,9 @@
  * chooser and one-confirmation bulk archive flow. The flow stays inside the
  * plugin-owned Settings surface and requires no workspace-row extension slot.
  * The searchable manager includes Archived, Recycle Bin, Storage & Retention,
- * and Origins & Branches views. Existing legacy snapshots appear in the
- * Recycle Bin and restore only as new archived copies. Removing an archived
- * chat moves it to recoverable trash and exposes immediate Undo. The recycle
- * view provides scoped read-only previews, original/snapshot restore, guarded
+ * and Origins & Branches views. Removing an archived chat moves it to
+ * recoverable trash and exposes immediate Undo. The recycle view provides
+ * scoped read-only previews, original/snapshot restore, guarded
  * permanent purge and empty operations, degraded-state warnings, responsive
  * rows, and accessible confirmation dialogs, all localized in English and 中文.
  */
@@ -15,10 +14,6 @@ export type RecycleLiveDisposition = 'cold' | 'disposed' | 'parked';
 
 export interface RecycleSessionRow {
   sessionId: string;
-  sourceKind?: 'legacy-snapshot';
-  legacySnapshotId?: string;
-  sourceSessionId?: string | null;
-  restorable?: boolean;
   state: RecycleRecordState;
   trashedAt: string;
   purgeRequestedAt: string | null;
@@ -50,45 +45,6 @@ export interface RetentionPolicy {
   recycleMaxAgeDays: number | null;
   /** Explicit opt-in; legacy policies load as false. */
   recycleAutoDelete: boolean;
-}
-
-export type HistoryScope = 'archived' | 'recycled' | 'history-only';
-export type HistoryVersionState = 'history' | 'recycle-protection';
-
-export interface HistoryVersion {
-  snapshotId: string;
-  createdAt: string;
-  totalBytes: number;
-  attachmentCount: number;
-  state: HistoryVersionState;
-}
-
-export interface HistorySession {
-  sessionId: string;
-  title: string | null;
-  workspace: { id: string | null; title: string | null } | null;
-  scope: HistoryScope;
-  versions: HistoryVersion[];
-}
-
-export interface HistoryResponse {
-  generatedAt: string;
-  sessions: HistorySession[];
-  degraded: Array<{ snapshotId: string; code: string }>;
-}
-
-export interface HistoryRestoreResult {
-  restored: string[];
-  sourceSessionId: string;
-  snapshotId: string;
-  warnings: Array<{ id: string; reason: string }>;
-}
-
-export interface HistoryDeleteResult {
-  deleted: string[];
-  freedBytes: number;
-  skipped?: Array<{ snapshotId: string; reason: string }>;
-  failed?: Array<{ snapshotId: string; reason: string }>;
 }
 
 export interface StorageInsightsSummary {
@@ -140,15 +96,6 @@ export interface StorageInsights {
 }
 
 export type RetentionCandidate =
-  | {
-    key: string;
-    action: 'delete-snapshot';
-    reason: 'history-count' | 'snapshot-age' | 'snapshot-quota';
-    snapshotId: string;
-    sessionId: string;
-    createdAt: string;
-    bytes: number;
-  }
   | {
     key: string;
     action: 'purge-trash';

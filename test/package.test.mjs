@@ -115,8 +115,6 @@ test(`published ${packageVersion} package contains runtime, brand banner, fixed 
     'lib/retention.js',
     'lib/retention-service.js',
     'lib/lineage.js',
-    'lib/history.js',
-    'lib/history-restore.js',
     'lib/workspace-bulk-archive.js',
     'docs/ARCHITECTURE.md',
     'docs/ARCHITECTURE.en.md',

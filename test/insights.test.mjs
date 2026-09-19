@@ -66,19 +66,20 @@ function fixture(overrides = {}) {
   };
 }
 
-test('insights separates session and snapshot bytes and counts repeated snapshot content', async () => {
+test('insights counts only protection snapshots referenced by the Recycle Bin', async () => {
   const { service } = fixture();
   const result = await service.inspect();
 
   assert.deepEqual(result.summary, {
     sessionBytes: 300,
-    snapshotBytes: 170,
-    totalMeasuredBytes: 470,
-    duplicateSnapshotBytes: 50,
+    snapshotBytes: 90,
+    totalMeasuredBytes: 390,
+    duplicateSnapshotBytes: 0,
     sessionUnavailableCount: 0,
     degradedSnapshotCount: 0,
   });
   assert.equal(result.generatedAt, '2026-08-24T00:00:00.000Z');
+  assert.deepEqual(result.snapshots.map((row) => row.snapshotId), ['s2']);
   assert.equal(result.snapshots.find((row) => row.snapshotId === 's2').active, true);
   assert.deepEqual(result.sessions.find((row) => row.id === 'b'), {
     id: 'b', title: 'Beta', workspaceId: 'w', workspaceTitle: 'Work', scope: 'trash',
@@ -88,7 +89,7 @@ test('insights separates session and snapshot bytes and counts repeated snapshot
   assert.equal(JSON.stringify(result).includes('attachments'), false);
 });
 
-test('insights excludes unavailable and degraded bytes from trusted totals', async () => {
+test('insights ignores old unreferenced snapshots, including degraded ones', async () => {
   const { service } = fixture({
     measurement: {
       summary: { sessionCount: 2, totalBytes: 100, unavailableCount: 1 },
@@ -104,13 +105,24 @@ test('insights excludes unavailable and degraded bytes from trusted totals', asy
   });
   const result = await service.inspect();
   assert.equal(result.summary.sessionBytes, 100);
-  assert.equal(result.summary.snapshotBytes, 80);
-  assert.equal(result.summary.totalMeasuredBytes, 180);
+  assert.equal(result.summary.snapshotBytes, 0);
+  assert.equal(result.summary.totalMeasuredBytes, 100);
   assert.equal(result.summary.sessionUnavailableCount, 1);
-  assert.equal(result.summary.degradedSnapshotCount, 1);
-  assert.deepEqual(result.snapshots.at(-1), {
-    snapshotId: 'broken', status: 'degraded', code: 'snapshot-hash-mismatch', active: false,
+  assert.equal(result.summary.degradedSnapshotCount, 0);
+  assert.deepEqual(result.snapshots, []);
+});
+
+test('insights reports a degraded protection snapshot when trash still references it', async () => {
+  const { service } = fixture({
+    trash: { status: 'ready', records: new Map([['b', { snapshotId: 'broken' }]]) },
+    inventory: { valid: [], degraded: [{ snapshotId: 'broken', code: 'snapshot-hash-mismatch' }] },
   });
+  const result = await service.inspect();
+  assert.equal(result.summary.snapshotBytes, 0);
+  assert.equal(result.summary.degradedSnapshotCount, 1);
+  assert.deepEqual(result.snapshots, [{
+    snapshotId: 'broken', status: 'degraded', code: 'snapshot-hash-mismatch', active: true,
+  }]);
 });
 
 test('insights shares in-flight work, returns isolated cached clones, and invalidates explicitly', async () => {

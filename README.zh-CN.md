@@ -66,7 +66,7 @@ dsh plugin --profile web update dsh-archived-chats
 ## 安全设计
 
 - **数据只在本机：** 插件元数据、回收记录、策略和已验证快照均保存在 `$DSH_HOME/plugin-data/archived-chats/`，不会上传或云同步。
-- **不静默覆盖：** 导入和旧快照恢复只创建或选择无冲突 ID，绝不覆盖已有会话。
+- **不静默覆盖：** 导入和快照恢复只创建或选择无冲突 ID，绝不覆盖已有会话。
 - **删除必须明确：** 普通移除会在快照保护后进入回收站；只有经过确认的永久删除操作才会物理清除。
 - **可选自动清理：** 默认关闭，确认保留期限后，DSH 运行时自动永久删除到期的回收聊天，启动后补清理。开启或缩短期限会先列出受影响聊天供确认；旧版设置不会自动开启。
 - **确认工作区归档：** 选择器只显示有可归档会话的工作区，支持单选、多选和可再次点击取消的“全选”，并统一从右下角“确定”继续。插件在后台分别准备精确集合，跳过准备期间变为空的工作区，再显示一次汇总确认。只有检查到真实 `turn/start` 的会话才符合条件；空白的新会话窗口及无法确认内容的会话都会跳过。每个工作区保留独立的 5 分钟单次凭据，不会纳入之后新建的聊天；运行中的聊天只会跳过，绝不停止或移动。
@@ -78,11 +78,11 @@ dsh plugin --profile web update dsh-archived-chats
 
 | Host 能力 | 插件行为 |
 | --- | --- |
-| 归档与会话读取 | 浏览、搜索、预览、回收站中的旧快照清单、空间分账和会话血缘。 |
+| 归档与会话读取 | 浏览、搜索、预览、回收站中的保护快照清单、空间分账和会话血缘。 |
 | `settings.section` + 公开 `archiveSession` | 插件自己的设置页提供仅展示可归档项的多工作区选择器和一次汇总确认，不依赖工作区菜单扩展 slot；缺少归档能力时，准备请求返回 `workspace-archive-unsupported`，且不作任何修改。 |
 | 附件读取 | 对话和快照预览可显示已存储图片；缺少时文本内容仍可阅读。 |
 | 会话独立日志位置 | 回收站永久删除使用持久化后端公开的 `locate(meta)` 能力。后端不提供会话独立位置时不支持永久删除；失败的条目保留在列表中并显示具体原因。 |
-| 公开会话 writer | ZIP 导入、旧快照恢复和原件丢失时的快照回退，都通过 Host 公开的 `create` / `append` / `locate` 能力写入；Host 提供专用恢复入口时优先使用。 |
+| 公开会话 writer | ZIP 导入、快照恢复和原件丢失时的快照回退，都通过 Host 公开的 `create` / `append` / `locate` 能力写入；Host 提供专用恢复入口时优先使用。 |
 | 缺少写入能力 | 操作返回 `restore-unsupported`，不会写入或覆盖数据。 |
 
 降级到不识别统一回收站或新版快照状态的版本前，请备份 `$DSH_HOME/plugin-data/archived-chats/`。
@@ -101,10 +101,10 @@ dsh plugin --profile web update dsh-archived-chats
   </tr>
   <tr>
     <td><img src="assets/screenshots/preview-03.png" alt="仅展示可归档项并支持全选的多工作区归档选择器"><br><sub>工作区归档选择器</sub></td>
-    <td><img src="assets/screenshots/preview-04.png" alt="带已存储图片的旧版快照原生只读预览"><br><sub>原生只读预览</sub></td>
+    <td><img src="assets/screenshots/preview-04.png" alt="带已存储图片的保护快照原生只读预览"><br><sub>原生只读预览</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/preview-05.png" alt="包含旧版快照及单条和工作区操作的统一回收站"><br><sub>统一回收站</sub></td>
+    <td><img src="assets/screenshots/preview-05.png" alt="包含保护快照及单条和工作区操作的统一回收站"><br><sub>统一回收站</sub></td>
     <td><img src="assets/screenshots/preview-06.png" alt="清空所有工作区回收站前的不可恢复确认"><br><sub>清空回收站确认</sub></td>
   </tr>
   <tr>
@@ -134,7 +134,7 @@ Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收�
 npm test
 ```
 
-测试覆盖 Host 与浏览器行为、导出导入、旧快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。测试只使用隔离临时数据，不读取真实会话。
+测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。测试只使用隔离临时数据，不读取真实会话。
 
 ## 卸载
 

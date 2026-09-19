@@ -1,8 +1,7 @@
 /**
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
  * (state, stats, insights, retention/policy, retention/preview, retention/apply,
- * lineage, history, history/capture, history/preview, history/preview/image,
- * history/restore/preview, history/restore, history/delete, history/delete-all,
+ * lineage,
  * workspace-archive/workspaces, workspace-archive/preview,
  * workspace-archive/apply,
  * preview, preview/image, search,
@@ -38,10 +37,6 @@ export type RecycleLiveDisposition = 'cold' | 'disposed' | 'parked';
 
 export interface RecycleSessionRow {
   sessionId: string;
-  sourceKind?: 'legacy-snapshot';
-  legacySnapshotId?: string;
-  sourceSessionId?: string | null;
-  restorable?: boolean;
   state: RecycleRecordState;
   trashedAt: string;
   purgeRequestedAt: string | null;
@@ -73,46 +68,6 @@ export interface RetentionPolicy {
   recycleMaxAgeDays: number | null;
   /** Explicit opt-in; legacy policies load as false. */
   recycleAutoDelete: boolean;
-}
-
-export type HistoryScope = 'archived' | 'recycled' | 'history-only';
-export type HistoryVersionState = 'history' | 'recycle-protection';
-
-export interface HistoryVersion {
-  snapshotId: string;
-  createdAt: string;
-  totalBytes: number;
-  attachmentCount: number;
-  state: HistoryVersionState;
-}
-
-export interface HistorySession {
-  sessionId: string;
-  title: string | null;
-  workspace: { id: string | null; title: string | null } | null;
-  scope: HistoryScope;
-  versions: HistoryVersion[];
-}
-
-export interface HistoryResponse {
-  generatedAt: string;
-  sessions: HistorySession[];
-  degraded: Array<{ snapshotId: string; code: string }>;
-}
-
-export interface HistoryRestoreResult {
-  restored: string[];
-  sourceSessionId: string;
-  snapshotId: string;
-  warnings: Array<{ id: string; reason: string }>;
-}
-
-/** A degraded version carries no readable bytes but can still be reclaimed. */
-export interface HistoryDeleteResult {
-  deleted: string[];
-  freedBytes: number;
-  skipped?: Array<{ snapshotId: string; reason: string }>;
-  failed?: Array<{ snapshotId: string; reason: string }>;
 }
 
 export interface StorageInsightsSummary {
@@ -164,15 +119,6 @@ export interface StorageInsights {
 }
 
 export type RetentionCandidate =
-  | {
-    key: string;
-    action: 'delete-snapshot';
-    reason: 'history-count' | 'snapshot-age' | 'snapshot-quota';
-    snapshotId: string;
-    sessionId: string;
-    createdAt: string;
-    bytes: number;
-  }
   | {
     key: string;
     action: 'purge-trash';

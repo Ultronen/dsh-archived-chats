@@ -7,6 +7,9 @@ import { createRecycleService, RecycleError } from '../lib/recycle.js';
 
 const NOW = '2026-08-24T00:00:00.000Z';
 const SNAPSHOT_ID = '00000000-0000-4000-8000-000000000001';
+const LEGACY_VALID_ID = '00000000-0000-4000-8000-000000000002';
+const LEGACY_DEGRADED_ID = '00000000-0000-4000-8000-000000000003';
+const SECOND_PROTECTED_ID = '00000000-0000-4000-8000-000000000004';
 const tempRoots = new Set();
 test.after(() => { for (const root of tempRoots) rmSync(root, { recursive: true, force: true }); });
 
@@ -147,6 +150,11 @@ function recycleFixture(options = {}) {
   const snapshots = new Map(options.priorSnapshotId
     ? [[id, { snapshotId: options.priorSnapshotId, sessionId: id, createdAt: '2026-08-23T00:00:00.000Z' }]]
     : options.trashed ? [[id, { snapshotId: SNAPSHOT_ID, sessionId: id, createdAt: NOW }]] : []);
+  const publishedSnapshots = new Map();
+  for (const value of snapshots.values()) publishedSnapshots.set(value.snapshotId, { kind: 'valid', value: structuredClone(value) });
+  for (const value of options.inventoryValid ?? []) publishedSnapshots.set(value.snapshotId, { kind: 'valid', value: structuredClone(value) });
+  for (const value of options.inventoryDegraded ?? []) publishedSnapshots.set(value.snapshotId, { kind: 'degraded', value: structuredClone(value) });
+  const snapshotRemoveAttempts = new Map();
   let captures = 0;
   let releaseCapture;
   let markCaptureStarted;
@@ -168,6 +176,7 @@ function recycleFixture(options = {}) {
       if (options.snapshotError) throw options.snapshotError;
       const value = { snapshotId: SNAPSHOT_ID, sessionId: input.sessionId, createdAt: NOW, bytes: 123, attachmentCount: 1, sourceRevision: 'rev-1' };
       snapshots.set(input.sessionId, value);
+      publishedSnapshots.set(value.snapshotId, { kind: 'valid', value: structuredClone(value) });
       return structuredClone(value);
     },
     async latestFor(sessionId) { return snapshots.has(sessionId) ? structuredClone(snapshots.get(sessionId)) : null; },
@@ -195,7 +204,13 @@ function recycleFixture(options = {}) {
     },
     async remove(snapshotId) {
       calls.push(`snapshot:remove:${snapshotId}`);
+      const attempts = (snapshotRemoveAttempts.get(snapshotId) ?? 0) + 1;
+      snapshotRemoveAttempts.set(snapshotId, attempts);
+      if (attempts <= (options.snapshotRemoveFailures?.[snapshotId] ?? 0)) {
+        throw Object.assign(new Error('private snapshot removal detail'), { code: 'snapshot-remove-failed' });
+      }
       for (const [sessionId, value] of snapshots) if (value.snapshotId === snapshotId) snapshots.delete(sessionId);
+      publishedSnapshots.delete(snapshotId);
     },
     async removeForSession(sessionId) {
       calls.push(`snapshot:remove:${sessionId}`);
@@ -205,8 +220,14 @@ function recycleFixture(options = {}) {
       return [SNAPSHOT_ID];
     },
     async recover() {
-      const valid = [...snapshots.values()].map((value) => structuredClone(value));
-      return { valid, degraded: [], latestBySession: new Map(valid.map((value) => [value.sessionId, value])) };
+      const valid = [...publishedSnapshots.values()].filter((entry) => entry.kind === 'valid').map((entry) => structuredClone(entry.value));
+      const degraded = [...publishedSnapshots.values()].filter((entry) => entry.kind === 'degraded').map((entry) => structuredClone(entry.value));
+      return { valid, degraded, latestBySession: new Map(valid.filter((value) => typeof value.sessionId === 'string').map((value) => [value.sessionId, value])) };
+    },
+    async inventory() {
+      const valid = [...publishedSnapshots.values()].filter((entry) => entry.kind === 'valid').map((entry) => structuredClone(entry.value));
+      const degraded = [...publishedSnapshots.values()].filter((entry) => entry.kind === 'degraded').map((entry) => structuredClone(entry.value));
+      return { valid, degraded };
     },
   };
   const attachments = {
@@ -239,13 +260,14 @@ function recycleFixture(options = {}) {
     registry, persistence, attachments, metadataStore, trashStore, snapshotStore,
     lifecycle: queue(), disposeLive, purgePhysical,
     invalidate: (ids) => { for (const sessionId of ids) calls.push(`cache:invalidate:${sessionId}`); },
-    logger: { warn() {} }, now: () => new Date(NOW),
+    logger: { warn(message) { calls.push(`warn:${message}`); } }, now: () => new Date(NOW),
   });
   return {
     service, persistence, attachments, workspace, registry, metadata, trashStore, snapshotStore,
     calls, captures: () => captures, disposeStarted,
     releaseDispose: () => releaseDispose?.(), captureStarted,
     releaseCapture: () => releaseCapture?.(), records, root, sessionDir, purgedIds, pendingPath,
+    publishedSnapshotIds: () => [...publishedSnapshots.keys()].sort(),
   };
 }
 
@@ -494,6 +516,68 @@ test('legacy pending migration snapshots archived ids and never purges them', as
   assert.notEqual(await fixture.trashStore.get('session-a'), null);
   assert.deepEqual(fixture.purgedIds, []);
   assert.equal(readFileSync(fixture.pendingPath, 'utf8'), '{\n  "ids": []\n}\n');
+});
+
+test('startup removes unreferenced valid and degraded snapshots while preserving every trash reference', async () => {
+  const second = { ...trashRecord('session-b'), snapshotId: SECOND_PROTECTED_ID };
+  const fixture = recycleFixture({
+    records: [trashRecord(), second],
+    inventoryValid: [
+      { snapshotId: SNAPSHOT_ID, sessionId: 'session-a', createdAt: NOW },
+      { snapshotId: SECOND_PROTECTED_ID, sessionId: 'session-b', createdAt: NOW },
+      { snapshotId: LEGACY_VALID_ID, sessionId: 'old-session', createdAt: NOW },
+    ],
+    inventoryDegraded: [{ snapshotId: LEGACY_DEGRADED_ID, code: 'snapshot-schema-invalid' }],
+  });
+  writeFileSync(fixture.pendingPath, '{"ids":[]}\n');
+
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+
+  assert.deepEqual(fixture.publishedSnapshotIds(), [SNAPSHOT_ID, SECOND_PROTECTED_ID]);
+});
+
+test('startup skips all legacy snapshot deletion when the trash authority is unreadable', async () => {
+  const fixture = recycleFixture({
+    inventoryValid: [{ snapshotId: LEGACY_VALID_ID, sessionId: 'old-session', createdAt: NOW }],
+    inventoryDegraded: [{ snapshotId: LEGACY_DEGRADED_ID, code: 'snapshot-schema-invalid' }],
+  });
+  fixture.trashStore.load = async () => ({ status: 'unavailable', records: new Map() });
+
+  await assert.rejects(
+    fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath }),
+    (cause) => cause?.code === 'trash-store-unavailable',
+  );
+
+  assert.deepEqual(fixture.publishedSnapshotIds(), [LEGACY_VALID_ID, LEGACY_DEGRADED_ID]);
+  assert.deepEqual(fixture.calls.filter((call) => call.startsWith('snapshot:remove:')), []);
+});
+
+test('startup continues after one legacy snapshot deletion fails and retries it next time', async () => {
+  const fixture = recycleFixture({
+    inventoryValid: [{ snapshotId: LEGACY_VALID_ID, sessionId: 'old-session', createdAt: NOW }],
+    inventoryDegraded: [{ snapshotId: LEGACY_DEGRADED_ID, code: 'snapshot-schema-invalid' }],
+    snapshotRemoveFailures: { [LEGACY_VALID_ID]: 1 },
+  });
+  writeFileSync(fixture.pendingPath, '{"ids":[]}\n');
+
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+  assert.deepEqual(fixture.publishedSnapshotIds(), [LEGACY_VALID_ID]);
+  assert.equal(fixture.calls.some((call) => call.includes('Alpha') || call.includes('private snapshot removal detail')), false);
+
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+  assert.deepEqual(fixture.publishedSnapshotIds(), []);
+});
+
+test('startup cleanup preserves the protection snapshot created by pending migration in the same run', async () => {
+  const fixture = recycleFixture({
+    inventoryValid: [{ snapshotId: LEGACY_VALID_ID, sessionId: 'old-session', createdAt: NOW }],
+  });
+  writeFileSync(fixture.pendingPath, '{"ids":["session-a"]}\n');
+
+  await fixture.service.recoverStartup({ legacyPendingPath: fixture.pendingPath });
+
+  assert.deepEqual(fixture.publishedSnapshotIds(), [SNAPSHOT_ID]);
+  assert.equal((await fixture.trashStore.get('session-a')).snapshotId, SNAPSHOT_ID);
 });
 
 test('purge failure retains durable purge-pending intent and keeps the original session', async () => {

@@ -23,7 +23,7 @@ test('published Host and client declarations compile for TypeScript consumers', 
   assert.equal(diagnostics.length, 0, diagnostics.map((item) => ts.flattenDiagnosticMessageText(item.messageText, '\n')).join('\n'));
 });
 
-test('published Host and client declarations expose session history contracts', () => {
+test('published Host and client declarations omit retired history contracts', () => {
   for (const path of [
     join(root, 'lib', 'types', 'index.d.ts'),
     join(root, 'lib', 'types', 'client', 'index.d.ts'),
@@ -37,6 +37,6 @@ test('published Host and client declarations expose session history contracts', 
       'export interface HistoryResponse',
       'export interface HistoryRestoreResult',
       'export interface HistoryDeleteResult',
-    ]) assert(source.includes(declaration), `${path} is missing ${declaration}`);
+    ]) assert(!source.includes(declaration), `${path} still exposes ${declaration}`);
   }
 });
