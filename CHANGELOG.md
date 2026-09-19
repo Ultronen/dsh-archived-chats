@@ -1,3 +1,17 @@
+## 1.3.3 — 统一术语并移除遗留文件 / Unify terminology and remove legacy files
+
+### 中文
+
+- 将"已有快照""旧快照"等旧称统一替换为"保护快照"，覆盖 README、用户指南和架构说明的中英文版本。
+- 删除已退役的 `lib/history.js`、`lib/history-restore.js`、`lib/legacy-recycle.js` 及其对应测试文件；相关兼容路由已在 1.3.0 中作为迁移层保留，现全部移除。
+- 不更改运行时行为。
+
+### English
+
+- Replaced legacy snapshot terminology ("older snapshot", "existing snapshot") with "protection snapshot" consistently across both README files, both user guides, and both architecture documents.
+- Removed retired `lib/history.js`, `lib/history-restore.js`, `lib/legacy-recycle.js` and their test files; the compatibility routes they backed were retained as a migration layer in 1.3.0 and are now fully removed.
+- No runtime behaviour changes.
+
 ## 1.3.1 — 更新插件市场截图 / Refresh plugin-market screenshots
 
 ### 中文
