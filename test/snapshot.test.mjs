@@ -364,6 +364,58 @@ test('rejects an empty persistence revision before publication', async () => {
   assert.deepEqual(await readdir(root), ['.staging']);
 });
 
+test('snapshot capture retains a modern inherited boundary without using strict ZIP inspection', async () => {
+  const { store, persistence } = await fixture();
+  const meta = { id: 'session-a', version: 3, createdAt: 10, isSeeded: true, parentSession: 'parent' };
+  const events = [{ seq: 0, type: 'session/title', data: { title: 'parent' } }, { seq: 1, type: 'session/title', data: { title: 'child' } }];
+  persistence.inspect = async () => { throw Object.assign(new Error('unsafe legacy inspection'), { code: 'session-inspection-unsupported' }); };
+  persistence.readSession = async () => ({ meta, events, inheritedEventCount: 1 });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  const checked = await store.validate(SNAPSHOT_ID);
+  assert.equal(checked.record.version, 2);
+  assert.deepEqual(checked.record.source, { meta, events, inheritedEventCount: 1 });
+});
+
+test('snapshot capture rejects invalid inherited boundaries before publishing', async () => {
+  for (const [isSeeded, inheritedEventCount] of [[true, -1], [true, 0.5], [true, 2], [false, 1]]) {
+    const { store, persistence, root, meta } = await fixture();
+    persistence.readSession = async () => ({ meta: { ...meta, isSeeded }, events: [{ seq: 0 }], inheritedEventCount });
+    await assert.rejects(store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' }), { code: 'snapshot-schema-invalid' });
+    assert.deepEqual(await readdir(root), ['.staging']);
+  }
+});
+
+test('snapshot read failures are not misreported as a missing source', async () => {
+  const { store, persistence } = await fixture();
+  persistence.inspect = async () => { throw Object.assign(new Error('private failure'), { code: 'session-inspection-unsupported', status: 501 }); };
+  await assert.rejects(store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' }), { code: 'session-inspection-unsupported', status: 501 });
+  persistence.inspect = async () => { throw new Error('private backend failure'); };
+  await assert.rejects(store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' }), { code: 'snapshot-source-unreadable', status: 500 });
+  persistence.inspect = async () => { throw Object.assign(new Error('gone'), { name: 'SessionPersistenceNotFoundError' }); };
+  await assert.rejects(store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' }), { code: 'snapshot-source-missing', status: 404 });
+});
+
+test('v2 snapshot readers validate the inherited cut even when record hashes are valid', async () => {
+  const { store, persistence, root, meta } = await fixture();
+  persistence.readSession = async () => ({ meta: { ...meta, isSeeded: true }, events: [{ seq: 0 }], inheritedEventCount: 1 });
+  await store.capture({ sessionId: 'session-a', archive, liveDisposition: 'cold' });
+  const recordPath = join(root, SNAPSHOT_ID, 'session.json');
+  const manifestPath = join(root, SNAPSHOT_ID, 'manifest.json');
+  const original = JSON.parse(await readFile(recordPath, 'utf8'));
+  for (const patch of [{ inheritedEventCount: 2 }, { inheritedEventCount: -1 }, { inheritedEventCount: 0.5 }, { inheritedEventCount: undefined }, { meta: { ...meta, isSeeded: false } }]) {
+    const record = structuredClone(original);
+    Object.assign(record.source, patch);
+    const data = Buffer.from(JSON.stringify(record));
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.session.bytes = data.length;
+    manifest.session.sha256 = createHash('sha256').update(data).digest('hex');
+    manifest.totalBytes = data.length;
+    await writeFile(recordPath, data);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await assert.rejects(store.validate(SNAPSHOT_ID), { code: 'snapshot-schema-invalid' });
+  }
+});
+
 test('stops after exactly three unstable revision attempts and cleans every attempt', async () => {
   const item = await fixture({
     events: [{ data: { image: image() } }],

@@ -19,6 +19,16 @@ const imageRef = Object.freeze({
   name: 'diagram.png',
 });
 
+test('preview distinguishes human input from plugin-injected context', () => {
+  const events = ['user', 'plugin'].map((kind, seq) => ({
+    seq, time: seq, type: 'user/message', surfaceOp: 'append',
+    data: { id: `input-${seq}`, role: 'user', source: { kind }, content: [{ type: 'text', text: 'context text' }] },
+  }));
+  const messages = projectArchivedMessages(events);
+  assert.deepEqual(messages.map(({ role }) => role), ['user', 'context']);
+  assert.deepEqual(messages.map(({ source }) => source), ['user', 'plugin']);
+});
+
 test('preview projection preserves tool correlation and verified image descriptors', () => {
   const messages = projectArchivedMessages([
     {
@@ -241,6 +251,231 @@ function userEvent(seq, text) {
     },
   };
 }
+
+function logEvent(seq, type, data, surfaceOp) {
+  return { seq, time: 1000 + seq, type, data, ...(surfaceOp === undefined ? {} : { surfaceOp }) };
+}
+
+function assistantEvent(seq, turn, step, content, extra = {}) {
+  return logEvent(seq, 'assistant/message', {
+    turn, step, stream: [], ...extra,
+    message: { id: `assistant-${seq}`, role: 'assistant', source: { kind: 'model', provider: 'test', model: 'test' }, content },
+  }, 'append');
+}
+
+function systemEvent(seq, text, surfaceOp = 'append') {
+  return logEvent(seq, 'system/message', {
+    turn: 1, step: 1,
+    message: { id: `system-${seq}`, role: 'system', source: { kind: 'plugin', plugin: 'system' }, content: text === '' ? [] : [{ type: 'text', text }] },
+  }, surfaceOp);
+}
+
+function requestHeaderEvent(seq, reason, extra = {}) {
+  return logEvent(seq, 'request/header', { header: { config: { provider: 'test', model: 'test' } }, reason, ...extra });
+}
+
+test('preview keeps native turn boundaries and counts dispatched process work once', () => {
+  const context = userEvent(3, 'environment context');
+  context.data.source = { kind: 'plugin', plugin: 'environment', form: 'snapshot' };
+  const result = (seq, callId) => logEvent(seq, 'tool/result', {
+    turn: 1, step: 1,
+    message: { id: `result-${seq}`, role: 'user', source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text: 'done' }] }] },
+  }, 'append');
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }),
+    userEvent(1, 'help me'),
+    logEvent(2, 'step/start', { turn: 1, step: 1 }),
+    context,
+    assistantEvent(4, 1, 1, [
+      { type: 'reasoning', text: 'inspect first' }, { type: 'text', text: 'I will inspect.' },
+      { type: 'tool-call', id: 'read-1', name: 'read', arguments: '{}' },
+      { type: 'tool-call', id: 'agent-1', name: 'subagent_review', arguments: '{}' },
+    ]),
+    logEvent(5, 'tool/call', { turn: 1, step: 1, callId: 'read-1', name: 'read', arguments: '{}' }),
+    logEvent(6, 'tool/call', { turn: 1, step: 1, callId: 'agent-1', name: 'subagent_review', arguments: '{}' }),
+    result(7, 'read-1'), result(8, 'agent-1'),
+    logEvent(9, 'step/end', { turn: 1, step: 1 }),
+    logEvent(10, 'step/start', { turn: 1, step: 2 }),
+    assistantEvent(11, 1, 2, [{ type: 'reasoning', text: 'ready' }, { type: 'text', text: '**Final answer**' }]),
+    logEvent(12, 'step/end', { turn: 1, step: 2 }),
+    logEvent(13, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  assert.deepEqual(messages[0].turn, {
+    key: 'turn:0', startSeq: 0, endSeq: 13, answerSeq: 11, processStartSeq: 3,
+    toolCallCount: 1, messageCount: 1, subagentCount: 1, endReason: 'completed', rowCount: 6,
+  });
+  assert.ok(messages.every((message) => message.turn === messages[0].turn));
+  assert.deepEqual(messages.map(({ step }) => step), [null, 1, 1, 1, 1, 2]);
+  const page = paginateProjectedMessages(messages, { offset: 1, limit: 2 });
+  assert.equal(page.messages[0].turn.answerSeq, 11);
+  assert.equal(page.messages[0].turn.rowCount, 6);
+  assert.equal(page.nextOffset, 3);
+  assert.equal('searchable' in page.messages[0], false);
+});
+
+test('preview never mistakes an earlier commentary or terminal tool request for a final answer', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 4 }),
+    logEvent(1, 'step/start', { turn: 4, step: 1 }),
+    assistantEvent(2, 4, 1, [{ type: 'text', text: 'Checking now.' }]),
+    logEvent(3, 'step/end', { turn: 4, step: 1 }),
+    logEvent(4, 'step/start', { turn: 4, step: 2 }),
+    assistantEvent(5, 4, 2, [{ type: 'text', text: 'Running a tool.' }, { type: 'tool-call', id: 'call-4', name: 'read', arguments: '{}' }]),
+    logEvent(6, 'step/end', { turn: 4, step: 2 }),
+    logEvent(7, 'turn/end', { turn: 4, reason: { kind: 'aborted', reason: { kind: 'user' } } }),
+  ]);
+  assert.equal(messages[0].turn?.answerSeq, null);
+  assert.equal(messages[0].turn.toolCallCount, 0);
+  assert.equal(messages[0].turn.messageCount, 2);
+});
+
+test('preview withholds folding for missing boundaries and retains interrupted answer status', () => {
+  const cases = [
+    { events: [assistantEvent(1, 1, 1, [{ type: 'text', text: 'orphan' }])], want: null },
+    { events: [logEvent(0, 'turn/start', { turn: 1 }), assistantEvent(1, 1, 1, [{ type: 'text', text: 'missing step' }]), logEvent(2, 'turn/end', { turn: 1, reason: { kind: 'completed' } })], want: { endSeq: 2, answerSeq: null, endReason: 'completed' } },
+    { events: [logEvent(0, 'turn/start', { turn: 1 }), logEvent(1, 'step/start', { turn: 1, step: 1 }), assistantEvent(2, 1, 1, [{ type: 'text', text: 'open' }])], want: { endSeq: null, answerSeq: null, endReason: null } },
+    { events: [logEvent(0, 'turn/start', { turn: 1 }), logEvent(1, 'step/start', { turn: 1, step: 1 }), assistantEvent(2, 1, 1, [{ type: 'reasoning', text: 'partial' }, { type: 'text', text: 'partial answer' }], { interrupted: true }), logEvent(3, 'step/end', { turn: 1, step: 1 }), logEvent(4, 'turn/end', { turn: 1, reason: { kind: 'interrupted' } })], want: { endSeq: 4, answerSeq: 2, endReason: 'interrupted' } },
+  ];
+  for (const { events, want } of cases) {
+    const [message] = projectArchivedMessages(events);
+    if (want === null) assert.equal(message.turn, null);
+    else for (const [key, value] of Object.entries(want)) assert.equal(message.turn[key], value, key);
+  }
+});
+
+test('preview uses start sequence identities across inherited prefixes and seed markers', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }), userEvent(1, 'inherited'),
+    logEvent(2, 'session/end-seed', { inherited: true }),
+    logEvent(3, 'step/start', { turn: 1, step: 1 }),
+    assistantEvent(4, 1, 1, [{ type: 'text', text: 'inherited answer' }]),
+    logEvent(5, 'step/end', { turn: 1, step: 1 }),
+    logEvent(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    logEvent(7, 'session/end-seed', { inherited: true }),
+    logEvent(8, 'turn/start', { turn: 1 }), userEvent(9, 'new lifecycle'),
+    logEvent(10, 'step/start', { turn: 1, step: 1 }),
+    assistantEvent(11, 1, 1, [{ type: 'text', text: 'new answer' }]),
+    logEvent(12, 'step/end', { turn: 1, step: 1 }),
+    logEvent(13, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  assert.deepEqual(messages.map(({ turn }) => turn?.key), ['turn:0', 'turn:0', 'turn:8', 'turn:8']);
+  assert.equal(messages[0].turn.answerSeq, 4);
+  assert.equal(messages[2].turn.answerSeq, 11);
+});
+
+test('preview leaves torn event windows unfolded even when end markers survived', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }),
+    logEvent(1, 'step/start', { turn: 1, step: 1 }),
+    assistantEvent(3, 1, 1, [{ type: 'text', text: 'answer after missing event' }]),
+    logEvent(4, 'step/end', { turn: 1, step: 1 }),
+    logEvent(5, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  assert.equal(messages[0].turn.endSeq, 5);
+  assert.equal(messages[0].turn.answerSeq, null);
+});
+
+test('preview exposes bounded producer labels without serializing private source payloads', () => {
+  const sources = [
+    { kind: 'plugin', plugin: 'environment', form: 'snapshot', privateData: 'PRIVATE_SOURCE' },
+    { kind: 'agent-instructions', changes: [{ path: 'AGENTS.md' }, { path: 'nested/AGENTS.md' }, { path: 'AGENTS.md' }] },
+    { kind: 'skill-invocation', name: 'debugging' },
+    { kind: 'session-reference', form: 'recall', references: [{ label: 'Earlier discussion' }] },
+    { kind: 'future-context', form: 'future-form' },
+    { kind: 'plugin', plugin: '😀'.repeat(5000) },
+  ];
+  const messages = projectArchivedMessages(sources.map((source, seq) => {
+    const event = userEvent(seq, 'context'); event.data.source = source; return event;
+  }));
+  assert.deepEqual(messages.slice(0, 5).map(({ sourceLabel }) => sourceLabel), ['environment', 'AGENTS.md, nested/AGENTS.md', 'debugging', 'Earlier discussion', 'future-context']);
+  assert.equal(messages[0].sourcePlugin, 'environment');
+  assert.equal(messages[0].sourceForm, 'snapshot');
+  assert.equal(messages[4].sourceForm, null);
+  assert.ok([...messages[5].sourceLabel].length <= 1025);
+  assert.equal(JSON.stringify(paginateProjectedMessages(messages)).includes('PRIVATE_SOURCE'), false);
+});
+
+test('preview shows independent system prompt updates while excluding other replacement copies', () => {
+  const messages = projectArchivedMessages([
+    systemEvent(0, 'original prompt'), userEvent(1, 'original input'),
+    systemEvent(2, 'replaced prompt', { op: 'replace', startSeq: 0, endSeq: 0 }),
+    { ...userEvent(3, 'compaction copy'), surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } },
+    systemEvent(4, 'appended update'),
+    systemEvent(5, '', { op: 'replace', startSeq: 4, endSeq: 4 }),
+  ]);
+  assert.deepEqual(messages.map(({ seq }) => seq), [0, 1, 2, 4]);
+  assert.deepEqual(messages.filter(({ role }) => role === 'system').map(({ systemPromptUpdate }) => systemPromptUpdate), [false, true, true]);
+  assert.equal(searchProjectedMessages(messages, 'original prompt').length, 1);
+  assert.equal(searchProjectedMessages(messages, 'replaced prompt').length, 1);
+  assert.equal(searchProjectedMessages(messages, 'compaction copy').length, 0);
+});
+
+test('preview repeats recorded system prompts at resumed and explicit request series starts', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }), userEvent(1, 'first prompt'),
+    logEvent(2, 'step/start', { turn: 1, step: 1 }), systemEvent(3, 'recorded instructions'),
+    requestHeaderEvent(4, 'initial'), assistantEvent(5, 1, 1, [{ type: 'text', text: 'first answer' }]),
+    logEvent(6, 'step/end', { turn: 1, step: 1 }), logEvent(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    logEvent(8, 'turn/start', { turn: 2 }), userEvent(9, 'resumed prompt'),
+    logEvent(10, 'step/start', { turn: 2, step: 1 }), requestHeaderEvent(11, 'resume'),
+    assistantEvent(12, 2, 1, [{ type: 'text', text: 'resumed answer' }]),
+    logEvent(13, 'step/end', { turn: 2, step: 1 }), logEvent(14, 'turn/end', { turn: 2, reason: { kind: 'completed' } }),
+    logEvent(15, 'turn/start', { turn: 3 }), userEvent(16, 'new series'),
+    logEvent(17, 'step/start', { turn: 3, step: 1 }), requestHeaderEvent(18, 'change', { startsSeries: true }),
+    assistantEvent(19, 3, 1, [{ type: 'text', text: 'third answer' }]),
+    logEvent(20, 'step/end', { turn: 3, step: 1 }), logEvent(21, 'turn/end', { turn: 3, reason: { kind: 'completed' } }),
+  ]);
+  const prompts = messages.filter(({ role }) => role === 'system');
+  assert.deepEqual(prompts.map(({ seq, anchorSeq }) => [seq, anchorSeq]), [[3, 0], [11, 8], [18, 15]]);
+  assert.ok(prompts.every((row) => row.segments[0].text === 'recorded instructions' && row.systemPromptUpdate === false));
+  assert.equal(prompts[1].turn.rowCount, 3);
+  assert.equal(prompts[1].turn.answerSeq, 12);
+  assert.deepEqual(messages.map(({ seq }) => seq), [1, 3, 5, 9, 11, 12, 16, 18, 19]);
+  assert.equal(paginateProjectedMessages(messages, { offset: 4, limit: 1 }).messages[0].anchorSeq, 8);
+});
+
+test('request prompt cards suppress immediate replacement duplicates and honor cleared instructions', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }), logEvent(1, 'step/start', { turn: 1, step: 1 }),
+    systemEvent(2, 'first instructions'), requestHeaderEvent(3, 'initial'),
+    systemEvent(4, 'new instructions', { op: 'replace', startSeq: 2, endSeq: 2 }),
+    requestHeaderEvent(5, 'change'), requestHeaderEvent(6, 'series'),
+    systemEvent(7, '', { op: 'replace', startSeq: 4, endSeq: 4 }),
+    requestHeaderEvent(8, 'resume'), requestHeaderEvent(9, 'change', { startsSeries: true }),
+    logEvent(10, 'step/end', { turn: 1, step: 1 }), logEvent(11, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  assert.deepEqual(messages.map(({ seq, systemPromptUpdate }) => [seq, systemPromptUpdate]), [[2, false], [4, true], [6, false]]);
+  assert.equal(messages[2].segments[0].text, 'new instructions');
+  assert.equal(messages[2].anchorSeq, 6);
+});
+
+test('request prompt cards track surviving system positions through non-system replacements', () => {
+  const messages = projectArchivedMessages([
+    logEvent(0, 'turn/start', { turn: 1 }), logEvent(1, 'step/start', { turn: 1, step: 1 }),
+    systemEvent(2, 'head instructions'), requestHeaderEvent(3, 'initial'),
+    systemEvent(4, 'later instructions'), requestHeaderEvent(5, 'change'),
+    { ...userEvent(6, 'replacement context'), surfaceOp: { op: 'replace', startSeq: 4, endSeq: 4 } },
+    requestHeaderEvent(7, 'change'),
+    systemEvent(8, '', { op: 'replace', startSeq: 2, endSeq: 2 }), requestHeaderEvent(9, 'resume'),
+    logEvent(10, 'step/end', { turn: 1, step: 1 }), logEvent(11, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  assert.deepEqual(messages.map(({ seq }) => seq), [2, 4, 7]);
+  assert.equal(messages[2].segments[0].text, 'head instructions');
+  assert.equal(searchProjectedMessages(messages, 'replacement context').length, 0);
+  assert.deepEqual(projectArchivedMessages([requestHeaderEvent(0, 'resume', { header: { config: {}, system: 'unlogged text' } })]), []);
+});
+
+test('preview cache budget includes serialized producer metadata', async () => {
+  let inspections = 0;
+  const cache = searchModule.createProjectedMessageCache(async () => {
+    inspections += 1;
+    const event = userEvent(1, 'ok');
+    event.data.source = { kind: 'plugin', plugin: 'p'.repeat(1000) };
+    return { events: [event] };
+  }, { maxCachedCodePoints: 100 });
+  await cache.get('metadata'); await cache.get('metadata');
+  assert.equal(inspections, 2);
+});
 
 test('projected search is Unicode-normalized and replacement-safe', () => {
   const messages = projectArchivedMessages([

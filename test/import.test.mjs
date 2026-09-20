@@ -4,9 +4,9 @@ import { zipSync, strToU8 } from 'fflate';
 import { IMPORT_LIMITS, inspectImport, selectImportItems } from '../lib/import.js';
 import { createExportZip, planExport } from '../lib/export.js';
 import { createRestoreAdapter } from '../lib/restore.js';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createImportTokenStore } from '../lib/index.js';
 
 function makePackage(items, extra = {}) {
@@ -31,7 +31,7 @@ function makePackage(items, extra = {}) {
     };
     const record = {
       format: 'dsh-archived-chats/session',
-      version: 1,
+      version: input.recordVersion ?? 1,
       exportedAt: '2026-08-20T00:00:00.000Z',
       archive,
       source: input.source ?? {
@@ -39,8 +39,8 @@ function makePackage(items, extra = {}) {
         events: input.events ?? [],
       },
     };
-    files[archive.files.json] = strToU8(JSON.stringify(record));
-    files[archive.files.markdown] = strToU8(`# ${archive.title}\n`);
+    files[archive.files.json] = input.jsonBytes ?? strToU8(input.jsonText ?? JSON.stringify(record));
+    files[archive.files.markdown] = input.markdownBytes ?? strToU8(`# ${archive.title}\n`);
     return archive;
   });
   const manifest = {
@@ -56,6 +56,28 @@ function makePackage(items, extra = {}) {
   files['manifest.json'] = strToU8(JSON.stringify(manifest));
   for (const [name, value] of Object.entries(extra.files ?? {})) files[name] = typeof value === 'string' ? strToU8(value) : value;
   return zipSync(files);
+}
+
+function duplicateFirstEntry(bytes) {
+  const result = bytes.slice();
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  const locals = [];
+  const centrals = [];
+  for (let offset = 0; offset <= result.length - 4; offset += 1) {
+    const signature = view.getUint32(offset, true);
+    if (signature === 0x04034b50) locals.push(offset);
+    if (signature === 0x02014b50) centrals.push(offset);
+  }
+  assert.ok(locals.length >= 2 && centrals.length >= 2);
+  const firstLocalLength = view.getUint16(locals[0] + 26, true);
+  const secondLocalLength = view.getUint16(locals[1] + 26, true);
+  assert.equal(firstLocalLength, secondLocalLength);
+  result.copyWithin(locals[1] + 30, locals[0] + 30, locals[0] + 30 + firstLocalLength);
+  const firstCentralLength = view.getUint16(centrals[0] + 28, true);
+  const secondCentralLength = view.getUint16(centrals[1] + 28, true);
+  assert.equal(firstCentralLength, secondCentralLength);
+  result.copyWithin(centrals[1] + 46, centrals[0] + 46, centrals[0] + 46 + firstCentralLength);
+  return result;
 }
 
 function rewriteZipUncompressedSize(bytes, size) {
@@ -76,6 +98,19 @@ function rewriteZipUncompressedSize(bytes, size) {
   return rewritten;
 }
 
+function rewriteFirstSignatureField(bytes, signature, fieldOffset, value, width = 2) {
+  const rewritten = bytes.slice();
+  const view = new DataView(rewritten.buffer, rewritten.byteOffset, rewritten.byteLength);
+  let offset = -1;
+  for (let index = 0; index <= rewritten.length - 4; index += 1) {
+    if (view.getUint32(index, true) === signature) { offset = index; break; }
+  }
+  assert.notEqual(offset, -1);
+  if (width === 2) view.setUint16(offset + fieldOffset, value, true);
+  else view.setUint32(offset + fieldOffset, value, true);
+  return rewritten;
+}
+
 test('valid v1 package produces a preview without raw transcript data', () => {
   const bytes = makePackage([{ id: 'session-a', title: 'Alpha', tags: ['one'], note: 'keep' }]);
   const result = inspectImport({ bytes, compressedBytes: bytes.length });
@@ -85,6 +120,23 @@ test('valid v1 package produces a preview without raw transcript data', () => {
   assert.equal(result.plan.items[0].note, 'keep');
   assert.equal('events' in result.plan.items[0], false);
   assert.equal(result.plan.items[0].hasAttachmentReferences, false);
+});
+
+test('v2 imports retain exact fork boundaries and reject missing, inconsistent, or out-of-range cuts', () => {
+  const meta = { id: 'fork', version: 3, createdAt: 42, isSeeded: true, parentSession: 'parent' };
+  const events = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Parent' } }];
+  const inspect = source => inspectImport({ bytes: makePackage([{ id: 'fork', recordVersion: 2, source }], { manifest: { version: 2 } }) });
+  const valid = inspect({ meta, events, inheritedEventCount: 1 });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.plan.items[0].record.source.inheritedEventCount, 1);
+  assert.equal(valid.plan.items[0].record.source.meta.parentSession, 'parent');
+  for (const cut of [-1, 0.5, 2, null, '1', undefined]) {
+    const invalid = inspect({ meta, events, inheritedEventCount: cut });
+    assert.equal(invalid.ok, false, `reject cut ${cut}`);
+    assert.ok(invalid.errors.some(error => error.code === 'source-invalid'));
+  }
+  assert.equal(inspect({ meta: { ...meta, isSeeded: false }, events, inheritedEventCount: 1 }).ok, false);
+  assert.equal(inspect({ meta, events, inheritedEventCount: 1, extra: true }).ok, false);
 });
 
 test('stops ZIP expansion at the configured actual-byte limit', () => {
@@ -175,7 +227,7 @@ test('rejects unsupported, incomplete, duplicate, unsafe, and mismatched package
   assert.equal(noManifest.ok, false);
   assert.equal(noManifest.errors[0].code, 'manifest-missing');
 
-  const unsupported = inspectImport({ bytes: makePackage([{ id: 'a' }], { manifest: { version: 2 } }) });
+  const unsupported = inspectImport({ bytes: makePackage([{ id: 'a' }], { manifest: { version: 99 } }) });
   assert.equal(unsupported.ok, false);
   assert.equal(unsupported.errors[0].code, 'format-unsupported');
 
@@ -196,19 +248,55 @@ test('rejects unsupported, incomplete, duplicate, unsafe, and mismatched package
   assert.equal(decoded.ok, true);
 });
 
-test('rejects duplicate ZIP entries and prototype pollution keys', () => {
-  const duplicate = zipSync({
-    'manifest.json': strToU8('{}'),
-    'manifest.json\u0000': strToU8('{}'),
-  });
+test('rejects genuine duplicate ZIP entries and prototype-sensitive JSON keys', () => {
+  const duplicate = duplicateFirstEntry(zipSync({ 'same-a': strToU8('a'), 'same-b': strToU8('b') }));
   const result = inspectImport({ bytes: duplicate });
   assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'entry-duplicate');
 
-  const polluted = makePackage([{ id: 'a' }]);
+  const polluted = makePackage([{ id: 'a', jsonText: '{"format":"dsh-archived-chats/session","version":1,"exportedAt":"2026-08-20T00:00:00.000Z","archive":{"id":"a"},"source":{"meta":{"id":"a"},"events":[],"__proto__":{"polluted":true}}}' }]);
   const withPollution = inspectImport({ bytes: polluted, compressedBytes: polluted.length });
-  assert.equal(withPollution.ok, true);
-  const record = withPollution.plan.items[0].record;
-  assert.equal(record.format, 'dsh-archived-chats/session');
+  assert.equal(withPollution.ok, false);
+  assert.ok(withPollution.errors.some((entry) => entry.code === 'json-key-unsafe'));
+});
+
+test('rejects truncated ZIP structures before issuing an import plan', () => {
+  const bytes = makePackage([{ id: 'truncated' }]);
+  for (const removed of [1, 10, 22, 50]) {
+    const result = inspectImport({ bytes: bytes.subarray(0, bytes.length - removed) });
+    assert.equal(result.ok, false, `removed ${removed} bytes`);
+    assert.equal(result.errors[0].code, 'zip-invalid');
+  }
+});
+
+test('rejects central/local name, method, encryption, size, and CRC disagreement', () => {
+  const bytes = makePackage([{ id: 'zip-integrity' }]);
+  const mutations = [
+    rewriteFirstSignatureField(bytes, 0x04034b50, 8, 99),
+    rewriteFirstSignatureField(bytes, 0x04034b50, 6, 1),
+    rewriteFirstSignatureField(bytes, 0x02014b50, 24, 1, 4),
+    rewriteFirstSignatureField(bytes, 0x02014b50, 16, 1, 4),
+  ];
+  const renamed = bytes.slice();
+  const view = new DataView(renamed.buffer, renamed.byteOffset, renamed.byteLength);
+  let local = -1;
+  for (let index = 0; index <= renamed.length - 4; index += 1) {
+    if (view.getUint32(index, true) === 0x04034b50) { local = index; break; }
+  }
+  renamed[local + 30] ^= 1;
+  mutations.push(renamed);
+  for (const mutation of mutations) {
+    const result = inspectImport({ bytes: mutation });
+    assert.equal(result.ok, false);
+    assert.equal(result.errors[0].code, 'zip-invalid');
+  }
+});
+
+test('rejects malformed UTF-8 in required transcript markdown', () => {
+  const bytes = makePackage([{ id: 'bad-markdown', markdownBytes: new Uint8Array([0xff, 0xfe]) }]);
+  const result = inspectImport({ bytes });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((entry) => entry.code === 'utf8-invalid' && entry.path.endsWith('/transcript.md')));
 });
 
 test('reports attachment references and unresolved workspace warnings', () => {
@@ -285,7 +373,7 @@ test('import confirmation tokens enforce count and retained-byte capacity', () =
  * fixtures cannot catch a drift between the two halves, or a writer contract
  * the running host never satisfies.
  */
-test('a real export ZIP validates and restores through an ordinary create/append host', async () => {
+test('a real export ZIP validates and restores through an exclusive-create/append host', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dac-roundtrip-'));
   const events = [
     { type: 'session/title', data: { title: 'Round trip 会话' } },
@@ -326,13 +414,20 @@ test('a real export ZIP validates and restores through an ordinary create/append
 
   const created = [];
   const appended = [];
+  let createdHeader = null;
   const archiveState = { archivedSessionIds: [] };
   const persistence = {
-    list: async () => [],
+    list: async () => createdHeader === null ? [] : [createdHeader],
     // A session log that does not exist yet reads as missing; that must not
     // abort the restore.
     inspect: async (id) => { throw Object.assign(new Error('no log yet'), { code: 'ENOENT', id }); },
-    create: async (meta) => { created.push(meta.id); },
+    createExclusive: async (meta) => {
+      created.push(meta.id);
+      createdHeader = meta;
+      const path = join(root, 'sessions', String(meta.id), 'session.jsonl.zstd');
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, 'header');
+    },
     append: async (id, batch) => { appended.push([id, batch.length]); },
     locate: (meta) => ({ kind: 'jsonl', path: join(root, 'sessions', String(meta.id), 'session.jsonl.zstd') }),
     removeSession: async () => {},
@@ -349,6 +444,7 @@ test('a real export ZIP validates and restores through an ordinary create/append
     set: async (id, value) => { saved.set(id, value); return { ...value, updatedAt: 'now' }; },
     remove: async () => {},
   };
+  await mkdir(join(root, 'sessions'), { recursive: true });
   const adapter = createRestoreAdapter({ persistence, registry, metadataStore, tempRoot: root });
   assert.deepEqual(adapter.capability, { supported: true });
 

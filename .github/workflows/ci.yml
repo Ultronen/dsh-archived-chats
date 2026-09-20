@@ -5,37 +5,49 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  unit:
+    name: Unit / ubuntu / Node 18
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version:
-          - "18"
-          - "24"
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "18"
           package-manager-cache: false
 
       - run: npm ci
       - run: npm test
       - run: npm pack --dry-run --json
 
-  windows-test:
-    runs-on: windows-latest
+  native-host:
+    name: Native / ${{ matrix.label }} / Node 24 / DSH 0.1.5-rc.2
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: ubuntu
+          - os: macos-latest
+            label: macos
+          - os: windows-latest
+            label: windows
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v6
         with:
@@ -44,4 +56,8 @@ jobs:
 
       - run: npm ci
       - run: npm test
+      - name: Install locked official Host fixture
+        run: npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+      - name: Run mandatory native Host integration
+        run: node scripts/run-native-integration.mjs
       - run: npm pack --dry-run --json

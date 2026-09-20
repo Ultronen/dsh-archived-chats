@@ -161,6 +161,23 @@ test('lineage projects a valid five-thousand-node chain without recursion overfl
   assert.equal(node.id, 's-4999');
 });
 
+test('reverse-ordered over-limit lineage chains fail with the stable typed limit', () => {
+  for (const length of [5001, 12000]) {
+    const headers = Array.from({ length }, (_, index) => ({
+      id: `reverse-${index}`,
+      createdAt: index,
+      ...(index === 0 ? {} : { parentSession: `reverse-${index - 1}` }),
+    })).reverse();
+    assert.throws(
+      () => projectLineage({ headers, archivedIds: [], trashRecords: new Map(), workspaces: [], titles: new Map() }),
+      (error) => error instanceof LineageError
+        && error.code === 'lineage-limit-exceeded'
+        && error.status === 413,
+      `${length} reverse-ordered nodes must not leak a RangeError`,
+    );
+  }
+});
+
 /**
  * Headers are the Host's data. This projection used to reject the entire graph
  * for any header it did not anticipate, which made a Host-side change — a new

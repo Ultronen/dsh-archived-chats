@@ -11,6 +11,7 @@ import {
   renderTranscript,
   createExportZip,
 } from '../lib/export.js';
+import { IMPORT_LIMITS, inspectImport } from '../lib/import.js';
 
 test('safeSegment removes traversal and Windows-reserved path syntax', () => {
   assert.equal(safeSegment('../CON:<bad>\\name', 'untitled', 80), 'CON-bad-name');
@@ -311,7 +312,7 @@ test('ZIP inspects sessions serially', async () => {
   assert.equal(maximumActive, 1);
 });
 
-test('mid-stream inspection failure aborts ZIP before later sessions', async () => {
+test('later inspection failure rejects before returning an export stream', async () => {
   const plan = zipPlan(3);
   const calls = [];
   const inspect = async (id) => {
@@ -320,11 +321,117 @@ test('mid-stream inspection failure aborts ZIP before later sessions', async () 
     return { meta: { id }, events: [] };
   };
 
-  const { stream, completion } = await createExportZip({ plan, inspect, generatorVersion: '0.7.0' });
-  const results = await Promise.allSettled([buffer(stream), completion]);
+  await assert.rejects(
+    () => createExportZip({ plan, inspect, generatorVersion: '0.7.0' }),
+    /fixture inspect failure/,
+  );
 
   assert.deepEqual(calls, ['session-a', 'session-b']);
-  assert(results.some((result) => result.status === 'rejected'));
-  assert(results.filter((result) => result.status === 'rejected')
-    .every((result) => /fixture inspect failure/.test(String(result.reason))));
+});
+
+test('refuses an export whose JSON cannot pass the same import limits', async () => {
+  const plan = zipPlan(2);
+  const calls = [];
+  const inspect = async (id) => {
+    calls.push(id);
+    return { meta: { id }, events: [{ type: 'session/title', data: { title: id === 'session-b' ? 'x'.repeat(5000) : 'ok' } }] };
+  };
+  await assert.rejects(
+    () => createExportZip({
+      plan,
+      inspect,
+      generatorVersion: '0.7.0',
+      limits: { ...IMPORT_LIMITS, maxJsonStringCodePoints: 4096 },
+    }),
+    (error) => error.code === 'export-limit-exceeded',
+  );
+  assert.deepEqual(calls, ['session-a', 'session-b']);
+});
+
+test('every successful export is accepted under the same configured limits', async () => {
+  const plan = zipPlan(2);
+  const limits = { ...IMPORT_LIMITS, maxJsonStringCodePoints: 4096, maxJsonBytes: 4096, maxManifestBytes: 4096, maxEntryBytes: 8192 };
+  const zip = await createExportZip({
+    plan,
+    inspect: async (id) => ({ meta: { id }, events: [{ seq: 0, type: 'session/title', data: { title: id } }] }),
+    generatorVersion: '0.7.0',
+    limits,
+  });
+  const bytes = new Uint8Array(await buffer(zip.stream));
+  await zip.completion;
+  assert.equal(inspectImport({ bytes }, { limits }).ok, true);
+});
+
+test('refuses v2 source metadata that the importer would reject', async () => {
+  const plan = zipPlan(1);
+  await assert.rejects(
+    () => createExportZip({
+      plan,
+      inspect: async (id) => ({ meta: { id }, events: [], inheritedEventCount: 0 }),
+      generatorVersion: '0.7.0',
+    }),
+    (error) => error.code === 'export-source-invalid',
+  );
+});
+
+test('refuses invalid event fields that the importer would reject', async () => {
+  const plan = zipPlan(1);
+  await assert.rejects(
+    () => createExportZip({
+      plan,
+      inspect: async (id) => ({ meta: { id }, events: [{ type: 'session/title', time: 'invalid', data: { title: 'x' } }] }),
+      generatorVersion: '0.7.0',
+    }),
+    (error) => error.code === 'export-source-invalid',
+  );
+});
+
+test('refuses descriptor fields that the importer would reject', async () => {
+  const plan = planExport([{
+    id: 'bad-descriptor',
+    title: 'Bad descriptor',
+    metadataUpdatedAt: 'not-a-timestamp',
+    tags: [],
+    note: '',
+  }], new Date('2026-08-19T12:00:00.000Z'));
+  await assert.rejects(
+    () => createExportZip({
+      plan,
+      inspect: async (id) => ({ meta: { id }, events: [] }),
+      generatorVersion: '0.7.0',
+    }),
+    (error) => error.code === 'export-source-invalid'
+      && error.errors.some((entry) => entry.path === 'manifest.sessions[0].metadataUpdatedAt'),
+  );
+});
+
+test('export enforces every import-facing byte, structure, and source budget before returning', async () => {
+  const one = zipPlan(1);
+  const ordinary = async (id) => ({ meta: { id }, events: [{ seq: 0, type: 'session/title', data: { title: 'small' } }] });
+  const cases = [
+    { limits: { maxManifestBytes: 32 }, inspect: ordinary },
+    { limits: { maxJsonBytes: 64 }, inspect: ordinary },
+    { limits: { maxMarkdownBytes: 32 }, inspect: ordinary },
+    { limits: { maxUncompressedBytes: 128 }, inspect: ordinary },
+    { limits: { maxJsonNodes: 3 }, inspect: ordinary },
+    { limits: { maxJsonDepth: 2 }, inspect: ordinary },
+  ];
+  for (const entry of cases) {
+    await assert.rejects(
+      () => createExportZip({ plan: one, inspect: entry.inspect, generatorVersion: '0.7.0', limits: { ...IMPORT_LIMITS, ...entry.limits } }),
+      (error) => error.code === 'export-limit-exceeded',
+    );
+  }
+  await assert.rejects(
+    () => createExportZip({ plan: zipPlan(2), inspect: ordinary, generatorVersion: '0.7.0', limits: { ...IMPORT_LIMITS, maxSessions: 1 } }),
+    (error) => error.code === 'export-limit-exceeded',
+  );
+  await assert.rejects(
+    () => createExportZip({ plan: one, inspect: async () => ({ meta: null, events: [] }), generatorVersion: '0.7.0' }),
+    (error) => error.code === 'export-source-invalid',
+  );
+  await assert.rejects(
+    () => createExportZip({ plan: one, inspect: async (id) => ({ meta: { id, isSeeded: true }, events: [] }), generatorVersion: '0.7.0' }),
+    (error) => error.code === 'export-source-invalid',
+  );
 });

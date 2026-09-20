@@ -301,3 +301,51 @@ test('refuses inherited sessions before reading away lineage evidence and closes
   assert.equal(reads, 0);
   assert.equal(closes, 1);
 });
+
+test('title-only reads close a fork handle after a failed read without masking the failure', async () => {
+  let closed = false;
+  const view = resolvePersistenceCompat({
+    async list() { return []; },
+    async open() {
+      return {
+        header: { ...HEADER, isSeeded: true }, inheritedEventCount: 2,
+        async read() { throw Object.assign(new Error('unreadable fork'), { code: 'read-failed' }); },
+        async close() { closed = true; },
+      };
+    },
+  });
+  await assert.rejects(view.readTitle(HEADER.id), { code: 'read-failed' });
+  assert.equal(closed, true);
+});
+
+test('full read preserves a fork boundary beside its inherited and local events', async () => {
+  const events = [{ seq: 0 }, { seq: 1 }, { seq: 2 }];
+  let closed = 0;
+  const header = { ...HEADER_V3, isSeeded: true, parentSession: 'parent' };
+  const view = resolvePersistenceCompat({
+    async list() { return []; },
+    async open(id, mode) {
+      assert.deepEqual([id, mode], [HEADER.id, 'read']);
+      return { header, inheritedEventCount: 2,
+        async read() { return { events }; }, async close() { closed++; } };
+    },
+  });
+  assert.equal(typeof view.readSession, 'function');
+  assert.deepEqual(await view.readSession(HEADER.id), { meta: header, events, inheritedEventCount: 2 });
+  assert.equal(closed, 1);
+  await assert.rejects(view.inspect(HEADER.id), { code: 'session-inspection-unsupported' });
+});
+
+test('full reads reject inconsistent fork boundaries and still close handles', async () => {
+  for (const [seeded, count, events] of [[false, 1, [{ seq: 0 }]], [true, 2, [{ seq: 0 }]], [true, -1, []], [true, 1.5, []]]) {
+    let closed = 0;
+    const view = resolvePersistenceCompat({
+      async list() { return []; },
+      async open() { return { header: { ...HEADER_V3, isSeeded: seeded }, inheritedEventCount: count,
+        async read() { return { events }; }, async close() { closed++; } }; },
+    });
+    assert.equal(typeof view.readSession, 'function');
+    await assert.rejects(view.readSession(HEADER.id), { code: 'persistence-response-invalid' });
+    assert.equal(closed, 1);
+  }
+});

@@ -10,11 +10,17 @@ permissions:
   id-token: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v6
         with:
@@ -23,5 +29,7 @@ jobs:
           package-manager-cache: false
 
       - run: npm ci
-      - run: npm test
+      - name: Verify release tag matches package version
+        run: node scripts/check-release-candidate.mjs
+      - run: npm pack --dry-run --json
       - run: npm publish --access public

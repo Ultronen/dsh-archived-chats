@@ -21,7 +21,9 @@ async function fixture(t) {
   const snapshotStore = { capture() {}, inventory: async () => ({ valid: [] }), remove() {}, removeForSession: async () => {}, latestFor: async () => null };
   let fail = false;
   const recycleService = createRecycleService({
-    persistence: { list: async () => [] }, trashStore, snapshotStore, lifecycle, now,
+    persistence: { list: async () => [], locate: async () => ({ path: join(root, 'unused', 'session.jsonl') }) },
+    trashStore, snapshotStore, lifecycle, now,
+    verifyPurgeScope: async (id) => ({ status: 'present', sessionDirectory: join(root, id) }),
     purgePhysical: async (id) => { if (fail) throw Object.assign(new Error('failed'), { code: 'disk-unavailable' }); await rm(join(root, id)); },
   });
   let markPurgeStarted;

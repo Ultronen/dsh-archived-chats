@@ -1,43 +1,47 @@
 # 架构与维护者说明
 
-[English](ARCHITECTURE.en.md) | 中文
+[English](ARCHITECTURE.en.md) · 中文 · [用户指南](USER_GUIDE.zh-CN.md)
 
-本文面向维护者和需要理解数据行为的开发者。普通用户请先阅读仓库根目录的 README.md；其中的安装、使用、隐私和限制说明优先于本文。
+本文描述当前仓库实现，包含 [Unreleased](../CHANGELOG.md#unreleased) 中尚未发布的标题和删除可靠性修复。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
 
-## 架构边界
+## 产品边界与模块
 
-插件由 Host 服务层和浏览器客户端两部分组成：
+插件补充已归档聊天管理页面，不替代 DSH 主会话区。浏览器仅通过 Host 路由读写数据；会话文件仍由 Host 持久层管理。
 
-- Host 服务层位于 lib/index.js，运行在 DSH Web 宿主中，读取工作区注册表和会话持久层，并提供本地 HTTP 路由。
-- 浏览器客户端位于 lib/client.js，通过 settings.section 注册「会话档案」设置页，负责展示状态和发起操作。
-- 纯领域逻辑拆分在 lib/export.js、lib/import.js、lib/restore.js、lib/metadata.js、lib/search.js、lib/stats.js、lib/insights.js、lib/retention.js、lib/retention-service.js、lib/auto-retention.js、lib/lineage.js 和 lib/workspace-bulk-archive.js 中。lib/persistence-compat.js 将新版 Host 的句柄读取面收敛为插件内部只读视图。lib/trash.js 负责版本化回收目录，lib/snapshot.js 负责可验证快照，lib/recycle.js 组合普通回收生命周期。
+| 模块（均位于 `lib/`） | 职责 |
+| --- | --- |
+| `index.js` | Host 能力解析、路由、归档可见性、生命周期队列及物理删除 |
+| `client.js` | 设置页、五个主视图、弹窗、原生归档提示与请求状态 |
+| `about.js` | 本地插件信息、受限的公开版本查询与运行期缓存 |
+| `persistence-compat.js` | 旧版 inspect 与新版只读句柄适配，独立标题读取 |
+| `workspace-bulk-archive.js` | 工作区归档候选、短效确认、执行重检 |
+| `trash.js`、`snapshot.js`、`recycle.js` | 回收目录、可验证保护快照、回收／恢复／永久删除 |
+| `export.js`、`import.js`、`restore.js` | ZIP 导出、有界导入验证、事务恢复 |
+| `metadata.js`、`durable.js` | 标签备注、串行原子写入与持久化操作 |
+| `search.js`、`stats.js`、`insights.js` | 消息投影与搜索、会话目录测量、空间分账 |
+| `retention.js`、`retention-service.js`、`auto-retention.js` | 策略、确认与重检、启动恢复及定时任务 |
+| `lineage.js` | 只读来源、分叉与子代理关系投影 |
 
-浏览器不直接访问会话文件。所有读取和写入都经 Host 路由完成。
+界面仅通过工作区操作移入回收站；单条可永久删除或取消归档。保留工作区导出与全部导出。后端兼容接口可接收单条 ID，不代表界面提供单条移入入口。
+
+独立 History、旧快照恢复副本和预览清理界面已移除。`history.js`、`history-restore.js`、`legacy-recycle.js` 不是当前模块。
 
 ## Host 路由
 
-当前注册的路由：
-
-~~~text
+```text
+GET  /plugins/dsh-archived-chats/about
+POST /plugins/dsh-archived-chats/about/check-updates
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 GET  /plugins/dsh-archived-chats/insights
+GET  /plugins/dsh-archived-chats/lineage
 GET  /plugins/dsh-archived-chats/workspace-archive/workspaces
 POST /plugins/dsh-archived-chats/workspace-archive/preview
 POST /plugins/dsh-archived-chats/workspace-archive/apply
-POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/policy/preview
+POST /plugins/dsh-archived-chats/retention/policy
 POST /plugins/dsh-archived-chats/retention/preview
 POST /plugins/dsh-archived-chats/retention/apply
-GET  /plugins/dsh-archived-chats/lineage
-POST /plugins/dsh-archived-chats/history/capture
-GET  /plugins/dsh-archived-chats/history
-POST /plugins/dsh-archived-chats/history/preview
-POST /plugins/dsh-archived-chats/history/preview/image
-POST /plugins/dsh-archived-chats/history/restore/preview
-POST /plugins/dsh-archived-chats/history/restore
-POST /plugins/dsh-archived-chats/history/delete
-POST /plugins/dsh-archived-chats/history/delete-all
 POST /plugins/dsh-archived-chats/preview
 POST /plugins/dsh-archived-chats/preview/image
 POST /plugins/dsh-archived-chats/search
@@ -53,151 +57,159 @@ POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
-~~~
+```
 
-所有修改路由以及会返回对话内容的 preview、preview/image、search、history/preview 和 history/preview/image 路由都要求 `x-dsh-archived-chats: 1` 请求头。`GET /history` 只返回有界安全清单；兼容快照图片只在快照身份与完整描述符同时匹配时返回。History 路由保留为迁移和只读兼容层，浏览器不再显示独立 History 页面。
+除导出外，上述 POST 路由要求 `x-dsh-archived-chats: 1`。读取对话内容的预览、图片、搜索也使用受保护 POST。导出单独接受有界原生表单，不使用此 header 守卫，并检查所请求会话的当前归档可见性；其余路由按各自限定解析载荷。
 
-工作区归档只列出安全且至少有一条符合条件会话的工作区摘要。浏览器可选择一个或多个工作区，但仍为每个工作区分别调用 preview；preview 只接受一个工作区 ID，并为最多 2,000 条符合条件且有序的会话 ID 签发 5 分钟有效、只能使用一次的 token/nonce。汇总确认只保留具有非空预览的工作区；如果全部变为空，返回刷新后的选择器，不进入空结果确认。apply 每次只接受一个工作区的 token 和 nonce，绝不接受调用方指定的会话 ID；浏览器按选择顺序执行各凭据并汇总安全结果。符合条件要求会话仍属于现有工作区、尚未归档、没有非空闲 Host agent，并且检查到活动或持久化事件日志包含 `turn/start`；空白的新会话窗口标记为 `session-empty`，检查失败标记为 `session-unavailable`，两者都会保守跳过。Host 不提供 agent 状态时，已加载会话会被保守视为活动；候选内容检查最多并发读取 8 条。每一项都会在共享生命周期队列内重新检查归属、归档状态、agent 状态和对话内容，然后以 registry 为 receiver 调用公开的 `workspaceRegistry.archiveSession()`。预览后新增的聊天不会纳入；已变为运行中、空白、不可确认、已归档或脱离工作区的项目会明确跳过。成功归档不再抓取快照。此功能不改变工作区成员关系、路径或目录，也不会在工作区之间移动聊天。Host 没有公开 `archiveSession` 时返回 `workspace-archive-unsupported`，且不作修改。
+所有 `/history` 和 `/history/*` 路由已移除，不再承诺返回旧的 410 响应。`/retention/preview` 和 `/retention/apply` 仍作为手动兼容 API 存在，但客户端不提供独立预览清理入口；不要混淆接口兼容与产品页面。
 
-## 状态和本地数据
+`/delete` 接收 `sessionId`，`/delete-all` 接收 `sessionIds`。默认调用回收服务 `move`；仅 `permanent: true` 调用 `deleteArchived`。归档直接永久删除返回 `{ deleted, pending, failed }`；全部失败且没有删除成功项时为 HTTP 409，部分成功仍可返回 200，调用方必须检查结果数组，不能只看状态码。
 
-state 路由把归档会话、工作区、标签、备注和 metadataUpdatedAt 组合成浏览器列表。标签和备注只写入：
+回收接口分别调用 `restore`、`purge`、`empty`。empty 要求确认时捕获的精确 `trashed`／`degraded` 记录实例，包括回收与快照身份。服务只清理这些目标：之后新增的记录被排除，已变更目标失败，不扩大或重算范围。已有 `purge-pending` 任务只由独立重试流程续作。规范的独占目录检查只授权删除会话所有的目标，不是广义文件系统删除保证；结果不确定时保留持久记录。
 
-~~~text
-$DSH_HOME/plugin-data/archived-chats/metadata.json
-$DSH_HOME/plugin-data/archived-chats/trash.json
-$DSH_HOME/plugin-data/archived-chats/legacy-recycle.json
-$DSH_HOME/plugin-data/archived-chats/retention.json
-$DSH_HOME/plugin-data/archived-chats/snapshots/
-~~~
+## 状态、所有权与持久化
 
-元数据和回收目录均带版本号，写入通过队列串行化并用临时文件原子替换。无法解析或不支持的 `trash.json` 保留原始字节、不隐藏任何归档会话，并禁用回收修改。
+插件状态根目录是 `$DSH_HOME/plugin-data/archived-chats/`：
 
-stats 路由以并发 4 测量会话目录，跳过符号链接，结果缓存 30 秒。测量失败只标记当前行不可用，不阻塞列表和其他操作；删除会使对应缓存失效。
+| 路径 | 当前用途 |
+| --- | --- |
+| `metadata.json` | 版本化标签备注 |
+| `trash.json` | 回收和永久删除意图的权威目录 |
+| `retention.json` | version 2 策略，含显式 `recycleAutoDelete` |
+| `snapshots/` | 保护快照、暂存和恢复所需文件 |
+| `pending-deletions.json` | 旧删除标记兼容与迁移输入 |
+| `legacy-recycle.json` | 旧版遗留，新版不再读取或投影 |
 
-insights 将会话目录测量与流式校验的快照清单分账，重复附件只按快照内已验证 SHA-256 统计；浏览器只在摘要卡片中显示总量，会话目录和快照明细通过有界、可搜索弹窗按需呈现。
+Host 的归档注册表决定归档归属；正常可见归档列表排除回收目录中的全部 ID，包括待删除任务。`trash.json` 无法解析或版本不支持时保留原字节，列表标为未经核对，修改操作 fail closed，不推断回收状态。
 
-retention.json 使用 version 2 schema，并加入显式 `recycleAutoDelete` 开关；version 1 文件继续兼容读取，其开关被强制视为 false 且不会静默改写磁盘。只有回收站保留天数参与清理规划，旧版保留策略的快照数量、年龄与容量字段不再规划快照删除。policy/preview 为开启或缩短期限生成五分钟单次 token/nonce，绑定当前策略、拟保存策略与到期候选；policy 保存支持 `{ policy, confirmation: { token, nonce } }`，在生命周期锁内复核并保存，保存请求本身不执行删除。自动任务在启动恢复完成后运行，此后每分钟串行检查；每条候选仍委托统一 recycle purge，在其生命周期锁内重新核对设置与记录后才写入 purge-pending 意图。停用插件会停止新任务；已有永久删除意图继续重试。旧版 retention/preview 与 retention/apply 手动 API 保持兼容，但界面不再提供额外预览清理步骤。
+元数据与回收写入串行化，通过临时文件和原子 rename 发布。生命周期队列把归档、导入恢复、回收和永久删除的关键重检与提交串行化。文件使用 `0600`，目录使用 `0700`；同步文件及父目录，不支持目录 fsync 的平台安全降级。Windows 上对瞬时 `EPERM`、`EACCES`、`EBUSY` 做有界重试，路径包含判断使用平台路径规则。
 
-lineage 只用持久化 parentSession 建树，不修改会话头；对已经进入聚焦关系树但没有安全标题的活动来源节点，最多按需读取 100 个标题事件。其 5,000 节点上限约束的是**实际投影出的**关系图，而不是 Host 的会话库：`focusIds` 已把输出收窄为归档与回收聊天加上解释它们所需的上下文，因此 100,000 个会话、25 条归档只投影 25 个节点。会话头字段按节点逐项收敛而不是整图校验——未预期的 `origin` 取值、缺失的 `createdAt`、变化的数值类型，各自只把该节点降级为公开 LineageNode 已允许的取值，只有身份不可用才丢弃该行。为一个不认识的会话头拒绝整张图，会让 Host 侧的变化在插件毫无改动的情况下直接停用该面板；畸形的工作区与回收记录出于同样理由被跳过。
+## 工作区批量归档
 
-## 预览和全文搜索
+客户端注册 `settings.section` 和 `shell.overlay`，在 **Settings → Session Archive / 设置 → 归档管理** 内维护工作区选择器，不依赖工作区菜单扩展或共享客户端 store。
 
-preview 默认只接受当前可见归档 ID；显式 `scope: "trash"` 时仅接受回收目录中的 ID。search 只搜索可见归档。lib/search.js 使用 Harness 的 append-origin 消息投影，不会将 replacement 副本重复索引。用户、助手、思考、工具调用与工具结果均可搜索，预览窗口以分页方式返回有界段落和净化后的图片描述符。
+1. 列出至少有一条符合条件聊天的工作区。
+2. 浏览器为每个选中工作区分别请求 preview；每个 preview 最多绑定 2,000 个有序 ID，凭据 token/nonce 有效 5 分钟且仅用一次。
+3. 跳过准备期间变空的工作区，显示一次汇总确认；全部变空则返回更新后的选择器。
+4. 按选择顺序 apply 各工作区凭据，汇总结果；后续工作区不会因前一个部分失败而自动停止。
 
-preview/image 的授权顺序固定为：先验证 POST 和 `x-dsh-archived-chats: 1`，再有界解析 `sessionId` 与 `attachmentId`；随后确认会话仍在当前可见归档集合中，从该会话的规范投影中查找完全匹配的图片描述符，最后才通过可选的 `attachments.readImage` 服务读取。preview 和 preview/image 都会在异步读取完成后、响应发送前再次检查可见归档状态，避免并发取消归档或删除泄露旧内容。图片字节以 `no-store`、`nosniff` 返回；跨会话、非归档或不在投影中的引用均会被拒绝，错误响应不回显文件路径。宿主没有附件读取能力时返回 `preview-image-unsupported`；这只降级图片，不阻塞文本、Markdown、思考、工具、JSON 或代码预览。
+apply 只接受凭据，不接受调用方增补会话 ID。每条执行前在生命周期队列内检查工作区归属、归档状态、agent 状态及真实 `turn/start`。空白为 `session-empty`，内容无法确认则 `session-unavailable`；没有 agent 状态的旧 Host 会保守跳过已加载会话。候选内容检查最多并发 8 条。
 
-跨会话搜索的持久层读取并发上限为 4，达到命中上限后不再调度后续批次，浏览器的新搜索会中止旧请求；单个会话失败会记入 skipped，其他命中仍正常返回。规范投影使用 30 秒 TTL、64 会话 LRU，并限制单段 256 Ki Unicode 码点、单消息 1 Mi 码点/1,000 段、单会话 10,000 条投影消息；结构化未知值在 stringify 前即受深度、节点和字符预算约束。超出投影边界的内容会安全截断且不会常驻缓存。取消归档、删除和恢复会使相关缓存失效。
+调用公开 `workspaceRegistry.archiveSession()` 时保留 receiver；不停止活动聊天、不移动工作区归属、不改目录、不抓取历史快照。缺少该能力返回 `workspace-archive-unsupported`。
 
-## 统一回收站与保护快照
+## 持久层兼容与分叉标题
 
-会话删除进入回收站，保留保护快照并支持恢复。删除前会验证来源聊天是否仍在活跃工作区中显示，从而防止误删。回收记录永久删除后，未被引用的快照会在启动时自动清理。
+带原生 `inspect` 的持久层对象保持原样。新版 `list()` 快照与 `open(id, 'read')` 句柄适配为内部 `list`、`listSnapshots`、`inspect`、`readSession` 和 `readTitle`；句柄从偏移 0 读取，并在成功或失败后关闭。
 
-归档不再调用 `history/capture`，该兼容路由拒绝新建历史版本。升级时保留已有快照；`legacy-recycle.js` 将未被普通回收记录引用的快照投影为 `legacy:<snapshotId>` 回收条目，浏览器直接在统一回收站中展示。History 清单、预览、恢复和删除路由继续服务迁移与兼容调用方；回收站仍可创建恢复所需的保护快照。
+`readTitle` 允许读取继承事件，但只返回最后一个非空白 `session/title` 字符串，不向备份调用者暴露事件载荷。归档列表优先调用它，解决分叉标题被严格检查阻断的问题。
 
-`history.js` 将已发布快照分组为 `archived` / `recycled` / `history-only`，单次最多检查 5,000 个快照目录，共用进行中请求并缓存已完成结果 30 秒。清单只含安全标题/工作区标题、时间、大小、附件数和保护状态；降级项只显示快照 ID 与稳定代码。分页预览与图片读取每次都重新验证快照、摘要和完整描述符，不返回路径或原始记录。
+`readSession` 返回 `{ meta, events, inheritedEventCount }`，用于正文预览／搜索及保护快照；验证继承数为非负整数、不超过日志长度，非 seeded 会话必须为 0。新版保护记录 `snapshot-session` v2 在 source 中保存完整事件及继承分界，manifest 仍为 v1；读取器兼容旧保护记录 v1，并校验 v2 分界。快照读取失败区分“不存在”“不可读”和“不支持”，不再统一伪报源文件丢失。
 
-`history-restore.js` 先完整验证快照，用 Host 生成新会话 ID，再签发五分钟、单次使用的 token/nonce。确认时先消费凭据并重验 manifest；然后依次创建持久会话、重写会话/附件身份、附加事件、恢复工作区和元数据，最后才写入归档注册表。统一回收服务在提交后将迁移状态标记为 `restore-complete`，再删除已恢复快照和迁移记录；清理失败只保留待清理状态，不会撤销已经成功创建的归档副本。任一插件控制的恢复边界失败都按逆序回滚；来源会话与快照在提交前始终不变，也不声称删除了 Host 全局附件对象。
+严格的旧 `inspect` 仍拒绝正继承数；新版 ZIP 改用 `readSession` 和 v2 保存继承分界。回收恢复优先保留现存原日志；其独立的旧快照写入器在原件缺失时仍拒绝正继承分界，不展平分叉，并保留保护记录。
 
-删除操作进入统一生命周期队列，并绕过普通 30 秒缓存/进行中请求，重新计算当前快照与普通回收保护关系。降级快照无法预览或恢复，但可通过统一回收站永久删除，避免无法回收磁盘字节。删除会物理移除插件快照及其附件副本，但不修改来源聊天或其他快照。
+适配器将现代 `create` 显式暴露为 `createWriteHandle`，不伪装为旧 create/append。原持久层暴露 `locate` 时才透传并验证绝对路径。没有 locate 时，不支持会话目录统计、物理删除或现代 ZIP 回滚写入器；有 locate 的只读后端仍可能支持直接永久删除。
 
-## 导出流程
+## 预览、搜索与客户端
 
-export 路由接收有界的原生表单请求，由 export.js 生成版本化 ZIP：
+`/preview` 默认只接受当前可见归档 ID，`scope: "trash"` 则要求存在回收记录。搜索只覆盖可见归档。聊天正文使用 Harness append-origin 投影，不重复索引 replacement 副本；系统提示词更新单独保留。`request/header` 在恢复或开启新请求系列时可引用日志中已知的有效系统提示词，尊重替换和清空，紧邻提示词卡片不重复展示。投影按日志顺序分页，客户端按 `anchorSeq` 将对应提示词放在当轮输入前；信息不完整时不推测提示词。
 
-~~~text
-manifest.json
-sessions/001-safe-title-id/session.json
-sessions/001-safe-title-id/transcript.md
-~~~
+图片按顺序校验：请求 guard → 有界身份字段 → 当前可见性 → 规范投影中完全匹配的图片描述符 → 可选公开 `attachments.readImage`。异步读取后再次检查可见性，响应使用 `no-store`、`nosniff`，错误不回显路径。
 
-session.json 保留持久层返回的完整元数据和事件，并附加归档标题、工作区、时间、来源、标签、备注和存储信息。transcript.md 使用 Harness 的规范消息投影生成。
+当前回收站预览仍调用原会话消息投影，没有保护快照回退。原件缺失时预览可能失败，即使恢复服务能从快照恢复；这是已知限制，不应写成已实现的快照预览功能。
 
-ZIP 路径会清理遍历字符并处理重名。批量导出按会话顺序逐个检查和写入，最多保留一个已检查的会话载荷。附件引用可保留在 JSON 中，但附件二进制和子会话不属于版本一格式。
+搜索读取并发 4；投影缓存为 30 秒 TTL、64 会话 LRU。单段最多 256 Ki Unicode 码点，单消息 1 Mi 码点／1,000 段，单会话 10,000 条投影消息；未知结构化值在 stringify 前限制深度、节点和字符。超预算内容截断或不入缓存。
 
-## 导入和恢复流程
+客户端识别公开 React 组件类型，包括经 `React.memo` 包装的 `MarkdownText`，优先使用宿主 `MarkdownText`、`DisclosureRow`、`JsonBlock`；缺少时降级为转义文本、原生 details 或 pre。工具结果只与更早且 ID 匹配的调用合并。图片使用 Blob URL，关闭／卸载时取消请求并释放 URL；请求序号屏蔽迟到响应。轮次导航在桌面位于左侧，宽度不超过 640px 时改为顶部横向滚动。
 
-import/inspect 只接受本插件版本一导出的 ZIP。Host 以有界压缩块流式解压，先核对条目声明大小，再累计实际输出，并限制条目数、单条目、manifest 与总解压量。JSON 校验使用迭代遍历限制深度、节点数和 Unicode 字符总量，然后继续校验路径、版本、生成器、工作区、存储描述符、时间戳、`source.meta.id`、事件数组及跨文件一致性并生成预览：
+轮次投影保留日志中的边界及过程／最终回复位置。仅完整加载、已结束且最终回复已知的轮次组成默认收起的过程折叠项；不完整或缺少边界的内容保持事件顺序。过程摘要显示「已思考」或实际工具／消息／子代理数量，嵌套思考、上下文来源及工具参数／结果默认收起，最终回复位于过程之外。真实用户消息居右，全部 AI 过程居左。预览只读、无输入框，不编造用量或耗时，也不承诺完整原生功能或缺失日志内容。部署时必须重新加载实际 DSH 后端以替换投影代码，仅刷新浏览器不够。
 
-1. 浏览器上传 ZIP，Host 返回会话摘要、版本、大小和警告。
-2. 已存在的会话 ID 标记为冲突并默认取消选择。
-3. 未解析的工作区和附件引用只显示警告，不伪造数据。
-4. 用户确认后，浏览器提交一次性令牌和选中的非冲突 ID。
-5. restore.js 通过能力探测的适配器写入会话、元数据和归档状态。
-6. 任一步骤失败都回滚暂存数据，不覆盖已有会话。
+导出下载使用受保护 fetch，验证状态、ZIP 内容类型和附件 disposition，缓冲完整响应后才创建 Blob URL。端到端超时为五分钟，已声明及流式响应上限为 320 MiB 字节。该上限不是峰值堆内存保证，因为分块、连续缓冲区和 Blob 可能同时存在；非流式 WebView 回退也没有更强的通用内存上限。完成文案表示已开始下载，不表示浏览器已保存到磁盘。
 
-确认令牌短期有效且只能使用一次，并受 8 条、总计 128 MiB 的进程内保留上限约束。确认后的冲突重检、暂存和提交全部进入共享生命周期队列。导入按能力解析会话 writer：有专用恢复入口时优先使用，否则使用普通的 `create` / `append` / `locate` 面——也就是快照恢复写入所用的同一能力，因此后者能工作的地方导入就能工作。append writer 自带会话作用域回滚（创建任何东西之前先确认定位到的目录属于该会话本身），所以只有专用恢复入口才需要额外的删除能力；归档与元数据写入能力仍然必需。待恢复 id 尚不存在，因此对未知会话 fail-closed 的读取器正是能力探测的预期回答，不会中断恢复。工作区 attach 必须有对应 detach，否则按未分组警告处理。任一边界即使在抛错前已经改变状态，也会按逆序补偿；无法完成补偿时明确返回 rollback failed，而不会报告恢复成功。
+归档行操作为预览、编辑标签备注、取消归档、删除。顶部提供批量归档和更多；更多菜单依次为导入备份、全部导出、全部取消归档、分隔线、全部删除，各 Tab 顶部保持一致尺寸。工作区菜单依次为全部取消归档、全部移入回收站、全部导出、分隔线、全部删除，每项均确认完整工作区名称和全部归档聊天数。全局导出／取消归档／删除确认所有工作区归档数量，排除回收站；筛选不缩小这些范围。「删除／全部删除」进入简短的不可恢复确认，点明聊天、工作区或全局范围。回收站聊天行保留预览图标，恢复／删除使用与归档行一致的紧凑文字按钮。工作区操作为全部恢复和全部删除；顶部直接并列显示纯文字的全部恢复和清空回收站，不再设置更多菜单；清空仍须不可恢复确认。主按钮和选中 Tab 使用随深色模式反转的黑白主题色，危险操作保留红色。两级恢复确认分别说明工作区名称或全局工作区数、可恢复聊天数及已归档去向，跳过 purge-pending。同步提交锁避免重复请求；反馈保留实际成功／失败数量及查看已归档入口。永久删除响应中的 deleted 和 pending 都从可操作归档列表移除，同时保留失败说明并刷新相关状态。
 
-## 回收与保护快照生命周期
+## 关于与版本查询
 
-`trash.json` 的合法状态只有 `trashed`、`purge-pending`、`degraded`。合法转换为 `missing -> trashed`、`trashed/degraded -> purge-pending`，以及任一现有状态在事务成功后移除。`purge-pending` 不得恢复。
+`GET /about` 只返回已加载包的本地身份、受控链接和内存缓存，无网络副作用。受现有同源 guard 保护的 `POST /about/check-updates` 只接收 `{ force: boolean }`。固定请求 `https://registry.npmjs.org/dsh-archived-chats/latest`，不携带聊天、备份或客户端凭据；拒绝重定向、异常状态、错误包名和非法 SemVer，按 SemVer 判断新版，绝不建议降级。请求超时 5 秒，响应上限 64 KiB。
 
-保护快照格式是 `dsh-archived-chats/snapshot` v1，会话载荷是 `dsh-archived-chats/snapshot-session` v1。每个普通回收记录只引用一个活跃快照；恢复或重复回收后不再被普通记录引用的有效快照会在启动时自动清理。精确上限为：manifest 4 MiB、session JSON 64 MiB、1,000 个附件、单附件 32 MiB、总计 512 MiB；恢复验证先流式校验附件摘要，再在写入 Host 前逐件复读，绝不同时保留全部附件字节。发布、删除与状态文件的 rename 会同步文件和父目录；不支持目录 fsync 的 Windows 文件系统安全降级。Windows 在目标仍被其他句柄打开时无法原子替换文件或移除目录项（索引服务或杀毒扫描即可导致），因此替换与递归删除会在该平台上、且仅在该平台上，对瞬时的 `EPERM` / `EACCES` / `EBUSY` 做有界重试：POSIX 上这些码表示永久条件，重试只会延后同一个失败。快照发布还会在 rename 被拒时探测目标目录再判定为冲突，因为 Windows 把「rename 到已存在目录」报成 `EPERM` 而不是 `EEXIST`。路径包含判定使用平台分隔符并拒绝绝对结果，因此 Windows 的 `..\` 逃逸或不同盘符都不会被误判为在根目录内。
+自动检查的成功／失败均缓存 12 小时；手动检查短限流 30 秒，并发合并，缓存随后端重载重置。失败状态为 unavailable，不误报 current。客户端加载本地信息后在后台发起缓存感知检查，取消或过期结果不覆盖当前页面。关于页位于最后一个 Tab；标题旁的新版入口只打开插件市场，不安装、运行命令或重启。用户按宿主提示自行重载后端，单纯刷新前端不保证加载新版。
 
-移入顺序为：校验归档所有权 → 处置/停放运行中会话 → 捕获并验证快照 → 再次校验所有权 → 原子写入 `trashed` 记录 → 使缓存失效。普通移入不删除持久层文件。
+## 回收与恢复
 
-恢复先检查同 ID 冲突。原会话完好时只恢复归档可见性并移除普通回收记录，不重写持久层；随后失去普通回收引用的保护快照会继续显示在统一回收站。原件丢失时先完成所有校验和附件身份重发，然后仅通过公开 `create` / `append` / `saveImage` 能力写入。失败会回滚新建件并保留回收记录。
+移入顺序：核对归档所有权 → 处置／停放已加载会话 → 捕获或复用健康保护快照 → 再核对所有权 → 原子写入 `trashed` → 使缓存失效。普通回收不删除原日志。
 
-永久删除在任何物理写入前持久化 `purge-pending`，接着删除该来源的全部快照，然后删除原会话，最后移除回收记录。会话删除刻意放在最后：在它之前失败会保留完好的原件和可继续完成的记录，而不是留下一条会话已消失、既不能恢复也不能完成的 `purge-pending`。快照清扫按 manifest 身份归属每个已发布快照，因此校验失败但确属该会话的快照仍会被删除，而无关的无法校验快照会被跳过而不是中断整个清扫——快照库别处的损坏绝不能让永久删除变成不可能。回收记录还会点名自己的快照 id，覆盖损坏到无法归属的那一个。工作区、元数据、快照或物理删除任一步骤失败时都保留 `purge-pending`；快照删除后还会重新扫描确认，不会虚假报告成功。物理删除另外要求定位到的文件位于以该会话自身命名的目录中，因此当后端布局让多个会话共享同一父目录时，那个父目录永远不会被删除。启动恢复仅重试 `purge-pending`，从不删除普通 `trashed`。旧 `pending-deletions.json` 是严格、只读的迁移输入：每个仍归档的 ID 都转成可恢复回收记录，绝不因旧标记在启动时直接删除。
+快照 manifest 格式为 `dsh-archived-chats/snapshot` v1；`dsh-archived-chats/snapshot-session` 载荷在有继承元数据时使用 v2，否则保留旧 v1。上限：manifest 4 MiB、session JSON 64 MiB、1,000 个附件、单附件 32 MiB、总计 512 MiB。附件流式校验 SHA-256，恢复写入前逐件复读，不同时驻留全部附件字节。
 
-## 浏览器客户端
+恢复拒绝 `purge-pending`。其他记录先检查原件身份：原件存在时恢复归档可见性、工作区关联和缺失元数据，移除回收记录，不重写日志。因此 degraded 条目不一定不可恢复。
 
-client.js 注册 order 30 的 `settings.section` 与 `shell.overlay`，并使用 Host 公开的归档服务和设计令牌。工作区归档 UI 状态保存在插件自己的设置区内，不依赖工作区操作 slot 或共享客户端 store。页面状态包括：
+原件缺失时，验证快照身份与完整内容，拒绝无法表达精确继承边界的 seeded 来源，重检 ID 冲突，并要求明确独占的 create、`append`、`locate` 及必要时的 `saveImage`；普通 create 不代表获得归属。恢复原 ID，不创建“新归档副本”。附件身份必须匹配；提交涉及日志、工作区、元数据、归档注册表及回收记录。失败逆序补偿；归属不明的创建和回滚失败会保留目标与回收记录并分别报告。工作区无法解析或没有成对 attach/detach 时降级为未分组警告。
 
-- `shell.overlay` 中的归档成功提示：插件在 effect 生命周期内包装公开的 `workspaces.archiveSession`，只在原调用成功后显示提示，提供查看与撤销，3 秒后关闭，不请求历史抓取。
-- **设置 → 会话档案** 中的 **批量归档工作区** 操作：选择器只显示有可归档会话的工作区，支持单选、多选和再次点击可取消的全选，右下角“确定”是唯一继续入口。客户端分别准备所选工作区，跳过并发变空的工作区，再显示一次包含精确总数量、已归档去向和仅在非零时出现的活动会话跳过数量的汇总确认，不显示会话预览。全部成功后刷新消费者并关闭；存在跳过或失败时保留逐项结果直至关闭。
-- 归档列表和工作区分组。
-- 搜索、类型/项目/标签筛选和排序。
-- 标签备注编辑器。
-- 行级操作负责单条聊天，依次为预览、编辑标签备注、永久删除和取消归档，不提供单条导出；归档工作区菜单依次提供全部导出、全部取消归档、全部永久删除和全部移至回收站；回收站工作区菜单提供全部恢复和全部永久删除。两页均无多选状态、行选择框或批量工具栏。
-- 已归档和回收站标题行分别提供跨工作区的全部删除与清空回收站；后者覆盖所有回收会话与保护快照。回收站行级恢复和永久删除使用具备名称与提示的图标按钮。
-- 已归档、回收站、空间与策略、来源与分支四标签。保护快照在回收站中提供预览、恢复为新的归档副本和确认删除；恢复确认的初始焦点位于取消，token/nonce 不进入渲染树。空间与关系视图保留有界弹窗和只读关系投影。
-- 导入预览、冲突禁用和恢复结果。
-- 响应式设置页标记和侧边栏刷新注入面。
+恢复后未引用的保护快照不再投影成回收条目，后续启动时按旧数据清理规则处理。
 
-当 `MenuAction`、`defineStore` 和 `sidebar.workspaces.workspace.action` 可用时，每次插件 apply 声明一个 handle，并由工作区操作、`shell.overlay` 与 `settings.section` 共用。Host 菜单所有者先关闭菜单，再调用贡献者回调并提供 `restoreFocus`；插件只在 apply 闭包中保存该回调，组件则从 slot 渲染器接收 actions 与 selector hook。贡献者卸载由插件负责：apply 清理会同步标记已卸载，延迟回调必须先检查该 guard，随后才能保存焦点或打开状态。Host 另行负责工作区行或浏览器卸载时的取消。缺少这些可选能力时只省略这个操作与对话框。
+## 永久删除与崩溃恢复
 
-预览优先使用 Harness 公开导出的 `MarkdownText`、`DisclosureRow` 和 `JsonBlock`；某个公开原语不可用时，只把对应内容降级为转义的纯文本、原生 `details`/`summary` 或 `pre`，不调用私有聊天渲染器。工具结果仅在其 `toolCallId` 与更早工具调用的 `callId` 精确匹配时折叠进该调用，匹配按时间顺序消费；未匹配结果保留为独立条目，错误状态使用语义错误令牌。图片由受保护路由读取为 Blob URL，离开视口前可按需加载，预览关闭或图片节点卸载时会中止读取并调用 `URL.revokeObjectURL`。
+`trash.json` 状态与转换：
 
-轮次轨道保留在预览内：桌面位于消息流左侧，跳转后随消息流滚动并用 `aria-current` 标出当前轮次；宽度不超过 640px 时轨道移到消息流上方并水平滚动，用户气泡仍保留可用宽度。轨道不会被替换为宿主私有导航组件。
+| 状态 | 含义 | 恢复规则 |
+| --- | --- | --- |
+| `trashed` | 已回收，保护数据可用 | 优先原件，缺失时快照回退 |
+| `degraded` | 保护数据缺失或不可用 | 原件仍可恢复，回退需通过验证 |
+| `purge-pending` | 已提交永久删除意图 | 不得恢复或取消归档，只能续作 |
 
-浏览器操作不会直接改变本地文件；操作完成后以 Host 返回的状态作为新的列表基线。关闭预览或切换到另一条会话会取消未完成的预览请求；客户端同时使用请求序号忽略迟到响应，避免已关闭的弹窗重新出现或旧会话覆盖新会话。
+普通回收为 missing → trashed；回收永久删除为 trashed/degraded → purge-pending；归档直接永久删除可 missing → purge-pending。直接删除先验证当前归档归属、没有回收记录、公开定位能力及会话独占目录，然后写入 `snapshotId: null`、快照字节及附件数为 0 的任务，不创建恢复副本。
 
-## 安全和失败策略
+两条路径共用 purge：持久化删除意图 → 清理该会话的全部关联快照并复查 → 物理删除会话 → 完成注册表与元数据清理 → 最后移除回收记录。物理删除在调用方持有生命周期锁且有待删除标记时执行。
 
-- 所有状态变更路由都要求 POST 和 guard header。
-- 兼容 History 响应与统一回收站中的保护快照条目不包含工作区/快照/附件路径、原始事件、备注或确认 token；日志只记 ID 和稳定代码。
-- 工作区归档响应只公开安全的工作区 ID/标题、符合条件数量、已确认预览中的会话 ID/标题/时间和稳定的逐项结果；工作区路径、事件正文、备注、附件路径与确认凭据不会进入日志或渲染结果。
-- 导入限制 ZIP 大小、条目数量、路径格式、版本和 JSON 结构，拒绝遍历、重复和原型污染字段。
-- 普通删除从不调用物理清除；仅已提交回收记录可进入 purge。归档列表还提供单独确认的直接永久删除操作，跳过快照和回收站，但复用同一套会话目录边界、崩溃恢复和失败保护；普通删除仍默认可恢复。
-- 快照和回收文件使用 `0600`，目录使用 `0700`；快照文件在 sync 前以可写句柄重新打开，发布顺序为临时写入、sync、原子 rename，以保持 Windows、macOS 和 Linux 的持久化语义一致。
-- 物理 purge 删除快照副本，但不承诺立即清理 Harness 全局附件库中仍被其他会话引用的字节。
-- 未知宿主能力必须降级或返回明确错误，不得猜测内部对象结构。
+快照清扫使用 manifest 身份归属，并点名记录引用的 snapshotId，以覆盖损坏快照；不相关且无法归属的损坏项不会阻塞该会话删除。会话文件必须位于以自身 ID 命名的独占目录中，共享目录不是合法删除目标。已删除日志或索引不代表任务完成：依靠持久化意图继续清理剩余状态。
 
-## 兼容性和测试
+失败保留 `purge-pending`。启动恢复和运行中的重试继续处理这些任务，不将其恢复为普通聊天。归档删除拒绝已有回收记录，所以归档页全部删除不会波及回收站。删除快照副本不承诺清除 Host 全局附件或 `session_projcache`；插件没有对应的安全公开 eviction API。
 
-插件通过能力检测适配 Host：归档读取、附件读取、持久层写入、物理定位和运行中会话生命周期能力分别判断，缺失能力必须安全降级或返回明确错误。带原生 `inspect` 的旧版持久层对象保持原样；新版 Host 的 `list()` 快照和 `open(id, 'read')` 句柄被适配为内部 `list` / `listSnapshots` / `inspect` 只读视图，读取始终从偏移 0 开始并在成功或失败后关闭句柄。这个视图不虚构 `create`、`append` 或 `locate`。因此普通会话可以继续浏览、导出和抓取快照，但会话目录空间显示不可用，这个只读视图上的恢复写入与永久清除也不可用；缺少物理定位时，永久清除会在修改回收状态、快照、待处理标记或运行中会话之前以 `purge-unsupported` 拒绝。
+## 启动恢复与旧数据清理
 
-当前 v1 快照和 ZIP schema 不能保存 `inheritedEventCount`。新版读取句柄报告大于 0 的继承前缀时，适配器会在读取事件前以 `session-inspection-unsupported` 拒绝并关闭句柄，避免把分支历史静默展平。工作区归档不再依赖快照抓取；回收保护与 ZIP 导出仍会拒绝不支持的继承事件数据。这个 UI 变更不扩展快照/恢复协议。
+`recoverStartup` 依次：
 
-兼容旧写入面的 Host 仍可让导入、保护快照恢复和原件丢失时的快照回退通过公开的 `create` / `append` / `locate` 能力写入，Host 提供专用恢复入口时优先使用；只有两者都不存在才返回 `restore-unsupported` 且不写入数据。要求一组没有任何已发布 Host 能满足的能力不是合格的守卫——那会让功能永久失效，而不是优雅降级。降级到不识别统一回收站或新版快照状态的版本前，应备份整个插件数据目录。
+1. 恢复快照存储，加载回收权威目录；标记缺失保护数据的非待删除条目为 degraded。
+2. 重试 purge-pending。
+3. 读取旧 pending-deletions 标记；仍归档且未回收的 ID 尝试迁移为可恢复记录，成功后移除旧标记，不直接永久删除。
+4. 在生命周期队列中重新读取回收目录与快照清单，保护所有被当前记录引用的 snapshotId，清理其余有效或降级快照。
 
-测试覆盖：
+这是启动旧数据清理，不受 `recycleAutoDelete` 控制，不提供旧版清理预览。权威目录不可读时不凭猜测清扫；迁移输入不可读可提前返回。单个快照清理失败记录稳定错误，后续启动可再尝试。
 
-- export.js 的记录、转录和 ZIP 流。
-- import.js 的有界校验和拒绝路径。
-- restore.js 的事务提交、回滚和能力缺失。
-- metadata.js 的版本、并发和原子写入。
-- stats.js 的符号链接、缓存和并发限制。
-- search.js 的消息投影、Unicode 搜索、分页、部分失败与 TTL/LRU 缓存。
-- trash.js、snapshot.js 和 recycle.js 的格式验证、并发、恢复、回滚、崩溃意图和旧标记迁移。
-- insights.js、retention.js、retention-service.js、auto-retention.js 和 lineage.js 的可信分账、策略边界、短效授权、重检、自动任务生命周期和有界图投影。
-- history.js、history-restore.js 和 legacy-recycle.js 的保护快照保留、统一回收投影、缓存失效、快照授权、单次确认、事务回滚与来源不变式。
-- Host 路由和浏览器设置页的冒烟及响应式行为。
+此清理删除插件快照和附件副本，不删除来源聊天。旧版本中“升级保留所有快照并放入回收站”的说明不适用于当前实现。用户必须在升级前保全仍需要的旧数据。
 
-运行：
+## 空间、策略与来源关系
 
-~~~sh
+`stats` 并发 4 测量会话目录、跳过符号链接，缓存 30 秒；失败只影响对应项。`insights` 仅统计当前回收记录引用的保护快照，与归档／回收会话目录分账；重复附件按已验证 SHA-256 计算，不当作全局可回收空间。
+
+策略 version 2 显式 opt-in。version 1 读入时 `recycleAutoDelete` 强制 false，不静默改写。旧快照数量、年龄、容量字段不再产生清理候选。开启或缩短回收保留期需要 5 分钟单次 token/nonce，绑定原策略、新策略与到期候选；保存时在生命周期锁内复查，但保存本身不执行删除。
+
+自动任务先做启动恢复，之后约每分钟串行检查。逐条 purge 前重新验证策略与记录；失败保留重试。关闭策略不撤销已提交删除意图，停用插件停止新定时任务。旧手动 retention API 仍需其自己的确认与重检。
+
+`lineage` 仅使用持久化 `parentSession` 建树，聚焦归档／回收聊天及必要上下文。最多按需读 100 个缺失标题，5,000 节点上限针对实际展示图；不认识的字段仅使相关节点降级。搜索和筛选保留必要祖先，不修改关系。
+
+客户端用迭代投影将每个受管理节点归入自身工作区一次；跨工作区节点成为分组内的起点，`sourceParent` 保留真实直接父节点摘要。工作区内再做搜索和状态筛选，折叠只改变可见性。工作区折叠独立保存于浏览器 `dsh-archived-chats:lineage-workspaces`，不写回 Host，也不影响归档页分组偏好。初次加载折叠所有有后代的受管理节点；搜索临时忽略折叠，清空后恢复，批量展开／折叠只修改当前筛选结果。
+
+关系行使用具名原生按钮展开分支，原生 details/summary 展示详细时间、标题与 ID；不把整张卡片设为点击目标。迭代展开保留实际层级，最多两列祖先引导线，深层显示层级标签及直接父来源。窄屏允许标题与状态换行，不增加树内独立滚动区。此改动不改变后端关系图、归档或删除接口。
+
+## ZIP 导出、导入与恢复
+
+导出包含 manifest、每条 session.json 和 transcript.md，路径净化并处理重名。它仅检查每个选中来源一次，在返回顺序 ZIP 流之前暂存渲染后的条目。共用完整语义验证器和全部导入预算先行执行，因此成功导出可被本插件导入，之后的无效来源不会把已成功响应变成不完整备份。现代读取产生 v2 manifest/session 记录，保存 `source.inheritedEventCount`；旧读取保留 v1。导入兼容两版的普通记录，要求包与记录版本一致，校验 v2 继承边界。边界不明的 seeded v1 来源会被拒绝，不会展平。两版均不打包附件二进制或自动递归加入后代会话。
+
+共用限制为 2,000 条会话、4,001 个条目、4 MiB manifest、单会话 JSON 4 MiB、单条目／Markdown 8 MiB，以及解压总量 256 MiB。导入的压缩输入上限为 512 MiB。每个 JSON 文档限制深度 64、节点 100,000 个，所有字符串合计 4 Mi Unicode 码点。导入有界解压，验证声明／实际大小、路径、版本、生成器、JSON 预算及跨文件身份。它对齐本地条目、数据描述符和中央目录，包括大小与 CRC；拒绝截断、无效 UTF-8、重复项、加密、ZIP64、多磁盘及 Store／Deflate 之外的压缩方法。已有 ID 禁用；缺失工作区或附件引用给警告。确认凭据有效 10 分钟、单次使用，进程最多保留 8 份、总计 128 MiB。确认后的冲突检查和提交进入生命周期队列。
+
+`restore.js` 优先已验证的现代 create 句柄，其次专用恢复入口或明确独占的旧 create/append/locate 合约。普通旧 create/append 不受支持：目录中不存在记录不能证明独占所有权。现代导入保留继承边界、分批追加、flush（包括空日志）、完整回读校验，并在注册表和元数据提交后关闭句柄。仅在创建成功后获得回滚权限，要求安全定位的会话独占目录；首次写入失败留下归属不确定的文件时保留并报告 `restore-rollback-failed`，不盲删。旧 writer 拒绝带继承的 v2 记录。工作区关联需 attach/detach 成对支持。冲突集包含回收记录和待删除任务，并在生命周期队列内重检。此适配器用于 ZIP 导入；回收快照回退在 `recycle.js` 中有独立检查。
+
+原始导入提交后，可选公开冷标题发布会在共享有界截止时间内验证精确标题和最终事件水位。缓存缺失、失败、超时或 seeded 冷列表限制只返回稳定降级警告，不回滚持久化恢复数据。取消归档另外要求权威可读的持久化 header 包含 `cwd`；缺少 `cwd` 不等于缺少工作区，并会把已归档副本保留为可预览／导出。
+
+## 验证与发布边界
+
+`test/backup-roundtrip.test.mjs` 在 `DSH_NATIVE_MODULE_ROOT` 指向已安装 Host 的 node_modules 时，使用官方存储组件和临时目录验证 v1 恢复、分叉 v2 往返、预览／取消归档／重新打开、首次落盘失败、并发创建及待删除冲突。未配置时显式跳过这些原生集成测试，现代写入器单元测试仍照常执行。
+
+测试覆盖实际保留模块：导出导入及回滚、快照与回收状态、删除中断重启、分叉标题、完整读取和严格 ZIP 读取、策略调度、统计、关系树、Host 路由、浏览器行为、类型和包内容。`test/archive-lifecycle.test.mjs` 覆盖分叉预览、回收／恢复、继承分界保留及直接永久删除链路。测试使用隔离数据，不读取真实聊天。
+
+```sh
 npm test
 npm pack --dry-run --json
-~~~
+git diff --check
+```
+
+自动化测试不等于已安装 Host 的真人操作验收。声明的 DSH `>=0.1.0-rc.7` 范围以能力为准；当前本地验收使用 macOS Web 上的官方 Host 0.1.5-rc.2。远程 Node 18／Linux／Windows CI、已安装 macOS／Windows 桌面客户端 UI，以及特定平台浏览器／WebView 行为仍是待补发布证据。现有截图来自 v1.3.1，含退役快照界面；发布前应重新拍摄受影响场景，不能作为新版行为证据。发布需同时更新中英文资料，并将未发布改动留在 Unreleased，直到实际发布。
