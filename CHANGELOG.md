@@ -1,10 +1,10 @@
 # 更新日志 / Changelog
 
-以下条目描述各版本当时的行为，不代表全部适用于当前版本。当前使用说明见中英文 README 和用户指南；未发布改动单独列在 Unreleased。
+以下条目描述各版本当时的行为，不代表全部适用于当前版本。当前使用说明见中英文 README 和用户指南。
 
-Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage; unpublished changes remain under Unreleased.
+Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
-## Unreleased
+## 1.4.0 — 2026-09-21
 
 ### 中文
 
@@ -76,7 +76,7 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 
 ### 中文
 
-- 调整保护快照术语；该版本文档中遗留的旧快照保留与恢复说明由本次 Unreleased 文档整理纠正。
+- 调整保护快照术语；该版本文档中遗留的旧快照保留与恢复说明由 1.4.0 文档整理纠正。
 - 删除已退役的 `lib/history.js`、`lib/history-restore.js`、`lib/legacy-recycle.js` 及其对应测试文件；相关兼容路由已在 1.3.0 中作为迁移层保留，现全部移除。
 - 回收站不再展示未被回收记录引用的旧快照，也不再提供将其恢复为新归档副本的流程；`legacy-recycle.json` 不再作为活动迁移状态使用。
 - 启动恢复后重新读取回收目录，保留被引用的保护快照，自动清理其他有效或降级快照及其插件附件副本。此行为独立于默认关闭的回收站自动清理，不删除来源聊天本身。
@@ -84,7 +84,7 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 
 ### English
 
-- Adjusted protection-snapshot terminology. Stale preservation/recovery claims remaining in those documents are corrected by the current Unreleased documentation revision.
+- Adjusted protection-snapshot terminology. Stale preservation/recovery claims remaining in those documents are corrected by the 1.4.0 documentation revision.
 - Removed retired `lib/history.js`, `lib/history-restore.js`, `lib/legacy-recycle.js` and their test files; the compatibility routes they backed were retained as a migration layer in 1.3.0 and are now fully removed.
 - The Recycle Bin no longer projects unreferenced old snapshots or restores them as new archived copies; `legacy-recycle.json` is no longer active migration state.
 - After startup recovery, reread the recycle catalog, retain referenced protection snapshots, and automatically remove other valid or degraded snapshots and their plugin-owned attachment copies. This is independent of default-off automatic Recycle Bin cleanup and does not delete source chats.

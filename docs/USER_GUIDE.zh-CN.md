@@ -2,7 +2,7 @@
 
 [English](USER_GUIDE.md) · 简体中文 · [返回 README](../README.zh-CN.md)
 
-归档管理为 DSH 已归档聊天提供查看和管理页面，并扩展按工作区批量归档。本文对应当前仓库实现；尚未发布的修复见 [Unreleased](../CHANGELOG.md#unreleased)。接口和数据格式见[架构说明](ARCHITECTURE.md)。
+归档管理为 DSH 已归档聊天提供查看和管理页面，并扩展按工作区批量归档。本文对应 dsh-archived-chats 1.4.0；版本变更见[更新日志](../CHANGELOG.md)。接口和数据格式见[架构说明](ARCHITECTURE.md)。
 
 ## 先理解三个位置
 
@@ -184,7 +184,7 @@ DSH 运行时约每分钟检查，关闭期间暂停，启动恢复完成后补�
 - v2 保护快照需要此版或更新的插件读取；回退旧插件前先恢复需要保留的回收聊天，并备份插件数据。
 - 如果 `trash.json` 无法读取，归档列表会标为未经核对，回收站不可用，并拒绝取消归档、编辑标签备注及删除等归档修改，避免猜测状态。
 
-声明的 DSH `>=0.1.0-rc.7` 范围表达基于能力的兼容性，不表示每个历史 Host／平台组合均已实测。当前本地验收使用 macOS Web 上的官方 Host 0.1.5-rc.2。远程 Linux／Windows 自动化及已安装 macOS／Windows 桌面客户端 UI 验收仍是待补发布证据。
+声明的 DSH `>=0.1.0-rc.7` 范围仍表达基于 Host 公开能力的兼容性。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。
 
 ## 本地数据与卸载
 

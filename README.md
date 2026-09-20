@@ -31,7 +31,7 @@ Session Archive gives DeepSeek Harness a place to find chats hidden from the mai
 
 > The English name remains **Session Archive** (formerly **Archived Chats**); the Chinese interface now uses **归档管理**, previously **会话档案**. The rename does not change the package name, install command, or local data location. It does not imply that older snapshots are preserved by later upgrades; see the upgrade warning below.
 >
-> These documents describe the current repository. Changes under [Unreleased](CHANGELOG.md#unreleased) are not yet part of the published npm release.
+> These documents describe dsh-archived-chats 1.4.0. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
@@ -111,7 +111,7 @@ The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Ho
 
 Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 
-The declared range is capability-based, not proof that every historical Host and platform combination was exercised. Current local acceptance used the official Host 0.1.5-rc.2 on macOS Web. Remote Linux/Windows CI and installed macOS/Windows desktop UI acceptance remain release checks.
+The declared range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`.
 
 ## Historical screenshots
 

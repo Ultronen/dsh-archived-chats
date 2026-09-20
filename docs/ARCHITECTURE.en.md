@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document describes the current repository, including title and deletion-reliability fixes under [Unreleased](../CHANGELOG.md#unreleased). Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document describes dsh-archived-chats 1.4.0; see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -212,4 +212,4 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-Automated tests are not acceptance testing in an installed Host. The declared DSH `>=0.1.0-rc.7` range is capability-based; current local acceptance used official Host 0.1.5-rc.2 on macOS Web. Remote Node 18/Linux/Windows CI, installed macOS/Windows desktop UI, and platform-specific browser/WebView behavior remain pending release evidence. Existing screenshots are from v1.3.1 and include retired snapshot UI; recapture affected scenes before release rather than treating them as current evidence. Update both languages together and leave unreleased changes under Unreleased until actually published.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`. Existing screenshots are from v1.3.1 and include retired snapshot UI; they remain historical examples rather than current behavior documentation.

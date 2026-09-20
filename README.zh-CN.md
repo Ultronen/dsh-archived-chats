@@ -30,7 +30,7 @@
 
 > 中文界面统一使用「归档管理」（曾用名「已归档的聊天」「会话档案」），英文名称仍为 Session Archive。更名没有改变包名、安装命令和本地数据位置，但不代表后续升级会保留旧快照；请阅读下方升级提醒。
 >
-> 本文对应当前仓库实现。[Unreleased](CHANGELOG.md#unreleased) 中的改动尚未随 npm 正式版发布。
+> 本文对应 dsh-archived-chats 1.4.0。版本变更见[更新日志](CHANGELOG.md)。
 
 ## 快速开始
 
@@ -110,7 +110,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 回收站预览目前仍依赖原会话；原件丢失时，即使保护快照可恢复，也可能无法预览。详见[兼容性与限制](docs/USER_GUIDE.zh-CN.md#兼容性与限制)。
 
-声明的版本范围以 Host 能力为准，不表示所有历史 Host 和平台组合均已实测。当前本地验收为 macOS Web 上的官方 Host 0.1.5-rc.2；远程 Linux/Windows CI 及 macOS/Windows 桌面客户端人工验收仍是发布检查项。
+声明的版本范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。
 
 ## 历史演示截图
 

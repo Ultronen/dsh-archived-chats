@@ -2,7 +2,7 @@
 
 [English](ARCHITECTURE.en.md) · 中文 · [用户指南](USER_GUIDE.zh-CN.md)
 
-本文描述当前仓库实现，包含 [Unreleased](../CHANGELOG.md#unreleased) 中尚未发布的标题和删除可靠性修复。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
+本文描述 dsh-archived-chats 1.4.0；版本变更见[更新日志](../CHANGELOG.md)。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
 
 ## 产品边界与模块
 
@@ -212,4 +212,4 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-自动化测试不等于已安装 Host 的真人操作验收。声明的 DSH `>=0.1.0-rc.7` 范围以能力为准；当前本地验收使用 macOS Web 上的官方 Host 0.1.5-rc.2。远程 Node 18／Linux／Windows CI、已安装 macOS／Windows 桌面客户端 UI，以及特定平台浏览器／WebView 行为仍是待补发布证据。现有截图来自 v1.3.1，含退役快照界面；发布前应重新拍摄受影响场景，不能作为新版行为证据。发布需同时更新中英文资料，并将未发布改动留在 Unreleased，直到实际发布。
+声明的 DSH `>=0.1.0-rc.7` 范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。现有截图来自 v1.3.1，含退役快照界面；它们仍是历史示例，不作为当前行为说明。

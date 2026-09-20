@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Session Archive provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This guide describes the current repository implementation; fixes not yet released are listed under [Unreleased](../CHANGELOG.md#unreleased). For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Session Archive provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This guide describes dsh-archived-chats 1.4.0; see the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -184,7 +184,7 @@ Features depend on public Host capabilities, not just a version number:
 - Version 2 protection records require this or a newer plugin. Before downgrading, restore recycled chats you need to retain and back up plugin data.
 - If `trash.json` cannot be read, Archived is marked unverified, the Recycle Bin is unavailable, and archive mutations such as unarchive, tag/note editing, and deletion are refused instead of guessing.
 
-The declared DSH `>=0.1.0-rc.7` range expresses capability-based compatibility, not evidence that every historical Host/platform combination has been exercised. Current local acceptance used official Host 0.1.5-rc.2 on macOS Web. Remote Linux/Windows automation and installed macOS/Windows desktop UI acceptance remain pending release evidence.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`.
 
 ## Local data and uninstall
 
