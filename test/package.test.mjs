@@ -43,6 +43,11 @@ const publicRoutes = [
   'POST /plugins/dsh-archived-chats/delete-all',
 ];
 
+function parseArchitectureRoutes(contents) {
+  const block = contents.match(/## (?:Host routes|Host 路由)[\s\S]*?```text\r?\n([\s\S]*?)\r?\n```/)?.[1];
+  return block?.split(/\r?\n/);
+}
+
 test('package and lock root publish one approved identity', () => {
   assert.equal(
     packageManifest.description,
@@ -93,9 +98,24 @@ test('both architecture documents list every current public route exactly once',
   }
 
   for (const path of ['docs/ARCHITECTURE.en.md', 'docs/ARCHITECTURE.md']) {
-    const block = read(path).match(/## (?:Host routes|Host 路由)[\s\S]*?```text\n([\s\S]*?)\n```/)?.[1];
-    assert(block, `${path} route block missing`);
-    assert.deepEqual(block.split('\n'), publicRoutes, `${path} route inventory is stale`);
+    const routes = parseArchitectureRoutes(read(path));
+    assert(routes, `${path} route block missing`);
+    assert.deepEqual(routes, publicRoutes, `${path} route inventory is stale`);
+  }
+});
+
+test('architecture route inventory parser accepts LF and CRLF documents', () => {
+  for (const path of ['docs/ARCHITECTURE.en.md', 'docs/ARCHITECTURE.md']) {
+    const lf = read(path).replace(/\r\n/g, '\n');
+    const variants = new Map([
+      ['LF', lf],
+      ['CRLF', lf.replace(/\n/g, '\r\n')],
+    ]);
+    for (const [lineEnding, contents] of variants) {
+      const routes = parseArchitectureRoutes(contents);
+      assert(routes, `${path} ${lineEnding} route block missing`);
+      assert.deepEqual(routes, publicRoutes, `${path} ${lineEnding} route inventory is stale`);
+    }
   }
 });
 
