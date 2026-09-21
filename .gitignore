@@ -20,3 +20,6 @@ design-qa.md
 
 # 日志
 *.log
+
+# 本地编辑器/助手配置
+.claude/
