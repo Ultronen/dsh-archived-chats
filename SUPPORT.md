@@ -1,6 +1,6 @@
 # 支持 / Support
 
-感谢你使用 Session Archive。请选择最合适的入口，这样问题更容易被复现、讨论和跟进。
+感谢你使用归档管理（Archive Management）。请选择最合适的入口，这样问题更容易被复现、讨论和跟进。
 
 | 需求 | 入口 |
 | --- | --- |
@@ -18,6 +18,8 @@
 功能建议提交后会先进入评审，不自动进入路线图。维护者确认范围并添加 `help wanted` 后，贡献者可以按照贡献指南留言认领；最终的产品方向、合并和发布决定由维护者负责。
 
 ## English
+
+Thank you for using Archive Management.
 
 Use [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions) for installation and usage questions, the [bug report form](https://github.com/Ultronen/dsh-archived-chats/issues/new?template=bug_report.yml) for reproducible defects, and the [feature request form](https://github.com/Ultronen/dsh-archived-chats/issues/new?template=feature_request.yml) for proposals. Report vulnerabilities and possible data exposure through [private vulnerability reporting](https://github.com/Ultronen/dsh-archived-chats/security/advisories/new).
 

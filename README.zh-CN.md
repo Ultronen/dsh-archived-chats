@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/brand/archive-management-banner.png" alt="归档管理：面向 DeepSeek Harness 的本地优先归档聊天中心" width="100%">
-</p>
-
 <div align="center">
 
 <h1>归档管理</h1>
@@ -28,11 +24,15 @@
 
 归档管理为 DeepSeek Harness 中归档后从主页面会话区隐藏的聊天提供查看和管理入口。保留 DSH 原有单条归档方式，并扩展工作区批量归档、搜索、预览、备份及按工作区移入回收站的流程。
 
-> 中文界面统一使用「归档管理」（曾用名「已归档的聊天」「会话档案」），英文名称仍为 Session Archive。更名没有改变包名、安装命令和本地数据位置，但不代表后续升级会保留旧快照；请阅读下方升级提醒。
+> 中文名称为「归档管理」，英文名称为 Archive Management；安装包名始终为 `dsh-archived-chats`。
 >
-> 本文对应 dsh-archived-chats 1.4.0。版本变更见[更新日志](CHANGELOG.md)。
+> 本文跟随 `main` 分支维护。最近发布版为 1.4.0，英文名称统一尚未发布；已安装用户请参阅升级说明中的版本差异。版本变更见[更新日志](CHANGELOG.md)。
 
 ## 快速开始
+
+在 DSH 插件市场搜索 `dsh-archived-chats`，核对作者为 **Ultronen** 后点击「安装」。安装完成后按宿主提示重启 DSH，打开 **设置 → 归档管理**。
+
+也可以在运行 DSH 的电脑上使用命令行安装：
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
@@ -54,11 +54,11 @@ dsh plugin --profile web update dsh-archived-chats
 | 工作区批量归档 | 设置页的工作区选择器支持选择一个或多个工作区，汇总确认后归档；跳过空白、正在使用或无法确认内容的聊天。 |
 | 只读预览 | 无需取消归档即可查看对话、思考、工具活动、Markdown、JSON、代码及可读取的已存储图片。 |
 | 备份 | 支持按工作区或全部归档导出 JSON + Markdown ZIP；导入先预览，跳过冲突 ID。 |
-| 回收站 | 按工作区移入回收站，再按单条或工作区恢复到已归档。 |
+| 回收站 | 按工作区移入回收站；支持单条、工作区和整个回收站恢复到已归档。 |
 | 永久删除 | 确认后删除单条归档、工作区归档或全部归档；回收站删除独立操作。 |
 | 空间与关系 | 空间分账、可选的回收站自动清理，以及只读「来源与分支」。 |
 
-五个视图为 **已归档**、**回收站**、**空间与策略**、**来源与分支** 和 **关于**。「历史版本」和「预览清理」界面已退役；归档不再生成历史版本。
+五个视图为 **已归档**、**回收站**、**空间与策略**、**来源与分支** 和 **关于**。归档不会创建历史版本；回收站保护快照仅用于恢复，不是可浏览的历史版本库。
 
 已归档页顶部仅保留 **批量归档** 和 **更多**；「更多」依次提供导入备份、全部导出、全部取消归档，分隔线后为全部删除。回收站顶部直接并列显示 **全部恢复** 和 **清空回收站**，不再设更多菜单；聊天行保留预览图标，使用紧凑的 **恢复** 和 **删除** 文字按钮。工作区恢复和全局恢复分别确认范围、数量及已归档去向，跳过正在永久删除的条目；清空仍须确认不可恢复的后果。各 Tab 顶部保持一致尺寸。工作区操作及全局导出、取消归档、删除均先确认完整归档范围和聊天数量。
 
@@ -90,6 +90,10 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 从旧版升级
 
+**名称与版本：** 当前源码的英文名称为 Archive Management，已发布的 1.4.0 英文菜单仍显示 Session Archive；两者都对应中文「归档管理」，不是不同插件。中文入口、包名、安装命令和数据位置不变。英文名称修改需后续版本发布并更新后才会生效。
+
+独立「历史版本」和「预览清理」界面已移除，不应再按旧版截图寻找这些入口。
+
 **启动恢复流程会清理未被当前回收记录引用的旧快照及其插件附件副本，不会将它们放进回收站。这项清理不受回收站自动清理开关控制。**
 
 当前回收记录引用的保护快照会保留。清理未引用快照不删除来源聊天本身；已确认删除任务的重试和已启用的到期清理是另外的操作。
@@ -112,28 +116,6 @@ dsh plugin --profile web update dsh-archived-chats
 
 声明的版本范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。
 
-## 历史演示截图
-
-现有截图拍摄于 **v1.3.1**，使用简体中文浅色环境和合成会话，仅供历史参考，**不代表当前版本验收结果**。其中 `preview-04.png`、`preview-05.png` 展示了已退役的快照流程；当前行为以上述指南为准。
-
-<details>
-<summary>查看历史截图目录</summary>
-
-| 场景 | 历史图片 |
-| --- | --- |
-| 归档总览 | [preview-01](assets/screenshots/preview-01.png) |
-| 全文搜索 | [preview-02](assets/screenshots/preview-02.png) |
-| 工作区选择器 | [preview-03](assets/screenshots/preview-03.png) |
-| 已退役的快照预览 | [preview-04](assets/screenshots/preview-04.png) |
-| 含已退役旧快照条目的回收站 | [preview-05](assets/screenshots/preview-05.png) |
-| 清空回收站确认 | [preview-06](assets/screenshots/preview-06.png) |
-| 自动清理确认 | [preview-07](assets/screenshots/preview-07.png) |
-| 来源与分支 | [preview-08](assets/screenshots/preview-08.png) |
-
-</details>
-
-现有市场截图清单未改动。更新市场素材前，应基于发布构建重新拍摄受影响场景。
-
 ## 文档
 
 | 资料 | English | 简体中文 |
@@ -146,7 +128,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 ## 项目状态
 
-Session Archive 目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。已开放认领的社区任务会标记为 [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)；开始较大改动前，请先阅读[需求认领流程](CONTRIBUTING.md#社区需求与认领)。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
+归档管理目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。已开放认领的社区任务会标记为 [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)；开始较大改动前，请先阅读[需求认领流程](CONTRIBUTING.md#社区需求与认领)。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
 
 ## 开发
 

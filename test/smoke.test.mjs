@@ -2337,9 +2337,9 @@ console.log('\n[11] client half — settings section registration');
     && zhDict['trash.confirm.emptyBody'] === '这将永久删除回收站中所有工作区的会话和保护快照。',
   'Chinese Recycle Bin copy has no retired legacy state');
   assert(clientCalls.localeRegister[0].dicts.en['export.row'] === undefined, 'single-chat export copy is removed');
-  assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Session Archive'
-    && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Session Archive',
-  'English session archive label and page title are localized');
+  assert(clientCalls.localeRegister[0].dicts.en['nav'] === 'Archive Management'
+    && clientCalls.localeRegister[0].dicts.en['page.title'] === 'Archive Management',
+  'English archive management label and page title match the documented settings entry');
   assert(clientCalls.localeRegister[0].dicts.en['archiveNotice.title'] === 'Chat archived'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.view'] === 'View'
     && clientCalls.localeRegister[0].dicts.en['archiveNotice.undo'] === 'Undo',
@@ -5591,9 +5591,13 @@ console.log('\n[13] client half — settings nav icon patch');
   const otherSvg = { dataset: {}, attrs: {}, innerHTML: '<circle cx="12" cy="12" r="3"/>', setAttribute(k, v) { this.attrs[k] = v; } };
   const ownButton = { textContent: '归档管理', querySelector: (sel) => (sel === 'svg' ? gearSvg : null) };
   const otherButton = { textContent: '通用', querySelector: (sel) => (sel === 'svg' ? otherSvg : null) };
-  mockDialogs = [{ querySelectorAll: (sel) => (sel === 'nav button' ? [ownButton, otherButton] : []) }];
+  const englishSvg = { dataset: {}, attrs: {}, innerHTML: '', setAttribute(k, v) { this.attrs[k] = v; } };
+  const englishButton = { textContent: 'Archive Management', querySelector: (sel) => (sel === 'svg' ? englishSvg : null) };
+  mockDialogs = [{ querySelectorAll: (sel) => (sel === 'nav button' ? [ownButton, englishButton, otherButton] : []) }];
   observers[0].cb();
   assert(gearSvg.dataset.dacPatched === '1', 'our nav button icon marked as patched');
+  assert(englishSvg.dataset.dacPatched === '1' && englishSvg.innerHTML === gearSvg.innerHTML,
+    'the renamed English settings entry receives the same archive icon as the Chinese entry');
   assert(gearSvg.attrs.viewBox === '0 0 24 24', 'archive icon viewBox applied');
   assert(gearSvg.attrs.width === '16' && gearSvg.attrs.height === '16'
     && gearSvg.attrs['stroke-width'] === '2' && gearSvg.attrs.stroke === 'currentColor',

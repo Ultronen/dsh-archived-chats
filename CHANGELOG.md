@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 未发布 / Unreleased
+
+### 中文
+
+- 英文界面、设置入口与当前文档统一为 Archive Management，对应中文「归档管理」；包名和数据位置不变。
+- 核对中英文 README、用户指南、架构与支持说明，补齐市场安装步骤，明确分叉 ZIP v2 能力及已发布 1.4.0 的英文菜单名称差异。当前 README 不再展示旧名称横幅或已退役流程的历史截图目录。
+- 修正客户端类型说明中「删除会进入回收站」的旧描述：只有工作区菜单能移入回收站，删除需确认且不可恢复。
+
+### English
+
+- Align the English UI, settings entry, and current documentation on Archive Management, matching 归档管理. The package identifier and data location are unchanged.
+- Audit both READMEs, user guides, architecture, and support notes; add marketplace installation steps, clarify fork ZIP v2 support, and distinguish the English menu label in published 1.4.0. Remove the old-name banner and historical screenshot catalog from current READMEs.
+- Correct the client declaration's outdated claim that Delete moves chats to the Recycle Bin: only workspace actions recycle chats; deletion requires confirmation and is irreversible.
+
 ## 1.4.0 — 2026-09-21
 
 ### 中文

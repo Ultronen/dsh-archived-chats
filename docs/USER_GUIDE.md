@@ -1,8 +1,8 @@
-# Session Archive user guide
+# Archive Management user guide
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Session Archive provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This guide describes dsh-archived-chats 1.4.0; see the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. The latest published release is 1.4.0; the English rename is not yet released. Installed users should check the version differences in the upgrade notes. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -16,11 +16,15 @@ Archiving is not deletion and creates no historical version. Moving to the Recyc
 
 ## Install and open
 
+Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Session Archive in published 1.4.0**, renamed to **Archive Management in current source**.
+
+Alternatively, run this command on the computer running DSH:
+
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH and open **Settings → Session Archive**. The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
+Restart DSH and open **Settings → Session Archive** in published 1.4.0, or **Settings → Archive Management** when running current source. The Chinese entry is **设置 → 归档管理** in both. The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
 
 Before updating an older installation, read “Upgrades, old data, and downgrades” below, especially the snapshot-cleanup warning.
 
@@ -39,7 +43,7 @@ Only workspaces with eligible chats are listed. Blank sessions, chats in use, an
 
 Search Archived by title, workspace, tags, notes, messages, and tool results. Filter by type, workspace, and tag; sort by time or title. Content matches show excerpts. Long workspace titles wrap to remain fully visible. Click a workspace folder or title to expand or collapse its chats; the open or closed folder reflects the current state. Group collapse state is saved in the browser.
 
-Forked chats use the last valid title in their own event stream, including renames after branching. The Host creates a new chat ID with history inherited through the fork point; parent and child develop independently afterwards. Modern Hosts support preview and Recycle Bin moves, with ZIP export restrictions described under “Compatibility and limits.”
+Forked chats use the last valid title in their own event stream, including renames after branching. The Host creates a new chat ID with history inherited through the fork point; parent and child develop independently afterwards. Modern Hosts support preview, Recycle Bin moves, and ZIP v2 export/import that preserves inherited history, even when the parent is absent. ZIPs do not include attachment bytes; see “Compatibility and limits” for older backups and Recycle Bin snapshot fallback.
 
 ## Preview, tags, and notes
 
@@ -162,6 +166,8 @@ Opening the archive loads local metadata immediately, then checks the public npm
 When a newer version is found, Get update beside the title opens the plugin market. This plugin does not download or install updates, run commands, or restart DSH. Follow the host's instructions after updating and restart when convenient; refreshing the page alone may not activate a new backend. The displayed version remains the actually loaded version until the backend reloads.
 
 ## Upgrades, old data, and downgrades
+
+**Names and versions:** the current source uses Archive Management; published 1.4.0 still labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. The English rename takes effect only after a future release is published and installed.
 
 The standalone History and cleanup-preview interfaces are retired. Archiving no longer creates versions. Recycle Bin protection snapshots support recovery; they are not a browsable version-history library.
 

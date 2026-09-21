@@ -1,11 +1,7 @@
 [![DSH Insights health](https://dsh-insights.com/badge/Ultronen/dsh-archived-chats.svg)](https://dsh-insights.com/p/Ultronen/dsh-archived-chats/)
-<p align="center">
-  <img src="assets/brand/archive-management-banner.png" alt="Session Archive: local-first archived-chat center for DeepSeek Harness" width="100%">
-</p>
-
 <div align="center">
 
-<h1>Session Archive</h1>
+<h1>Archive Management</h1>
 
 <p><strong>A local-first archived-chat center for DeepSeek Harness</strong></p>
 <p><code>dsh-archived-chats</code></p>
@@ -27,19 +23,23 @@
 
 </div>
 
-Session Archive gives DeepSeek Harness a place to find chats hidden from the main chat area after archiving. It keeps DSH's single-chat archive workflow and adds workspace bulk archiving, search, preview, backup, and a workspace-based Recycle Bin workflow.
+Archive Management gives DeepSeek Harness a place to find chats hidden from the main chat area after archiving. It keeps DSH's single-chat archive workflow and adds workspace bulk archiving, search, preview, backup, and a workspace-based Recycle Bin workflow.
 
-> The English name remains **Session Archive** (formerly **Archived Chats**); the Chinese interface now uses **归档管理**, previously **会话档案**. The rename does not change the package name, install command, or local data location. It does not imply that older snapshots are preserved by later upgrades; see the upgrade warning below.
+> The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> These documents describe dsh-archived-chats 1.4.0. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch. The latest published release is 1.4.0; the English rename is not yet released. Installed users should check the version differences in the upgrade notes. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
+
+Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Session Archive in published 1.4.0**, renamed to **Archive Management in current source**.
+
+Alternatively, run this command on the computer running DSH:
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH, then open **Settings → Session Archive**.
+Restart DSH, then open **Settings → Session Archive** in published 1.4.0, or **Settings → Archive Management** when running current source. The Chinese entry is **设置 → 归档管理** in both.
 
 Before updating an older installation, read “Upgrading from older releases” below. To update:
 
@@ -55,11 +55,11 @@ dsh plugin --profile web update dsh-archived-chats
 | Workspace archiving | A settings-owned workspace chooser supports one or more workspaces and one aggregate confirmation; blank, active, or unreadable chats are skipped. |
 | Read-only preview | Conversations, reasoning, tool activity, Markdown, JSON, code, and readable stored images without unarchiving. |
 | Backup | Export one workspace or the entire archive as JSON + Markdown ZIP; preview imports and skip conflicting IDs. |
-| Recycle Bin | Move archived chats by workspace, then restore individual chats or a workspace back to Archived. |
+| Recycle Bin | Move archived chats by workspace; restore one chat, a workspace, or the entire Recycle Bin back to Archived. |
 | Permanent deletion | Delete one archived chat, a workspace's archive, or all archived chats after confirmation. Recycle Bin deletion is separate. |
 | Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
 
-The five views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. History and cleanup-preview interfaces are retired; archiving does not create historical versions.
+The five views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
 
 The Archived header has **Bulk archive** and **More**. More contains Import backup, Export all, Unarchive all, then Delete all after a separator. The Recycle Bin header directly shows **Restore all** and **Empty Recycle Bin** without a More menu. Recycle rows retain the preview icon and use compact **Restore** and **Delete** text buttons. Workspace and global restoration separately confirm scope, counts, and the Archived destination, skipping pending deletions. Empty Recycle Bin still requires irreversible-action confirmation. The header keeps consistent dimensions across tabs. Workspace actions and global export, unarchive, and deletion ask you to confirm the complete archive scope and chat count.
 
@@ -80,7 +80,7 @@ Empty Recycle Bin acts only on the exact recycle-record incarnations shown at co
 
 ## Data safety and limits
 
-- **Local only:** plugin state lives under `$DSH_HOME/plugin-data/archived-chats/`; the plugin does not upload or cloud-sync chats.
+- **Local only:** plugin state lives under `$DSH_HOME/plugin-data/archived-chats/`; the plugin does not upload or cloud-sync chats. Update checks request only public npm version metadata, without chat or backup content.
 - **Recovery before purge:** workspace Recycle Bin moves require a healthy protection snapshot. Direct permanent deletion does not create a recoverable copy.
 - **No overwrite:** imports skip existing IDs. Recycle recovery prefers the original; snapshot fallback recreates an ordinary session ID only through an explicitly exclusive Host writer and otherwise retains the recovery record.
 - **Durable deletion:** confirmed deletion tasks clean related snapshots before the original. Partial failures retain non-restorable tasks for retries while running or after restart.
@@ -90,6 +90,10 @@ Empty Recycle Bin acts only on the exact recycle-record incarnations shown at co
 Successful exports are validated against the same format and budgets as import before the download starts. The browser buffers a validated ZIP with a five-minute timeout and 320 MiB response cap; this limits response bytes, not peak browser memory. “Backup download started” does not mean the browser has saved the file to disk.
 
 ## Upgrading from older releases
+
+**Names and versions:** the current source uses Archive Management; published 1.4.0 still labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. The English rename takes effect only after a future release is published and installed.
+
+The standalone History and cleanup-preview interfaces have been removed; do not use older screenshots to locate them.
 
 **Startup recovery removes old snapshots that are not referenced by current recycle records, including plugin-owned attachment copies. They are not placed in the Recycle Bin. This cleanup is independent of the optional Recycle Bin retention setting.**
 
@@ -113,28 +117,6 @@ Recycle Bin preview still depends on the original session; a missing original ma
 
 The declared range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`.
 
-## Historical screenshots
-
-The screenshot assets were captured for **v1.3.1**, using synthetic conversations in a Simplified Chinese light-theme environment. They are historical examples, **not current-version acceptance evidence**. In particular, `preview-04.png` and `preview-05.png` show retired snapshot workflows. Current behavior is defined by the guide above.
-
-<details>
-<summary>View the historical screenshot set</summary>
-
-| Scene | Historical image |
-| --- | --- |
-| Archive overview | [preview-01](assets/screenshots/preview-01.png) |
-| Full-text search | [preview-02](assets/screenshots/preview-02.png) |
-| Workspace chooser | [preview-03](assets/screenshots/preview-03.png) |
-| Retired snapshot preview | [preview-04](assets/screenshots/preview-04.png) |
-| Recycle Bin with retired legacy rows | [preview-05](assets/screenshots/preview-05.png) |
-| Empty Recycle Bin confirmation | [preview-06](assets/screenshots/preview-06.png) |
-| Automatic cleanup confirmation | [preview-07](assets/screenshots/preview-07.png) |
-| Origins and Branches | [preview-08](assets/screenshots/preview-08.png) |
-
-</details>
-
-The existing market screenshot manifest is unchanged. Recapture affected scenes against the release build before refreshing marketplace assets.
-
 ## Documentation
 
 | Resource | English | 简体中文 |
@@ -147,7 +129,7 @@ See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBU
 
 ## Project status
 
-Session Archive is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Accepted community tasks are marked [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22); read the [claim workflow](CONTRIBUTING.md#community-proposals-and-claims) before starting substantial work. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
+Archive Management is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Accepted community tasks are marked [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22); read the [claim workflow](CONTRIBUTING.md#community-proposals-and-claims) before starting substantial work. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
 
 ## Development
 

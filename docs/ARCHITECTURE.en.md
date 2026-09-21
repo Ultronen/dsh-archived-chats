@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document describes dsh-archived-chats 1.4.0; see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main`, based on 1.4.0 behavior with the unreleased English rename; see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -86,7 +86,7 @@ Metadata and recycle writes are serialized and published through temporary files
 
 ## Workspace bulk archive
 
-The client registers `settings.section` and `shell.overlay`. Its workspace chooser lives in **Settings → Session Archive / 设置 → 归档管理**, without depending on a workspace-menu extension or shared client store.
+The client registers `settings.section` and `shell.overlay`. Its workspace chooser lives in **Settings → Archive Management / 设置 → 归档管理**, without depending on a workspace-menu extension or shared client store.
 
 1. List workspaces containing at least one eligible chat.
 2. Prepare each selected workspace separately. A preview binds at most 2,000 ordered IDs to a five-minute, single-use token/nonce.

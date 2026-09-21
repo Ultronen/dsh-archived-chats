@@ -1,11 +1,14 @@
 /**
- * Browser client entry — the Session Archive settings section with a workspace
+ * Browser client entry — the Archive Management settings section with a workspace
  * chooser and one-confirmation bulk archive flow. The flow stays inside the
  * plugin-owned Settings surface and requires no workspace-row extension slot.
  * The searchable manager includes Archived, Recycle Bin, Storage & Retention,
- * and Origins & Branches views. Removing an archived chat moves it to
- * recoverable trash and exposes immediate Undo. The recycle view provides
- * scoped read-only previews, original/snapshot restore, guarded
+ * Origins & Branches, and About views. Only workspace actions move archived
+ * chats to the Recycle Bin and offer immediate Undo. Delete/Delete all instead
+ * require confirmation for irreversible permanent deletion. Recycle restore
+ * returns chats to Archived; Unarchive returns them to the main chat area.
+ * The recycle view provides original-backed read-only previews,
+ * capability-dependent original/snapshot restore, guarded
  * permanent purge and empty operations, degraded-state warnings, responsive
  * rows, and accessible confirmation dialogs, all localized in English and 中文.
  */

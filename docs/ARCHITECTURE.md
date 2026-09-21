@@ -2,7 +2,7 @@
 
 [English](ARCHITECTURE.en.md) · 中文 · [用户指南](USER_GUIDE.zh-CN.md)
 
-本文描述 dsh-archived-chats 1.4.0；版本变更见[更新日志](../CHANGELOG.md)。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
+本文跟随 `main` 分支，功能以 1.4.0 为基础，包含尚未发布的英文名称统一；版本变更见[更新日志](../CHANGELOG.md)。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
 
 ## 产品边界与模块
 
@@ -86,7 +86,7 @@ Host 的归档注册表决定归档归属；正常可见归档列表排除回收
 
 ## 工作区批量归档
 
-客户端注册 `settings.section` 和 `shell.overlay`，在 **Settings → Session Archive / 设置 → 归档管理** 内维护工作区选择器，不依赖工作区菜单扩展或共享客户端 store。
+客户端注册 `settings.section` 和 `shell.overlay`，在 **Settings → Archive Management / 设置 → 归档管理** 内维护工作区选择器，不依赖工作区菜单扩展或共享客户端 store。
 
 1. 列出至少有一条符合条件聊天的工作区。
 2. 浏览器为每个选中工作区分别请求 preview；每个 preview 最多绑定 2,000 个有序 ID，凭据 token/nonce 有效 5 分钟且仅用一次。
