@@ -130,6 +130,27 @@ test('package declares a capability range and the tested Host fixture separately
   assert.equal(packageManifest.peerDependenciesMeta?.['@deepseek-ai/dsh-session']?.optional, true);
 });
 
+test('runtime dependencies stay free of the builtin-slash resolution chain', () => {
+  // DSH 0.1.6-alpha.2 routes module resolution through a layer that calls
+  // createRequire().resolve.paths() and iterates the result. `readable-stream@4`
+  // requests 'process/' (trailing slash, to dodge the builtin) and that layer
+  // strips the slash, resolves a builtin, receives null, and throws while
+  // iterating — which aborts the whole host boot. The chain reached this package
+  // through zip-stream, so the export writer must not reintroduce it.
+  const offenders = ['zip-stream', 'compress-commons', 'crc32-stream', 'readable-stream'];
+  const installed = new Set(
+    Object.keys(packageLock.packages ?? {})
+      .filter((path) => path.startsWith('node_modules/'))
+      .map((path) => path.slice('node_modules/'.length)),
+  );
+  for (const offender of offenders) {
+    assert(!installed.has(offender), `published dependency tree must not contain ${offender}`);
+  }
+  for (const [name, range] of Object.entries(packageManifest.dependencies ?? {})) {
+    assert(!offenders.includes(name), `runtime dependency must not be ${name} (${range})`);
+  }
+});
+
 test('packed artifact resolves normally beside the tested Host prerelease', () => {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const fixture = mkdtempSync(join(tmpdir(), 'dac-peer-resolution-'));
@@ -174,7 +195,6 @@ test('packed artifact resolves normally beside the tested Host prerelease', () =
         '@deepseek-ai/cordis': localPackage('cordis', '@deepseek-ai/cordis', '4.0.2'),
         react: localPackage('react', 'react', '18.3.1'),
         fflate: localPackage('fflate', 'fflate', '0.8.3'),
-        'zip-stream': localPackage('zip-stream', 'zip-stream', '7.0.5'),
       },
     }, null, 2)}\n`);
 

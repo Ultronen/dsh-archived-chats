@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.4.2 — 2026-09-22
+
+### 中文
+
+- 修复在 DSH `0.1.6-alpha.2` 等新版 Host 上启动即崩溃的问题。导出改用 `fflate`，移除 `zip-stream` 及其 `readable-stream@4` 依赖链：该链会请求带斜杠的内置模块名（`process/`），新版 Host 的模块解析层去掉斜杠后对内建模块调用 `createRequire().resolve.paths()`，得到 `null` 并逐项迭代，从而抛出异常并中止整个 Host 启动。此问题与聊天内容无关，插件在被加载时即触发。
+- 导出的 ZIP 改为同步分片压缩：每个条目按 256 KiB 分片推送，分片之间让出事件循环，避免单次压缩长时间占用主线程；分片大小固定，同一导出计划仍产生字节一致的归档。
+- 新增依赖树回归测试，阻止该依赖链被重新引入；新增下载中途取消的测试，确认中止会销毁流并以调用方错误拒绝完成，不再可能把已取消的导出报告为成功。
+
+### English
+
+- Fix the startup crash on DSH `0.1.6-alpha.2` and later Hosts. Export now uses `fflate`, removing `zip-stream` and its `readable-stream@4` chain: that chain requests a builtin module name with a trailing slash (`process/`), and the newer Host's resolution layer strips the slash, calls `createRequire().resolve.paths()` on a builtin, receives `null`, iterates it, and throws — aborting the whole Host boot. The failure is independent of chat content and fires as soon as the plugin loads.
+- ZIP export now compresses synchronously in 256 KiB slices, yielding to the event loop between slices so a single compression never monopolizes the main thread. The slice size is fixed, so one export plan still produces a byte-identical archive.
+- Add a dependency-tree regression test that blocks that chain from returning, and a mid-download cancellation test proving that abort destroys the stream and rejects completion with the caller's error instead of reporting a cancelled export as successful.
+
 ## 1.4.1 — 2026-09-21
 
 ### 中文

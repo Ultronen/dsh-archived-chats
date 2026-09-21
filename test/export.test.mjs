@@ -348,6 +348,28 @@ test('refuses an export whose JSON cannot pass the same import limits', async ()
   assert.deepEqual(calls, ['session-a', 'session-b']);
 });
 
+test('abort mid-download destroys the stream and rejects completion', async () => {
+  // The HTTP route aborts when the client disconnects. The archive must stop
+  // producing, surface the abort, and never resolve completion as a success, or
+  // the route reports a finished export for a download nobody received.
+  const plan = zipPlan(4);
+  const zip = await createExportZip({
+    plan,
+    inspect: async (id) => ({ meta: { id }, events: [{ seq: 0, type: 'session/title', data: { title: id } }] }),
+    generatorVersion: '0.7.0',
+  });
+  const abortError = Object.assign(new Error('export client disconnected'), { code: 'export-aborted' });
+  // Flowing mode is what drives the archive pump; the assertion below is about
+  // the abort contract, not about how many bytes happened to arrive first.
+  zip.stream.on('data', () => {});
+  const failure = zip.completion.then(() => null, (error) => error);
+  zip.abort(abortError);
+  assert.equal(await failure, abortError, 'abort rejects completion with the caller error');
+  assert.equal(zip.stream.destroyed, true, 'abort destroys the readable');
+  // The readable must stop producing: a destroyed stream cannot accept more.
+  assert.equal(zip.stream.push(Buffer.from('x')), false, 'a destroyed stream accepts no further output');
+});
+
 test('every successful export is accepted under the same configured limits', async () => {
   const plan = zipPlan(2);
   const limits = { ...IMPORT_LIMITS, maxJsonStringCodePoints: 4096, maxJsonBytes: 4096, maxManifestBytes: 4096, maxEntryBytes: 8192 };

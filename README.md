@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch. This guide targets 1.4.1, including the English rename and feedback improvements. Installed users should check the version differences in the upgrade notes. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch. This guide targets 1.4.2, whose export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements.
 
 ## Quick start
 
@@ -96,7 +96,7 @@ Successful exports are validated against the same format and budgets as import b
 
 ## Upgrading from older releases
 
-**Names and versions:** Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
+**Names and versions:** Version 1.4.2 changes the export writer only; the menu names below are unchanged. Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
 
 The standalone History and cleanup-preview interfaces have been removed; do not use older screenshots to locate them.
 
@@ -117,6 +117,7 @@ The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Ho
 | Session-scoped physical location | Required for session-directory accounting and permanent deletion; shared directories are never used as purge targets. |
 | Public writer | Required for ZIP import and snapshot fallback; restoring an intact original does not rewrite its log. Plain legacy create/append is not enough for safe ZIP restore unless the provider explicitly guarantees exclusive creation. |
 | Modern handles | Fork titles, preview/search, and Recycle Bin moves are supported. ZIP v2 preserves inherited boundaries; import uses create/append/flush/close and a safe session-scoped rollback location. Ordinary v1 ZIPs remain readable, but ambiguous seeded v1 sources are refused rather than flattened. |
+| Host module resolution | DSH `0.1.6-alpha.2` added a resolution layer that fails on any dependency requesting a builtin name with a trailing slash. Before 1.4.2 this package reached `readable-stream@4` through `zip-stream`, so the plugin aborted Host startup as soon as it loaded. 1.4.2 uses `fflate` for export and no longer carries that chain; update before running on those Host versions. |
 
 Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 

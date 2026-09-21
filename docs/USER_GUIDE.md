@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.1, including the English rename and feedback improvements. Installed users should check the version differences in the upgrade notes. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.2, whose export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](../CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -133,6 +133,8 @@ Import requires a complete, internally consistent ZIP and rejects truncation, CR
 
 The browser buffers and validates the complete ZIP before initiating its download. The response-byte cap is 320 MiB and the complete fetch/body-read timeout is five minutes; this is not a peak-heap guarantee, and the current non-stream fallback has no stronger universal WebView memory promise. Download started does not mean the browser has saved the file to disk. A timeout or cap failure downloads no incomplete file and can be retried.
 
+Export compresses the staged entries in 256 KiB slices and yields to the event loop between them, so a large backup does not freeze the rest of the Host while it is written. When a download is cancelled, the archive stops and the response fails; a cancelled export is never reported as a completed one.
+
 ZIP import and Recycle Bin recovery are separate workflows. A ZIP is not a Recycle Bin protection snapshot.
 
 ## Storage and automatic cleanup
@@ -173,7 +175,7 @@ When a newer version is found, Get update beside the title opens the plugin mark
 
 ## Upgrades, old data, and downgrades
 
-**Names and versions:** Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
+**Names and versions:** Version 1.4.2 changes the export writer only; the menu names below are unchanged. Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
 
 The standalone History and cleanup-preview interfaces are retired. Archiving no longer creates versions. Recycle Bin protection snapshots support recovery; they are not a browsable version-history library.
 
