@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/archive-management-banner.png" alt="归档管理：面向 DeepSeek Harness 的本地优先归档聊天中心" width="100%">
+</p>
+
 <div align="center">
 
 <h1>归档管理</h1>
