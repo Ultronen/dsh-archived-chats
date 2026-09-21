@@ -2430,7 +2430,7 @@ console.log('\n[11] client half — settings section registration');
 }
 
 function renderTestComponent(node) {
-  if (node.type.name !== 'NotePreview') return node.type(node.props ?? {});
+  if (!['NotePreview', 'HelpTooltip'].includes(node.type.name)) return node.type(node.props ?? {});
   // A nested note owns hooks independently of the enclosing page/dialog.
   const savedHooks = { ...moduleTable.react };
   try { return createHookHarness(node.type).render(node.props ?? {}); }
@@ -2539,6 +2539,106 @@ function createHookHarness(component) {
       for (const effect of effects) effect?.cleanup?.();
     },
   };
+}
+
+console.log('\n[11a-feedback] pausable success feedback and contextual help');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedTimeout = globalThis.setTimeout;
+  const savedClear = globalThis.clearTimeout;
+  const savedNow = Date.now;
+  const timers = new Map();
+  let clock = 0, timerId = 0, dismissed = 0;
+  globalThis.setTimeout = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; };
+  globalThis.clearTimeout = id => timers.delete(id);
+  Date.now = () => clock;
+  try {
+    const useTimer = clientExports.__test.useSuccessNoticeTimer;
+    assert(typeof useTimer === 'function', 'success notices share a pausable four-second timer');
+    if (useTimer) {
+      const harness = createHookHarness(({ notice }) => useTimer(notice, notice?.kind === 'ok', () => { dismissed++; }));
+      let notice = { kind: 'ok', action: 'view-archived' };
+      const render = () => { const handlers = harness.render({ notice }); harness.flushEffects(); return handlers; };
+      let handlers = render();
+      assert([...timers.values()][0]?.delay === 4000, 'view-archived success gets a four-second timeout');
+      const stale = [...timers.values()][0]?.fn;
+      clock = 1000;
+      handlers.onMouseEnter(); handlers = render();
+      assert(timers.size === 0, 'hover pauses successful feedback');
+      handlers.onFocus(); handlers = render();
+      handlers.onMouseLeave(); handlers = render();
+      assert(timers.size === 0, 'focus keeps feedback paused after pointer leaves');
+      handlers.onBlur({ currentTarget: { contains: () => false }, relatedTarget: null }); handlers = render();
+      assert([...timers.values()][0]?.delay === 3000, 'leaving hover and focus resumes remaining time');
+      const beforeReplacement = [...timers.values()][0]?.fn;
+      notice = { kind: 'ok', action: 'undo-trash' };
+      handlers = harness.render({ notice });
+      beforeReplacement?.();
+      assert(dismissed === 0, 'old timeout cannot dismiss a replacement before passive cleanup runs');
+      harness.flushEffects();
+      stale?.();
+      assert(dismissed === 0 && [...timers.values()][0]?.delay === 4000, 'replacement notice gets a fresh timer and ignores stale expiry');
+      [...timers.values()][0]?.fn();
+      assert(dismissed === 1, 'successful feedback auto-dismisses');
+      notice = { kind: 'error' }; render();
+      assert(timers.size === 0, 'error feedback never auto-dismisses');
+      notice = { kind: 'ok' }; render();
+      const unmounted = [...timers.values()][0]?.fn;
+      harness.unmount(); unmounted?.();
+      assert(timers.size === 0 && dismissed === 1, 'unmount cancels pending and stale expiry');
+    }
+  } finally {
+    globalThis.setTimeout = savedTimeout; globalThis.clearTimeout = savedClear; Date.now = savedNow;
+    Object.assign(moduleTable.react, savedHooks);
+  }
+  const HelpTooltip = clientExports.__test.HelpTooltip;
+  assert(typeof HelpTooltip === 'function', 'context explanations use an accessible help control');
+  if (HelpTooltip) {
+    const savedAddListener = windowMock.addEventListener;
+    const savedRemoveListener = windowMock.removeEventListener;
+    const helpWindowListeners = new Map();
+    windowMock.addEventListener = (name, fn) => helpWindowListeners.set(name, fn);
+    windowMock.removeEventListener = name => helpWindowListeners.delete(name);
+    const harness = createHookHarness(HelpTooltip);
+    const props = { id: 'test-help', label: 'Retention help', children: 'Permanent deletion warning' };
+    const render = () => { const tree = harness.render(props); harness.flushEffects(); return tree; };
+    const tip = tree => collectElements(tree).find(el => el.props?.role === 'tooltip');
+    const button = tree => collectElements(tree).find(el => el.type === 'button');
+    let tree = render();
+    tree.props.ref.current = { getBoundingClientRect: () => ({ left: 990, top: 30, bottom: 50 }), contains: target => target === 'inside' };
+    assert(!tip(tree) && button(tree)?.props['aria-label'] === props.label, 'help starts hidden with a labelled keyboard control');
+    tree.props.onMouseEnter(); tree = render();
+    assert(elementText(tip(tree)) === props.children && button(tree).props['aria-describedby'] === tip(tree)?.props.id, 'hover opens linked explanation');
+    assert(tip(tree)?.props.style.left + tip(tree)?.props.style.width <= (windowMock.innerWidth || 1024) - 12, 'help stays within horizontal viewport');
+    let hoverEscapeStopped = false;
+    documentListeners.get('keydown')?.({ key: 'Escape', preventDefault() {}, stopPropagation() { hoverEscapeStopped = true; }, stopImmediatePropagation() {} });
+    tree = render();
+    assert(!tip(tree) && hoverEscapeStopped, 'Escape from outside the help control dismisses pointer-only tooltip without reaching host');
+    tree.props.onMouseEnter(); tree = render();
+    tree.props.onFocus(); tree = render();
+    tree.props.onMouseLeave(); tree = render();
+    assert(!!tip(tree), 'focused help persists when pointer leaves');
+    tree.props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} }); tree = render();
+    assert(!tip(tree), 'Escape dismisses help without closing the surrounding dialog');
+    tree.props.onFocus(); tree = render();
+    button(tree).props.onClick(); tree = render();
+    assert(!!tip(tree), 'touch focus followed by click keeps help open');
+    documentListeners.get('pointerdown')?.({ target: 'outside' }); tree = render();
+    assert(!tip(tree), 'outside pointer dismisses help');
+    button(tree).props.onClick(); tree = render();
+    button(tree).props.onClick(); tree = render();
+    assert(!tip(tree), 'repeated touch toggles help closed');
+    harness.unmount(); Object.assign(moduleTable.react, savedHooks);
+    assert(helpWindowListeners.size === 0, 'help removes viewport listeners on unmount');
+    windowMock.addEventListener = savedAddListener;
+    windowMock.removeEventListener = savedRemoveListener;
+  }
+  for (const updateStatus of ['available', 'current', 'unchecked', 'unavailable', undefined]) {
+    const tree = clientExports.__test.ArchiveTabs({ pageMode: 'about', onChange() {}, t: key => key, updateStatus });
+    const dots = collectElements(tree).filter(el => el.props?.className === 'dac-update-dot');
+    assert(dots.length === (updateStatus === 'available' ? 1 : 0), `About update indicator matches ${updateStatus}`);
+    if (dots.length) assert(dots[0].props['aria-hidden'] === true, 'decorative update dot does not duplicate the tab accessible label');
+  }
 }
 
 console.log('\n[11a] client half — responsive host marker follows the loaded page lifecycle');
@@ -3966,7 +4066,8 @@ console.log('\n[11f] client half — recycle navigation and management');
     assert(storageElements.some((element) => element.props?.role === 'note' && elementText(element).includes('归档列表为空')),
       'storage view explains why retained snapshots can remain without archived chats');
     assert(!storageText.includes('Alpha 归档') && !storageText.includes('snapshot-active')
-      && storageText.includes('自动永久删除'),
+      && findComponentElement(storageTree, 'HelpTooltip')?.props.children === t('retention.note')
+      && !storageElements.some(element => element.props?.role === 'tooltip'),
       'storage view keeps unbounded directory and snapshot rows out of the policy layout');
 
     const sessionDetailsButton = storageElements.find((element) => element.type === 'button' && element.props?.['aria-label'] === '查看会话目录明细');
@@ -4149,8 +4250,10 @@ console.log('\n[11f] client half — recycle navigation and management');
     await new Promise((resolve) => setTimeout(resolve, 0));
     const relationshipsTree = relationshipsHarness.render({ t });
     const relationshipElements = collectElements(relationshipsTree);
-    assert(relationshipElements.some((element) => element.props?.role === 'note' && elementText(element).includes('不受本插件管理')),
-      'origins and branches view explains that relationship context is not managed');
+    const scopeHelp = findComponentElement(relationshipsTree, 'HelpTooltip');
+    assert(scopeHelp?.props.children === t('lineage.scopeNote')
+      && !relationshipElements.some(element => element.props?.role === 'tooltip'),
+      'origins scope explanation is available as help rather than a permanent paragraph');
     assert(elementText(relationshipsTree).includes('暂无已归档或回收站会话的来源与分支'),
       'origins and branches view has a scoped empty state');
     relationshipsHarness.unmount();
@@ -4468,6 +4571,23 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(afterProjectRestoreText.includes('未分组') && afterProjectRestoreText.includes('1 个聊天恢复到已归档'),
     'workspace restore result names its scope, actual restored count, and destination');
 
+  const savedFeedbackTimeout = globalThis.setTimeout;
+  const savedFeedbackClear = globalThis.clearTimeout;
+  const feedbackTimers = new Map();
+  globalThis.setTimeout = (fn, delay) => { const id = {}; feedbackTimers.set(id, { fn, delay }); return id; };
+  globalThis.clearTimeout = id => feedbackTimers.delete(id);
+  try {
+    tree = harness.render(recycleProps); harness.flushEffects();
+    const expiry = [...feedbackTimers.values()].find(timer => timer.delay === 4000);
+    assert(!!expiry && collectElements(tree).some(el => el.props?.className === 'dac-toast'
+      && typeof el.props.onMouseEnter === 'function' && typeof el.props.onFocus === 'function'),
+    'actual workspace restore wires a pausable auto-dismiss toast');
+    expiry?.fn();
+    assert(!collectElements(harness.render(recycleProps)).some(el => el.props?.className === 'dac-toast'),
+      'workspace restore success disappears on expiry, including its view-archived action');
+    harness.flushEffects();
+  } finally { globalThis.setTimeout = savedFeedbackTimeout; globalThis.clearTimeout = savedFeedbackClear; }
+
   tree = harness.render(recycleProps);
   elements = collectElements(tree);
 
@@ -4500,6 +4620,13 @@ console.log('\n[11f] client half — recycle navigation and management');
     && !elementText(tree).includes('Trash Alpha')
     && recycleSidebarRefreshes === 3,
   'ordinary restore returns the exact chat to the archive and refreshes archive consumers');
+
+  collectElements(tree).find(el => el.props?.role === 'tab' && elementText(el) === t('tab.archived'))?.props.onClick();
+  tree = harness.render(recycleProps);
+  assert(!collectElements(tree).some(el => el.props?.className === 'dac-toast'), 'tab change immediately clears restore success');
+  collectElements(tree).find(el => el.props?.role === 'tab' && elementText(el) === t('tab.trash'))?.props.onClick();
+  tree = harness.render(recycleProps);
+  assert(!collectElements(tree).some(el => el.props?.className === 'dac-toast'), 'returning to Recycle Bin does not resurrect stale success');
 
   elements = collectElements(tree);
   const currentHead = elements.find((element) => element.props?.className === 'dac-head');
@@ -4606,11 +4733,13 @@ console.log('\n[11f2] client half — global recycle restore and About');
   assert(elementText(tree).includes('v1.3.3'), 'title row displays the loaded backend version');
   const updateLink = collectElements(tree).find(el => el.type === 'a' && elementText(el) === '去更新');
   assert(updateLink?.props.href === about.links.marketplace, 'new-version header action opens the market rather than running installation');
+  assert(collectElements(tree).some(el => el.props?.className === 'dac-update-dot'), 'confirmed backend update appears on the actual About tab');
   const automaticChecks = requests.filter(request => request.path.endsWith('/about/check-updates'));
   assert(automaticChecks.length === 1 && automaticChecks[0].options.body === '{"force":false}', 'opening archive performs one cache-aware metadata check');
   collectElements(tree).find(el => el.props?.role === 'tab' && elementText(el) === '关于')?.props.onClick();
   tree = render();
   const aboutPanel = findComponentElement(tree, 'AboutPanel');
+  assert(collectElements(tree).some(el => el.props?.className === 'dac-update-dot'), 'visiting About does not falsely mark an available update as installed');
   assert(aboutPanel !== undefined && elementText(tree).includes('Ultronen') && elementText(tree).includes('MIT'), 'About shows package identity and license');
   if (aboutPanel) {
     assert(!collectElements(aboutPanel).some(el => /^h[1-6]$/.test(el.type)), 'About does not repeat the plugin title already shown in the page heading');
@@ -4629,6 +4758,7 @@ console.log('\n[11f2] client half — global recycle restore and About');
   await collectElements(tree).find(el => el.type === 'button' && elementText(el) === '检查更新')?.props.onClick();
   tree = render();
   assert(elementText(tree).includes('检查更新失败') && !elementText(tree).includes('已是最新版本'), 'offline update checks never report latest');
+  assert(!collectElements(tree).some(el => el.props?.className === 'dac-update-dot'), 'failed update checks do not retain a confirmed-update badge');
   assert(elementText(tree).includes('当前版本 · v1.3.3') && elementText(tree).includes('Ultronen'), 'failed remote checks retain the running local version and identity');
   assert(requests.some(request => request.path.endsWith('/about/check-updates') && request.options.body === '{"force":true}'), 'manual update check explicitly bypasses the long cache');
   collectElements(tree).find(el => el.props?.role === 'tab' && elementText(el) === '回收站')?.props.onClick();

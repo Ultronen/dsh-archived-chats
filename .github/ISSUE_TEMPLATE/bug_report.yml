@@ -13,7 +13,7 @@ body:
     attributes:
       label: 插件版本 / Plugin version
       description: 填写「归档管理 → 关于」显示的当前运行版本，不要用 npm 最新版代替。Use the running version shown in the plugin's About tab, not npm's latest version.
-      placeholder: 1.4.0
+      placeholder: 1.4.1
     validations:
       required: true
   - type: input

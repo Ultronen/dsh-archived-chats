@@ -1,6 +1,6 @@
 {
   "name": "dsh-archived-chats",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "查看、搜索和恢复已归档会话，支持按工作区批量归档、备份导入导出与回收站管理。",
   "license": "MIT",
   "author": "Ultronen",
