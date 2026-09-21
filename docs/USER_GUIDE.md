@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. The latest published release is 1.4.0; the English rename is not yet released. Installed users should check the version differences in the upgrade notes. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.1, including the English rename and feedback improvements. Installed users should check the version differences in the upgrade notes. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -16,7 +16,7 @@ Archiving is not deletion and creates no historical version. Moving to the Recyc
 
 ## Install and open
 
-Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Session Archive in published 1.4.0**, renamed to **Archive Management in current source**.
+Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Archive Management**.
 
 Alternatively, run this command on the computer running DSH:
 
@@ -24,7 +24,7 @@ Alternatively, run this command on the computer running DSH:
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH and open **Settings → Session Archive** in published 1.4.0, or **Settings → Archive Management** when running current source. The Chinese entry is **设置 → 归档管理** in both. The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
+Restart DSH and open **Settings → Archive Management** (Chinese: **设置 → 归档管理**). The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
 
 Before updating an older installation, read “Upgrades, old data, and downgrades” below, especially the snapshot-cleanup warning.
 
@@ -147,6 +147,8 @@ This is separate from the old-snapshot cleanup below: **disabling automatic Recy
 
 ## Origins and Branches
 
+Version 1.4.1 puts the scope explanation behind the help icon beside Managed chats. Hover, keyboard focus, or a touch tap reveals it. Auto-empty Recycle Bin on the storage page uses the same help control; enabling cleanup still shows the full permanent-deletion confirmation.
+
 This read-only view shows sources, forks, and subagent trees for archived and recycled chats, plus the active-session context needed to explain their relationships. Unrelated active chats are not listed.
 
 Chats are grouped by their actual workspace, with counts in workspace headings and browser-persisted workspace folding. Compact rows use title-side buttons to expand branches; initially only starting chats are shown, not every descendant. Details disclose full titles, timestamps, sources, and session IDs with Copy ID. Ungrouped chats have their own group.
@@ -156,6 +158,10 @@ Deep forks do not keep consuming horizontal space: at most two ancestor-guide co
 Search temporarily opens matching workspaces and branches; clearing it restores previous folds. Filters retain necessary source information. Expand/collapse all applies to the currently filtered workspaces and branches. Missing parents, cycles, and unknown fields produce diagnostics or degraded details without modifying relationships.
 
 ## About and updates
+
+From 1.4.1, a red dot appears on the About tab only when a newer version is confirmed. Unchecked, failed, and up-to-date checks show no dot. Visiting About does not dismiss an available update.
+
+Success notices within Archive Management, including View Archived after restoration, dismiss after four seconds and pause while hovered or keyboard-focused. Switching tabs clears the current notice. Errors do not auto-dismiss and can be closed manually. The native archive-success notice on the main chat page still closes after about three seconds. These interaction improvements are available from 1.4.1.
 
 About shows the running plugin version, author, license, and direct links to the project, language-appropriate guide, changelog, issue feedback, and plugin market. The title also displays the running version.
 
@@ -167,7 +173,7 @@ When a newer version is found, Get update beside the title opens the plugin mark
 
 ## Upgrades, old data, and downgrades
 
-**Names and versions:** the current source uses Archive Management; published 1.4.0 still labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. The English rename takes effect only after a future release is published and installed.
+**Names and versions:** Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
 
 The standalone History and cleanup-preview interfaces are retired. Archiving no longer creates versions. Recycle Bin protection snapshots support recovery; they are not a browsable version-history library.
 

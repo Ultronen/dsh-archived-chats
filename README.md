@@ -27,11 +27,11 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch. The latest published release is 1.4.0; the English rename is not yet released. Installed users should check the version differences in the upgrade notes. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch. This guide targets 1.4.1, including the English rename and feedback improvements. Installed users should check the version differences in the upgrade notes. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
-Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Session Archive in published 1.4.0**, renamed to **Archive Management in current source**.
+Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Archive Management**.
 
 Alternatively, run this command on the computer running DSH:
 
@@ -39,7 +39,7 @@ Alternatively, run this command on the computer running DSH:
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH, then open **Settings → Session Archive** in published 1.4.0, or **Settings → Archive Management** when running current source. The Chinese entry is **设置 → 归档管理** in both.
+Restart DSH, then open **Settings → Archive Management** (Chinese: **设置 → 归档管理**).
 
 Before updating an older installation, read “Upgrading from older releases” below. To update:
 
@@ -91,7 +91,7 @@ Successful exports are validated against the same format and budgets as import b
 
 ## Upgrading from older releases
 
-**Names and versions:** the current source uses Archive Management; published 1.4.0 still labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. The English rename takes effect only after a future release is published and installed.
+**Names and versions:** Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
 
 The standalone History and cleanup-preview interfaces have been removed; do not use older screenshots to locate them.
 
