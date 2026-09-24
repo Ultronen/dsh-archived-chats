@@ -56,6 +56,8 @@
 ```sh
 npm ci
 npm test
+npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 ```
 
@@ -70,12 +72,12 @@ PR 应保持单一目的，并说明用户可见变化、兼容性影响、数�
 3. 只修改已确认范围所必需的文件；未经书面要求不修改维护者控制文件。
 4. 添加或更新能够证明行为的测试。
 5. 同时维护中文和英文用户文档。
-6. 运行完整测试和 npm 包内容检查。
+6. 运行完整测试、原生 Host 集成检查和 npm 包内容检查。
 7. 等待 GitHub CI 和 Code Owner 审核通过，并处理所有评审意见。
 
 ## English summary
 
-Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test` plus `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files.
+Use Discussions for questions, Issues for reproducible bugs, and private vulnerability reporting for security problems. Keep pull requests focused, add tests, update both language documents when user behavior changes, and run `npm test`, the mandatory native Host integration commands, and `npm pack --dry-run --json`. Never commit local plugin data, conversations, attachments, credentials, logs, or temporary files.
 
 ### Branch, commit, and pull request naming
 
