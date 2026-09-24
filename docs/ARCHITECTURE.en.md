@@ -208,8 +208,12 @@ Tests cover retained modules: export/import rollback, snapshots/recycle states, 
 
 ```sh
 npm test
+npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 git diff --check
 ```
+
+The native commands install the locked `@deepseek-ai/dsh-session@0.1.5-rc.2` fixture and require all five native round-trip cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
 
 The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`. Existing screenshots are from v1.3.1 and include retired snapshot UI; they remain historical examples rather than current behavior documentation.

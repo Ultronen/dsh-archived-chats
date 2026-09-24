@@ -139,10 +139,12 @@ dsh plugin --profile web update dsh-archived-chats
 
 ```sh
 npm test
+npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 ```
 
-测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。测试只使用隔离临时数据，不读取真实会话。
+测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。原生集成命令会安装锁定的 `@deepseek-ai/dsh-session@0.1.5-rc.2` fixture，并要求五个原生往返用例全部执行且不能跳过。所有检查只使用隔离临时数据，不读取真实会话。
 
 ## 卸载
 

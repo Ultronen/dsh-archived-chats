@@ -208,8 +208,12 @@ apply 只接受凭据，不接受调用方增补会话 ID。每条执行前在�
 
 ```sh
 npm test
+npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 git diff --check
 ```
+
+原生集成命令会安装锁定的 `@deepseek-ai/dsh-session@0.1.5-rc.2` fixture，并要求五个原生往返用例全部执行且不能跳过；这是 CI 强制原生 Host 集成门禁的本地等价检查。
 
 声明的 DSH `>=0.1.0-rc.7` 范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。现有截图来自 v1.3.1，含退役快照界面；它们仍是历史示例，不作为当前行为说明。
