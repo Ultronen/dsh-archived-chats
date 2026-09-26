@@ -2,7 +2,7 @@
 
 [English](ARCHITECTURE.en.md) · 中文 · [用户指南](USER_GUIDE.zh-CN.md)
 
-本文跟随 `main` 分支，功能对应 1.4.4，其运行时代码与 1.4.3 相同（1.4.3 在持久化兼容层接受 v4 会话格式，1.4.2 改用 `fflate` 生成导出 ZIP）；版本变更见[更新日志](../CHANGELOG.md)。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
+本文跟随 `main` 分支，功能对应 1.4.5。本版更新文档和截图；运行时行为及 Host 兼容性与 1.4.4 相同。版本变更见[更新日志](../CHANGELOG.md)。运行时代码是接口与行为的依据；用户操作说明与本文应保持一致。
 
 ## 产品边界与模块
 
@@ -216,4 +216,4 @@ git diff --check
 
 原生集成命令会安装锁定的 `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture，并要求五个原生往返用例全部执行且不能跳过；这是 CI 强制原生 Host 集成门禁的本地等价检查。
 
-声明的 DSH `>=0.1.0-rc.7` 范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。现有截图来自 v1.3.1，含退役快照界面；它们仍是历史示例，不作为当前行为说明。
+声明的 DSH `>=0.1.0-rc.7` 范围仍以 Host 公开能力为准。发布自动化在 Ubuntu 上测试 Node.js 18，并在 Ubuntu、macOS 和 Windows 上测试 Node.js 24；Node.js 24 矩阵强制运行基于官方 `@deepseek-ai/dsh-session@0.1.7-rc.2` 的 Host 后端集成（5/5）与打包检查，覆盖 v4 会话格式。[截图](../screenshots.json)使用虚构示例聊天展示当前界面。

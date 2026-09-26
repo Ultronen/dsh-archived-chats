@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.4, whose runtime code is unchanged from 1.4.3; package metadata now lists DSH `0.1.7-rc.2` among the verified Hosts. 1.4.3 accepts the v4 session format those Hosts publish. The 1.4.2 export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](../CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.4.5. This release refreshes documentation and screenshots; runtime behavior and Host compatibility are unchanged from 1.4.4. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -198,7 +198,7 @@ Features depend on public Host capabilities, not just a version number:
 - Version 2 protection records require this or a newer plugin. Before downgrading, restore recycled chats you need to retain and back up plugin data.
 - If `trash.json` cannot be read, Archived is marked unverified, the Recycle Bin is unavailable, and archive mutations such as unarchive, tag/note editing, and deletion are refused instead of guessing.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (5/5) and package checks, including the v4 session format.
 
 ## Local data and uninstall
 

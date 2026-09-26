@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch. This guide targets 1.4.4, whose runtime code is unchanged from 1.4.3; package metadata now lists DSH `0.1.7-rc.2` among the verified Hosts. 1.4.3 accepts the v4 session format those Hosts publish. The 1.4.2 export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements.
+> This document follows the `main` branch and targets 1.4.5. This release refreshes documentation and screenshots; runtime behavior and Host compatibility are unchanged from 1.4.4. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
@@ -65,6 +65,19 @@ dsh plugin --profile web update dsh-archived-chats
 | Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
 
 The five views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
+
+## Screenshots
+
+These screenshots show the current interface with synthetic example chats; they contain no private conversations. The [marketplace screenshot list](screenshots.json) uses the same files in the same order.
+
+1. [Archived chats](assets/screenshots/preview-01.png)
+2. [Full-text search](assets/screenshots/preview-02.png)
+3. [Workspace bulk archive](assets/screenshots/preview-03.png)
+4. [Read-only preview](assets/screenshots/preview-04.png)
+5. [Recycle Bin](assets/screenshots/preview-05.png)
+6. [Restore confirmation](assets/screenshots/preview-06.png)
+7. [Storage & Retention](assets/screenshots/preview-07.png)
+8. [Origins & Branches](assets/screenshots/preview-08.png)
 
 The Archived header has **Bulk archive** and **More**. More contains Import backup, Export all, Unarchive all, then Delete all after a separator. The Recycle Bin header directly shows **Restore all** and **Empty Recycle Bin** without a More menu. Recycle rows retain the preview icon and use compact **Restore** and **Delete** text buttons. Workspace and global restoration separately confirm scope, counts, and the Archived destination, skipping pending deletions. Empty Recycle Bin still requires irreversible-action confirmation. The header keeps consistent dimensions across tabs. Workspace actions and global export, unarchive, and deletion ask you to confirm the complete archive scope and chat count.
 
@@ -121,7 +134,7 @@ The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Ho
 
 Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 
-The declared range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`.
+The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (5/5) and package checks, including the v4 session format.
 
 ## Documentation
 
