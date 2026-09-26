@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.4.4 — 2026-09-27
+
+### 中文
+
+- 运行时代码无变化，本次发布只更新包元数据中的已验证 Host 版本。可选 peer 范围原本就通过 `>=0.1.2-alpha.1 <0.2.0-0` 覆盖 0.1.7，现在额外显式列出已验证的 `0.1.7-rc.2`。
+- 发布验证的 Host fixture 从 `0.1.5-rc.2`（会话格式 v3）升级到 `0.1.7-rc.2`（v4），CI 因此在 Ubuntu、macOS 和 Windows 上真正执行 v4 路径。1.4.3 的缺陷此前无法被 CI 复现，正是因为旧 fixture 的会话格式是 v3。
+- 已安装 1.4.3 或更高版本并运行在 DSH `0.1.7-rc.2` 上的用户，本版没有需要采取的动作。
+
+### English
+
+- No runtime code changes. This release only updates the verified Host version in the package metadata. The optional peer range already admitted 0.1.7 through `>=0.1.2-alpha.1 <0.2.0-0`; it now also lists the verified `0.1.7-rc.2` explicitly.
+- The release-verification Host fixture moves from `0.1.5-rc.2` (session format v3) to `0.1.7-rc.2` (v4), so CI now exercises the v4 path on Ubuntu, macOS, and Windows. The 1.4.3 defect could not be reproduced by CI before this change precisely because the old fixture's session format was v3.
+- Users already on 1.4.3 or later running DSH `0.1.7-rc.2` have no action to take for this release.
+
 ## 1.4.3 — 2026-09-26
 
 ### 中文
