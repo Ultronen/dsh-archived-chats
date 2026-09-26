@@ -48,8 +48,7 @@ test('native integration runner fails when locked Host dependencies are not inst
 
   assert.equal(result.status, 1);
   const [lockedName, lockedVersion] = Object.entries(hostDependencies)[0];
-  assert.match(result.stderr,
-    new RegExp(`native dependency is not installed: ${lockedName.replace(/[/@]/g, '\\$&')}@${lockedVersion.replace(/\./g, '\\.')}`));
+  assert.ok(result.stderr.includes(`native dependency is not installed: ${lockedName}@${lockedVersion}`), result.stderr);
   assert.doesNotMatch(result.stdout + result.stderr, /skip/i);
 });
 
@@ -71,7 +70,7 @@ test('native integration runner loads the locked Host and rejects skipped native
   assert.match(result.stderr, /native integration did not execute every case: tests=2 pass=1 skipped=1 expected=2/);
   const expectedHost = Object.entries(hostDependencies)
     .map(([name, version]) => `${name}@${version}`).join(',');
-  assert.match(result.stdout, new RegExp(`host=${expectedHost.replace(/[/@.]/g, '\\$&')}`));
+  assert.ok(result.stdout.includes(`host=${expectedHost}`), result.stdout);
 });
 
 test('native integration runner succeeds only after every expected case executes', async t => {
