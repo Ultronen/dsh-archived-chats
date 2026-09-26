@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.2, whose export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](../CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch. This guide targets 1.4.3, which accepts the v4 session format published by DSH `0.1.7-rc.2` and later Hosts. The 1.4.2 export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](../CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 

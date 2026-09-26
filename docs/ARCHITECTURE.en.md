@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main`, covering 1.4.2 behavior, which switches export ZIP generation to `fflate`; see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main`, covering 1.4.3 behavior, which accepts the v4 session format in the persistence compatibility layer (1.4.2 switched export ZIP generation to `fflate`); see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 

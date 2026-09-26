@@ -4,6 +4,22 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.4.3 — 2026-09-26
+
+### 中文
+
+- 修复在 DSH `0.1.7-rc.2` 等新版 Host 上删除归档会话失败的问题。该版本把会话格式提升为 v4，磁盘上的 `header.version` 因此变为 `4`；插件的持久化兼容层只接受 v2 和 v3，在读取列表时就拒绝，删除随即以 `persistence-response-invalid` 中止。现在兼容层接受 v4。
+- v4 相对 v3 只是版本号递增，header 字段形状不变，因此接受 v4 时其余校验（必需字段类型、`cwd` 必须为绝对路径、`createdAt`/`delegationDepth` 的取值范围、未知扩展字段保留等）全部保持原样。
+- 新增 v4 header 的读取用例，覆盖列表与检查两条路径；该用例在放宽前失败，可阻止回归。
+- 删除归档依赖读取列表，因此此缺陷同时影响删除、批量删除、预览与搜索等所有走持久化兼容层的入口。
+
+### English
+
+- Fix deleting archived chats on DSH `0.1.7-rc.2` and later Hosts. Those versions raise the session format to v4, so the on-disk `header.version` is now `4`; the plugin's persistence compatibility layer accepted only v2 and v3, rejected the header during list, and the deletion aborted with `persistence-response-invalid`. The compatibility layer now accepts v4.
+- v4 differs from v3 by the version number alone and keeps the same header field shape. Accepting v4 therefore leaves every other check intact: required field types, `cwd` having to be absolute, the `createdAt` and `delegationDepth` ranges, and preserving unknown extension fields.
+- Add a v4 header read test covering both list and inspect; it failed before the relaxation, so it guards against regression.
+- Deletion reads the list first, so the defect also affected every entry point that goes through the compatibility layer, including bulk deletion, preview, and search.
+
 ## 1.4.2 — 2026-09-22
 
 ### 中文

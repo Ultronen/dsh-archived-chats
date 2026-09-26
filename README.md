@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch. This guide targets 1.4.2, whose export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements.
+> This document follows the `main` branch. This guide targets 1.4.3, which accepts the v4 session format published by DSH `0.1.7-rc.2` and later Hosts. The 1.4.2 export writer no longer carries a dependency that prevents startup on newer Hosts. See the [changelog](CHANGELOG.md) for release history, including 1.4.1's English rename and feedback improvements.
 
 ## Quick start
 

@@ -15,6 +15,11 @@ const HEADER_V3 = Object.freeze({
   version: 3,
 });
 
+const HEADER_V4 = Object.freeze({
+  ...HEADER,
+  version: 4,
+});
+
 test('preserves the modern public locate contract for a session-scoped purge location', async () => {
   const raw = {
     async list() { return [{ header: HEADER, revision: 'rev' }]; },
@@ -148,6 +153,27 @@ test('accepts v3 headers and unwraps event slices returned by the current read c
 
   assert.deepEqual(await view.list(), [HEADER_V3]);
   assert.deepEqual(await view.inspect(HEADER_V3.id), { meta: HEADER_V3, events });
+});
+
+test('accepts v4 headers published by the current Host persistence contract', async () => {
+  const handle = {
+    header: HEADER_V4,
+    inheritedEventCount: 0,
+    async read() { return { events: [] }; },
+    async close() {},
+  };
+  const raw = {
+    async list() { return [{ header: HEADER_V4, revision: 'rev-v4' }]; },
+    async open(id, mode) {
+      assert.deepEqual([id, mode], [HEADER_V4.id, 'read']);
+      return handle;
+    },
+  };
+
+  const view = resolvePersistenceCompat(raw);
+
+  assert.deepEqual(await view.list(), [HEADER_V4]);
+  assert.deepEqual(await view.inspect(HEADER_V4.id), { meta: HEADER_V4, events: [] });
 });
 
 test('closes a modern read handle when reading fails', async () => {
