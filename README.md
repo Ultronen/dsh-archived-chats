@@ -146,7 +146,7 @@ node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 ```
 
-The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The native commands install the locked `@deepseek-ai/dsh-session@0.1.5-rc.2` fixture and require all five native round-trip cases to run without skips. All checks use isolated temporary data and never read real sessions.
+The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all five native round-trip cases to run without skips. All checks use isolated temporary data and never read real sessions.
 
 ## Uninstall
 

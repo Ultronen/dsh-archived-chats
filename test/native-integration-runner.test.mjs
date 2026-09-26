@@ -9,9 +9,9 @@ import test from 'node:test';
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const runner = join(repositoryRoot, 'scripts', 'run-native-integration.mjs');
 const hostDependencies = {
-  '@deepseek-ai/cordis': '4.0.2',
-  '@deepseek-ai/dsh-session': '0.1.5-rc.2',
-  '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.5-rc.2',
+  '@deepseek-ai/cordis': '4.0.4',
+  '@deepseek-ai/dsh-session': '0.1.7-rc.2',
+  '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.7-rc.2',
 };
 
 async function temporaryFixture(t) {
@@ -47,7 +47,9 @@ test('native integration runner fails when locked Host dependencies are not inst
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /native dependency is not installed: @deepseek-ai\/cordis@4\.0\.2/);
+  const [lockedName, lockedVersion] = Object.entries(hostDependencies)[0];
+  assert.match(result.stderr,
+    new RegExp(`native dependency is not installed: ${lockedName.replace(/[/@]/g, '\\$&')}@${lockedVersion.replace(/\./g, '\\.')}`));
   assert.doesNotMatch(result.stdout + result.stderr, /skip/i);
 });
 
@@ -67,7 +69,9 @@ test('native integration runner loads the locked Host and rejects skipped native
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /native integration did not execute every case: tests=2 pass=1 skipped=1 expected=2/);
-  assert.match(result.stdout, /host=@deepseek-ai\/cordis@4\.0\.2,@deepseek-ai\/dsh-session@0\.1\.5-rc\.2,@deepseek-ai\/dsh-session-persistence-jsonl@0\.1\.5-rc\.2/);
+  const expectedHost = Object.entries(hostDependencies)
+    .map(([name, version]) => `${name}@${version}`).join(',');
+  assert.match(result.stdout, new RegExp(`host=${expectedHost.replace(/[/@.]/g, '\\$&')}`));
 });
 
 test('native integration runner succeeds only after every expected case executes', async t => {

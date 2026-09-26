@@ -20,9 +20,16 @@ if (process.env.DSH_REQUIRE_NATIVE === '1' && !nativeRoot) {
 }
 const native = async name => import(pathToFileURL(join(nativeRoot, '@deepseek-ai', name, 'lib/index.js')));
 
+// The pinned Host decides which session format is current; every header this
+// file fabricates has to carry that version or the Host rejects it outright.
+// 3 is the floor for the oldest Host this fixture supports.
+const sessionFormatVersion = nativeRoot
+  ? (await native('dsh-session')).SESSION_FORMAT_VERSION
+  : 3;
+
 async function smallBackup(id, root) {
-  const meta = { version: 3, id, createdAt: 42, cwd: root, isSeeded: false };
-  const events = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Backup title' } }];
+  const meta = { version: sessionFormatVersion, id, createdAt: 42, cwd: root, isSeeded: false };
+  const events = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Backup title', messageSeqs: [], source: { kind: 'user' } } }];
   const zip = await createExportZip({ plan: planExport([{ id, title: 'Backup title', workspaceId: 'ws-backup', workspaceTitle: 'Backup workspace' }]),
     inspect: async () => ({ meta, events, inheritedEventCount: 0 }), generatorVersion: 'test' });
   const [bytes] = await Promise.all([buffer(zip.stream), zip.completion]);
@@ -88,9 +95,9 @@ async function fixture(t) {
 test('official modern backend: export, permanent delete, import, preview, unarchive, and reopen', { skip: !nativeRoot }, async t => {
   const f = await fixture(t);
   const id = 'session-native-backup';
-  const header = { version: 3, id, createdAt: 42, cwd: f.root, isSeeded: false };
+  const header = { version: sessionFormatVersion, id, createdAt: 42, cwd: f.root, isSeeded: false };
   const events = [
-    { seq: 0, time: 42, type: 'session/title', data: { title: 'Greeting to coding assistant' } },
+    { seq: 0, time: 42, type: 'session/title', data: { title: 'Greeting to coding assistant', messageSeqs: [], source: { kind: 'user' } } },
     { seq: 1, time: 43, type: 'user/message', surfaceOp: 'append', data: { id: 'message-greeting', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Backed up greeting' }] } },
   ];
   const handle = await f.raw.create(header);
@@ -152,10 +159,10 @@ test('official modern backend: a fork backup restores its inherited cut without 
   const f = await fixture(t);
   const { Session } = await native('dsh-session');
   const id = 'session-fork-backup';
-  const header = { version: 3, id, createdAt: 42, cwd: f.root, isSeeded: true, parentSession: 'missing-parent' };
-  const seed = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Parent title' } }];
+  const header = { version: sessionFormatVersion, id, createdAt: 42, cwd: f.root, isSeeded: true, parentSession: 'missing-parent' };
+  const seed = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Parent title', messageSeqs: [], source: { kind: 'user' } } }];
   const session = Session.create(id, seed, header, 1);
-  session.append('session/title', { title: 'Fork title' });
+  session.append('session/title', { title: 'Fork title', messageSeqs: [], source: { kind: 'user' } });
   const events = session.snapshotEvents();
   const handle = await f.raw.create(header, { inheritedEventCount: 1 });
   await handle.append(events); await handle.flush(); await handle.close();
@@ -227,7 +234,7 @@ test('a foreign first-materialization conflict never deletes the foreign log', {
     const append = handle.append.bind(handle);
     handle.append = async events => {
       const foreign = await peer.create(backup.meta);
-      await foreign.append([{ ...backup.events[0], data: { title: 'Foreign conversation' } }]);
+      await foreign.append([{ ...backup.events[0], data: { ...backup.events[0].data, title: 'Foreign conversation' } }]);
       await foreign.flush(); await foreign.close();
       return append(events);
     };

@@ -122,10 +122,10 @@ test('architecture route inventory parser accepts LF and CRLF documents', () => 
 test('package declares a capability range and the tested Host fixture separately', () => {
   assert.equal(packageManifest.dsh?.engines?.dsh, '>=0.1.0-rc.7');
   assert.equal(packageManifest.dependencies?.['@deepseek-ai/dsh-session'], undefined);
-  assert.equal(packageManifest.devDependencies?.['@deepseek-ai/dsh-session'], '0.1.5-rc.2');
+  assert.equal(packageManifest.devDependencies?.['@deepseek-ai/dsh-session'], '0.1.7-rc.2');
   assert.equal(
     packageManifest.peerDependencies?.['@deepseek-ai/dsh-session'],
-    '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0 || 0.1.5-rc.2',
+    '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0 || 0.1.5-rc.2 || 0.1.7-rc.2',
   );
   assert.equal(packageManifest.peerDependenciesMeta?.['@deepseek-ai/dsh-session']?.optional, true);
 });
@@ -191,8 +191,8 @@ test('packed artifact resolves normally beside the tested Host prerelease', () =
       private: true,
       dependencies: {
         'dsh-archived-chats': `file:${join(packDirectory, filename)}`,
-        '@deepseek-ai/dsh-session': localPackage('dsh-session', '@deepseek-ai/dsh-session', '0.1.5-rc.2'),
-        '@deepseek-ai/cordis': localPackage('cordis', '@deepseek-ai/cordis', '4.0.2'),
+        '@deepseek-ai/dsh-session': localPackage('dsh-session', '@deepseek-ai/dsh-session', '0.1.7-rc.2'),
+        '@deepseek-ai/cordis': localPackage('cordis', '@deepseek-ai/cordis', '4.0.4'),
         react: localPackage('react', 'react', '18.3.1'),
         fflate: localPackage('fflate', 'fflate', '0.8.3'),
       },
