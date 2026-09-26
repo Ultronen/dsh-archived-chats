@@ -30,7 +30,7 @@
 
 > 中文名称为「归档管理」，英文名称为 Archive Management；安装包名始终为 `dsh-archived-chats`。
 >
-> 本文跟随 `main` 分支维护。本文适用于 1.4.4，其运行时代码与 1.4.3 相同；包元数据现将 DSH `0.1.7-rc.2` 列为已验证 Host。1.4.3 接受这些 Host 发出的 v4 会话格式。1.4.2 的导出实现不再携带会导致新版 Host 启动失败的依赖；已安装用户请先升级。版本变更见[更新日志](CHANGELOG.md)，其中包含 1.4.1 的英文名称统一与交互提示优化。
+> 本文跟随 `main` 分支维护，适用于 1.4.5。本版更新文档和截图；运行时行为及 Host 兼容性与 1.4.4 相同。版本变更见[更新日志](CHANGELOG.md)。
 
 ## 快速开始
 
@@ -63,6 +63,19 @@ dsh plugin --profile web update dsh-archived-chats
 | 空间与关系 | 空间分账、可选的回收站自动清理，以及只读「来源与分支」。 |
 
 五个视图为 **已归档**、**回收站**、**空间与策略**、**来源与分支** 和 **关于**。归档不会创建历史版本；回收站保护快照仅用于恢复，不是可浏览的历史版本库。
+
+## 界面截图
+
+以下截图使用虚构示例聊天展示当前界面，不含私人会话。[插件市场截图清单](screenshots.json)使用相同文件及顺序。
+
+1. [已归档聊天](assets/screenshots/preview-01.png)
+2. [全文搜索](assets/screenshots/preview-02.png)
+3. [工作区批量归档](assets/screenshots/preview-03.png)
+4. [只读预览](assets/screenshots/preview-04.png)
+5. [回收站](assets/screenshots/preview-05.png)
+6. [恢复确认](assets/screenshots/preview-06.png)
+7. [空间与策略](assets/screenshots/preview-07.png)
+8. [来源与分支](assets/screenshots/preview-08.png)
 
 已归档页顶部仅保留 **批量归档** 和 **更多**；「更多」依次提供导入备份、全部导出、全部取消归档，分隔线后为全部删除。回收站顶部直接并列显示 **全部恢复** 和 **清空回收站**，不再设更多菜单；聊天行保留预览图标，使用紧凑的 **恢复** 和 **删除** 文字按钮。工作区恢复和全局恢复分别确认范围、数量及已归档去向，跳过正在永久删除的条目；清空仍须确认不可恢复的后果。各 Tab 顶部保持一致尺寸。工作区操作及全局导出、取消归档、删除均先确认完整归档范围和聊天数量。
 
@@ -119,7 +132,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 回收站预览目前仍依赖原会话；原件丢失时，即使保护快照可恢复，也可能无法预览。详见[兼容性与限制](docs/USER_GUIDE.zh-CN.md#兼容性与限制)。
 
-声明的版本范围仍以 Host 公开能力为准。发布自动化已通过 Ubuntu 上的 Node.js 18，以及 Ubuntu、macOS 和 Windows 上的 Node.js 24；Node.js 24 矩阵强制运行官方 Host 后端集成（5/5）与打包检查。已安装的 1.4.0 产物也已在 `@deepseek-ai/dsh-session@0.1.5-rc.2` 上通过官方 native 闭环（5/5）。
+声明的版本范围仍以 Host 公开能力为准。发布自动化在 Ubuntu 上测试 Node.js 18，并在 Ubuntu、macOS 和 Windows 上测试 Node.js 24；Node.js 24 矩阵强制运行基于官方 `@deepseek-ai/dsh-session@0.1.7-rc.2` 的 Host 后端集成（5/5）与打包检查，覆盖 v4 会话格式。
 
 ## 文档
 

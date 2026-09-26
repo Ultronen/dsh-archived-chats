@@ -4,6 +4,18 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.4.5 — 2026-09-27
+
+### 中文
+
+- 使用隔离的虚构示例数据重拍八张插件界面截图，替换仍显示 1.3.1 旧界面及已移除快照入口的图片；中英文 README 与插件市场截图清单使用相同文件和顺序。
+- 同步中英文 README、用户指南及架构文档的版本说明，突出当前 `0.1.7-rc.2` Host fixture 与 v4 会话格式验证。本版不改动运行时代码、数据格式或 Host 兼容范围。
+
+### English
+
+- Replace all eight 1.3.1 screenshots, which showed retired snapshot UI, with captures of the current plugin using isolated synthetic example data. Both READMEs and the marketplace screenshot list reference the same files in the same order.
+- Update version notes in both READMEs, user guides, and architecture documents to describe the current `0.1.7-rc.2` Host fixture and v4 session-format verification. Runtime code, data format, and Host compatibility range are unchanged.
+
 ## 1.4.4 — 2026-09-27
 
 ### 中文

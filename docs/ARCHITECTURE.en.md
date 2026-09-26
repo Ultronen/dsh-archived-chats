@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main`, covering 1.4.4 behavior, whose runtime code is unchanged from 1.4.3 (1.4.3 accepts the v4 session format in the persistence compatibility layer, 1.4.2 switched export ZIP generation to `fflate`); see the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main` and covers 1.4.5 behavior. This release refreshes documentation and screenshots; runtime behavior and Host compatibility are unchanged from 1.4.4. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -216,4 +216,4 @@ git diff --check
 
 The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all five native round-trip cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation passed Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix required the official Host backend integration (5/5) and package checks. The installed 1.4.0 artifact also passed the official native round trip (5/5) against `@deepseek-ai/dsh-session@0.1.5-rc.2`. Existing screenshots are from v1.3.1 and include retired snapshot UI; they remain historical examples rather than current behavior documentation.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (5/5) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
