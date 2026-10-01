@@ -104,3 +104,110 @@ test('exclusive deletion scope returns a checked canonical directory that a deep
   await assert.rejects(access(join(original, suffix)), { code: 'ENOENT' });
   assert.equal(await readFile(join(decoy, suffix, 'session.jsonl'), 'utf8'), 'decoy');
 });
+
+
+// locate() identifies the Host's append target, not necessarily a materialized log.
+test('historical-only logs do not block their own or sibling deletion scopes', async t => {
+  for (const filename of ['session.jsonl', 'session.jsonl.zstd', 'session.v3.jsonl', 'session.v3.jsonl.zstd']) {
+    await t.test(filename, async t => {
+      const f = await fixture(t, ['chat-a', 'chat-b']);
+      const directory = join(f.root, 'sessions', 'chat-b');
+      await rm(f.paths.get('chat-b'));
+      await writeFile(join(directory, filename), 'historical');
+      f.paths.set('chat-b', join(directory, 'session.v4.jsonl.zstd'));
+      for (const id of ['chat-a', 'chat-b']) {
+        assert.deepEqual(await resolveExclusiveSessionDirectory(f.persistence, id), {
+          status: 'present', sessionDirectory: await realpath(join(f.root, 'sessions', id)),
+        });
+      }
+    });
+  }
+});
+
+test('an empty unmaterialized session directory still has an exclusive deletion scope', async t => {
+  const f = await fixture(t, ['chat-a', 'chat-b']);
+  await rm(f.paths.get('chat-b'));
+  assert.deepEqual(await resolveExclusiveSessionDirectory(f.persistence, 'chat-b'), {
+    status: 'present', sessionDirectory: await realpath(join(f.root, 'sessions', 'chat-b')),
+  });
+  assert.equal((await resolveExclusiveSessionDirectory(f.persistence, 'chat-a')).status, 'present');
+});
+
+test('missing directories in inventory do not block deletion or interrupted-purge retries', async t => {
+  const f = await fixture(t, ['chat-a', 'chat-b']);
+  await rm(join(f.root, 'sessions', 'chat-b'), { recursive: true });
+  f.headers.push({ id: 'pending' });
+  f.paths.set('pending', join(f.root, 'new-store', 'new-project', 'pending', 'session.v4.jsonl.zstd'));
+  assert.equal((await resolveExclusiveSessionDirectory(f.persistence, 'chat-a')).status, 'present');
+  for (const id of ['chat-b', 'pending']) {
+    assert.deepEqual(await resolveExclusiveSessionDirectory(f.persistence, id), {
+      status: 'missing', sessionDirectory: null,
+    });
+  }
+});
+
+test('empty and historical session directories still reject nested deletion scopes', async t => {
+  const f = await fixture(t, ['chat-a']);
+  await rm(f.paths.get('chat-a'));
+  const nested = join(f.root, 'sessions', 'chat-a', 'nested', 'chat-b');
+  await mkdir(nested, { recursive: true });
+  await writeFile(join(nested, 'session.v3.jsonl.zstd'), 'historical');
+  f.headers.push({ id: 'chat-b' });
+  f.paths.set('chat-b', join(nested, 'session.v4.jsonl.zstd'));
+  for (const id of ['chat-a', 'chat-b']) {
+    await assert.rejects(resolveExclusiveSessionDirectory(f.persistence, id), { code: 'session-location-unsafe' });
+  }
+});
+
+test('existing located files and historical fallback logs reject non-file artifacts', async t => {
+  for (const filename of ['session.v4.jsonl.zstd', 'session.v3.jsonl.zstd', 'session.v2.jsonl', 'session.jsonl']) {
+    await t.test(filename, async t => {
+      const f = await fixture(t);
+      await rm(f.paths.get('chat-a'));
+      f.paths.set('chat-a', join(f.root, 'sessions', 'chat-a', 'session.v4.jsonl.zstd'));
+      await mkdir(join(f.root, 'sessions', 'chat-a', filename));
+      await assert.rejects(resolveExclusiveSessionDirectory(f.persistence, 'chat-a'), { code: 'session-location-unsafe' });
+    });
+  }
+});
+
+test('located and historical fallback artifacts reject links or Windows junctions', async t => {
+  for (const filename of ['session.v4.jsonl.zstd', 'session.v3.jsonl.zstd']) {
+    await t.test(filename, async t => {
+      const f = await fixture(t);
+      await rm(f.paths.get('chat-a'));
+      f.paths.set('chat-a', join(f.root, 'sessions', 'chat-a', 'session.v4.jsonl.zstd'));
+      const outside = join(f.root, 'outside');
+      await mkdir(outside);
+      await writeFile(join(outside, 'keep'), 'unrelated');
+      await symlink(outside, join(f.root, 'sessions', 'chat-a', filename),
+        process.platform === 'win32' ? 'junction' : 'dir');
+      await assert.rejects(resolveExclusiveSessionDirectory(f.persistence, 'chat-a'), { code: 'session-location-unsafe' });
+      assert.equal(await readFile(join(outside, 'keep'), 'utf8'), 'unrelated');
+    });
+  }
+});
+
+test('a linked session directory is unsafe even when the located log is absent', async t => {
+  const f = await fixture(t);
+  const directory = join(f.root, 'sessions', 'chat-a');
+  const outside = join(f.root, 'outside');
+  await rm(directory, { recursive: true });
+  await mkdir(outside);
+  await symlink(outside, directory, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(resolveExclusiveSessionDirectory(f.persistence, 'chat-a'), { code: 'session-location-unsafe' });
+});
+
+test('noncanonical generation artifacts are not mistaken for committed fallback logs', async t => {
+  const f = await fixture(t);
+  await rm(f.paths.get('chat-a'));
+  const directory = join(f.root, 'sessions', 'chat-a');
+  f.paths.set('chat-a', join(directory, 'session.v4.jsonl.zstd'));
+  for (const name of ['session.v0.jsonl', 'session.v03.jsonl.zstd', 'session.V3.jsonl',
+    'session.v3.jsonl.zstd.tmp', 'session.v9007199254740992.jsonl']) {
+    await mkdir(join(directory, name));
+  }
+  assert.deepEqual(await resolveExclusiveSessionDirectory(f.persistence, 'chat-a'), {
+    status: 'present', sessionDirectory: await realpath(directory),
+  });
+});

@@ -47,7 +47,7 @@ function summary(output, label) {
 export async function runNativeIntegration(args = process.argv.slice(2)) {
   const fixtureRoot = resolve(option(args, '--fixture-root', join(repositoryRoot, 'test', 'fixtures', 'native-host')));
   const testFile = resolve(option(args, '--test-file', join(repositoryRoot, 'test', 'backup-roundtrip.test.mjs')));
-  const expectedTests = Number(option(args, '--expected-tests', '5'));
+  const expectedTests = Number(option(args, '--expected-tests', '6'));
   if (!Number.isSafeInteger(expectedTests) || expectedTests < 1) throw new Error('--expected-tests must be a positive integer');
 
   const host = await loadLockedHost(fixtureRoot);

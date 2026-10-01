@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.4.6 — 2026-10-02
+
+### 中文
+
+- 修复会话库同时保留旧版 v3 与当前 v4 日志时，任意旧会话会使所有永久删除、清空回收站及自动回收清理报 `session-location-unavailable` 的问题（#55）。Host 的 `locate()` 返回当前代写入路径，不能据此要求该文件已经存在。
+- 删除安全检查以真实会话独占目录为范围，兼容实际存在的规范代际日志及尚未生成日志的空目录；清单中的已不存在目录不再阻塞删除和中断任务重试。继续拒绝符号链接／junction、非文件日志、目录重叠、不属于会话的路径及不可读清单。
+- 新增混合日志、空／缺失目录和删除安全回归，以及使用官方后端验证单条永久删除、归档直接删除、清空回收站的集成用例。原生 CI 门禁增加到六项；另在隔离目录验证官方 `0.2.0-rc.2` 后端，并在可选 peer 范围中显式加入这个已验证版本。
+
+### English
+
+- Fix `session-location-unavailable` blocking every permanent deletion, Empty Recycle Bin, and automatic recycle purge when the inventory contains a historical v3 log beside current v4 logs (#55). The Host's `locate()` names the current append target, which may not exist yet.
+- Use the actual exclusive session directory as the deletion scope, accepting canonical stored generations and unmaterialized empty directories. Absent inventory directories no longer block deletion or interrupted-purge retries. Keep refusing links/junctions, non-file logs, overlapping directories, non-session-scoped paths, and unreadable inventory.
+- Add mixed-generation, empty/missing-directory, and safety regressions plus an official-backend integration for individual purge, direct archive deletion, and Empty Recycle Bin. The mandatory native CI gate now runs six cases. Also verify the official `0.2.0-rc.2` backend in an isolated fixture and explicitly admit that tested version in the optional peer range.
+
 ## 1.4.5 — 2026-09-27
 
 ### 中文
