@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main` and covers 1.4.5 behavior. This release refreshes documentation and screenshots; runtime behavior and Host compatibility are unchanged from 1.4.4. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main` and covers 1.4.6 behavior. This release fixes permanent deletion and Recycle Bin cleanup when historical and current session log generations coexist. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -159,7 +159,7 @@ Move is missing → trashed; recycle purge is trashed/degraded → purge-pending
 
 Both paths share purge: persist intent → remove and recheck all associated snapshots → physically delete the session → finish registry/metadata cleanup → remove the recycle record last. Physical deletion runs with the caller's lifecycle lock and a pending marker.
 
-Snapshot sweeping uses manifest ownership and the record's named snapshotId to cover corrupted protection data. Unrelated unassignable corruption does not block a session's purge. The log must reside in a directory named for that session ID; shared directories are not purge targets. A missing log or archive index is not proof of completion: durable intent authorizes remaining cleanup.
+Snapshot sweeping uses manifest ownership and the record's named snapshotId to cover corrupted protection data. Unrelated unassignable corruption does not block a session's purge. The log must reside in a directory named for that session ID; shared directories are not purge targets. Safety checks use the actual session directory as the removal scope. If the current-generation log named by `locate()` is absent, inspect canonical generation logs that exist in the directory; empty directories still undergo ancestry and overlap checks. Inventory entries with absent directories are treated as missing and do not block other purges. Links/junctions, non-file logs, overlapping directories, and unreadable inventory still refuse deletion. A missing log or archive index is not proof of completion: durable intent authorizes remaining cleanup.
 
 Failures retain purge-pending. Startup and runtime retries continue these tasks, never restore them to ordinary chats. Archive deletion rejects existing recycle records, protecting the Recycle Bin from archive-wide Delete all. Purging snapshot copies does not promise global attachment cleanup or Host session_projcache eviction; no corresponding safe public eviction API is used.
 
@@ -214,6 +214,6 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all five native round-trip cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
+The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all six native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (5/5) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (6/6) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import * as zlib from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { EventEmitter, once } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -262,4 +263,67 @@ test('ZIP restore cannot resurrect an ID still reserved by a pending deletion', 
   assert.equal(result.json().skipped[0].reason, 'id-conflict');
   assert.equal(await f.raw.stat(backup.meta.id), undefined);
   assert.equal((await f.inspect(backup.bytes)).sessions[0].conflict, true);
+});
+
+
+test('official modern backend: purge and empty succeed with compressed historical-only sessions', { skip: !nativeRoot }, async t => {
+  const f = await fixture(t);
+  const oldId = 'session-historical-only';
+  const mixedId = 'session-mixed-generations';
+  const currentId = 'session-current';
+  const directId = 'session-direct-delete';
+  const paths = new Map();
+  for (const id of [oldId, mixedId, currentId, directId]) {
+    const meta = { version: sessionFormatVersion, id, createdAt: 42, cwd: f.root, isSeeded: false, delegationDepth: 0 };
+    const path = f.raw.locate(meta).path;
+    paths.set(id, path);
+    if (id !== oldId) {
+      const handle = await f.raw.create(meta);
+      await handle.flush(); await handle.close();
+    }
+    if (id === oldId || id === mixedId) {
+      await mkdir(dirname(path), { recursive: true });
+      const historical = { type: 'session', ...meta, version: 3 };
+      await writeFile(join(dirname(path), 'session.v3.jsonl.zstd'),
+        zlib.zstdCompressSync(Buffer.from(JSON.stringify(historical) + '\n')));
+    }
+    await f.workspace.attachSession(id);
+  }
+  const inventory = await f.raw.list();
+  assert.equal(inventory.length, 4, 'real Host inventory includes historical and current sessions');
+  assert.equal(f.raw.locate(inventory.find(item => item.header.id === oldId).header).path, paths.get(oldId));
+  await assert.rejects(access(paths.get(oldId)), { code: 'ENOENT' });
+  const historicalPath = join(dirname(paths.get(oldId)), 'session.v3.jsonl.zstd');
+  const historicalBytes = await readFile(historicalPath);
+  f.registry.state.archivedSessionIds = [oldId, mixedId, currentId, directId];
+
+  const movedCurrent = await f.call('/delete', { sessionId: currentId });
+  assert.equal(movedCurrent.status, 200, movedCurrent.bytes.toString());
+  const purgedCurrent = await f.call('/trash/purge', { sessionIds: [currentId] });
+  assert.deepEqual(purgedCurrent.json().purged, [currentId], purgedCurrent.bytes.toString());
+  assert.deepEqual(purgedCurrent.json().failed, []);
+  await assert.rejects(access(dirname(paths.get(currentId))), { code: 'ENOENT' });
+  assert.deepEqual(await readFile(historicalPath), historicalBytes, 'purging a sibling preserves historical bytes');
+
+  const direct = await f.call('/delete-all', { sessionIds: [directId], permanent: true });
+  assert.deepEqual(direct.json().deleted, [directId], direct.bytes.toString());
+  await assert.rejects(access(dirname(paths.get(directId))), { code: 'ENOENT' });
+
+  for (const id of [oldId, mixedId]) {
+    const moved = await f.call('/delete', { sessionId: id });
+    assert.equal(moved.status, 200, moved.bytes.toString());
+  }
+  const trash = (await f.call('/trash')).json().sessions;
+  assert.equal(trash.length, 2);
+  const targets = trash.map(row => ({ sessionId: row.sessionId, state: row.state,
+    trashedAt: row.trashedAt, snapshotId: row.snapshotId, bytes: row.snapshotBytes }));
+  const emptied = await f.call('/trash/empty', { targets });
+  assert.deepEqual(emptied.json().failed, [], emptied.bytes.toString());
+  assert.deepEqual(emptied.json().purged.sort(), [oldId, mixedId].sort());
+  assert.deepEqual((await f.call('/trash')).json().sessions, []);
+  assert.deepEqual(f.registry.archivedSessionIds, []);
+  assert.deepEqual(f.workspace.sessionIds, []);
+  for (const id of [oldId, mixedId]) {
+    await assert.rejects(access(dirname(paths.get(id))), { code: 'ENOENT' });
+  }
 });

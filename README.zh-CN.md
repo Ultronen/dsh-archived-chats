@@ -30,7 +30,7 @@
 
 > 中文名称为「归档管理」，英文名称为 Archive Management；安装包名始终为 `dsh-archived-chats`。
 >
-> 本文跟随 `main` 分支维护，适用于 1.4.5。本版更新文档和截图；运行时行为及 Host 兼容性与 1.4.4 相同。版本变更见[更新日志](CHANGELOG.md)。
+> 本文跟随 `main` 分支维护，适用于 1.4.6。本版修复旧版与当前版本会话日志混存时，永久删除及回收站清空失败的问题。版本变更见[更新日志](CHANGELOG.md)。
 
 ## 快速开始
 
@@ -132,7 +132,7 @@ dsh plugin --profile web update dsh-archived-chats
 
 回收站预览目前仍依赖原会话；原件丢失时，即使保护快照可恢复，也可能无法预览。详见[兼容性与限制](docs/USER_GUIDE.zh-CN.md#兼容性与限制)。
 
-声明的版本范围仍以 Host 公开能力为准。发布自动化在 Ubuntu 上测试 Node.js 18，并在 Ubuntu、macOS 和 Windows 上测试 Node.js 24；Node.js 24 矩阵强制运行基于官方 `@deepseek-ai/dsh-session@0.1.7-rc.2` 的 Host 后端集成（5/5）与打包检查，覆盖 v4 会话格式。
+声明的版本范围仍以 Host 公开能力为准。发布自动化在 Ubuntu 上测试 Node.js 18，并在 Ubuntu、macOS 和 Windows 上测试 Node.js 24；Node.js 24 矩阵强制运行基于官方 `@deepseek-ai/dsh-session@0.1.7-rc.2` 的 Host 后端集成（6/6）与打包检查，覆盖 v4 会话格式。
 
 ## 文档
 
@@ -157,7 +157,7 @@ node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 ```
 
-测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。原生集成命令会安装锁定的 `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture，并要求五个原生往返用例全部执行且不能跳过。所有检查只使用隔离临时数据，不读取真实会话。
+测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。原生集成命令会安装锁定的 `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture，并要求六个原生集成用例全部执行且不能跳过。所有检查只使用隔离临时数据，不读取真实会话。
 
 ## 卸载
 

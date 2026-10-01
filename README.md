@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch and targets 1.4.5. This release refreshes documentation and screenshots; runtime behavior and Host compatibility are unchanged from 1.4.4. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch and targets 1.4.6. This release fixes permanent deletion and Recycle Bin cleanup when historical and current session log generations coexist. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
@@ -134,7 +134,7 @@ The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Ho
 
 Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 
-The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (5/5) and package checks, including the v4 session format.
+The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (6/6) and package checks, including the v4 session format.
 
 ## Documentation
 
@@ -159,7 +159,7 @@ node scripts/run-native-integration.mjs
 npm pack --dry-run --json
 ```
 
-The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all five native round-trip cases to run without skips. All checks use isolated temporary data and never read real sessions.
+The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all six native integration cases to run without skips. All checks use isolated temporary data and never read real sessions.
 
 ## Uninstall
 

@@ -125,7 +125,7 @@ test('package declares a capability range and the tested Host fixture separately
   assert.equal(packageManifest.devDependencies?.['@deepseek-ai/dsh-session'], '0.1.7-rc.2');
   assert.equal(
     packageManifest.peerDependencies?.['@deepseek-ai/dsh-session'],
-    '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0 || 0.1.5-rc.2 || 0.1.7-rc.2',
+    '>=0.1.0-rc.7 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.2.0-0 || 0.1.5-rc.2 || 0.1.7-rc.2 || 0.2.0-rc.2',
   );
   assert.equal(packageManifest.peerDependenciesMeta?.['@deepseek-ai/dsh-session']?.optional, true);
 });
@@ -151,66 +151,69 @@ test('runtime dependencies stay free of the builtin-slash resolution chain', () 
   }
 });
 
-test('packed artifact resolves normally beside the tested Host prerelease', () => {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const fixture = mkdtempSync(join(tmpdir(), 'dac-peer-resolution-'));
-  const packDirectory = join(fixture, 'pack');
-  const peerDirectory = join(fixture, 'peers');
-  const consumer = join(fixture, 'consumer');
-  const cache = join(fixture, 'npm-cache');
-  mkdirSync(packDirectory, { recursive: true });
-  mkdirSync(peerDirectory, { recursive: true });
-  mkdirSync(consumer, { recursive: true });
-  const localPackage = (directory, name, version) => {
-    const path = join(peerDirectory, directory);
-    mkdirSync(path, { recursive: true });
-    writeFileSync(join(path, 'package.json'), `${JSON.stringify({ name, version })}\n`);
-    const packed = spawnSync(npm, ['pack', '--json', '--pack-destination', packDirectory, path], {
-      cwd: fixture,
-      encoding: 'utf8',
-      env: { ...process.env, npm_config_cache: cache },
-      shell: process.platform === 'win32',
-    });
-    assert.equal(packed.status, 0, packed.stderr || packed.stdout);
-    const [{ filename }] = JSON.parse(packed.stdout);
-    return `file:${join(packDirectory, filename)}`;
-  };
+for (const hostVersion of ['0.1.7-rc.2', '0.2.0-rc.2']) {
+  test(`packed artifact resolves normally beside Host ${hostVersion}`, () => {
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const fixture = mkdtempSync(join(tmpdir(), 'dac-peer-resolution-'));
+    const packDirectory = join(fixture, 'pack');
+    const peerDirectory = join(fixture, 'peers');
+    const consumer = join(fixture, 'consumer');
+    const cache = join(fixture, 'npm-cache');
+    mkdirSync(packDirectory, { recursive: true });
+    mkdirSync(peerDirectory, { recursive: true });
+    mkdirSync(consumer, { recursive: true });
+    const localPackage = (directory, name, version) => {
+      const path = join(peerDirectory, directory);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'package.json'), `${JSON.stringify({ name, version })}\n`);
+      const packed = spawnSync(npm, ['pack', '--json', '--pack-destination', packDirectory, path], {
+        cwd: fixture,
+        encoding: 'utf8',
+        env: { ...process.env, npm_config_cache: cache },
+        shell: process.platform === 'win32',
+      });
+      assert.equal(packed.status, 0, packed.stderr || packed.stdout);
+      const [{ filename }] = JSON.parse(packed.stdout);
+      return `file:${join(packDirectory, filename)}`;
+    };
 
-  try {
-    const packed = spawnSync(npm, ['pack', '--json', '--pack-destination', packDirectory], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, npm_config_cache: cache },
-      shell: process.platform === 'win32',
-    });
-    assert.equal(packed.status, 0, packed.stderr || packed.stdout);
-    const [{ filename }] = JSON.parse(packed.stdout);
-    writeFileSync(join(consumer, 'package.json'), `${JSON.stringify({
-      name: 'dsh-archived-chats-peer-resolution-test',
-      version: '1.0.0',
-      private: true,
-      dependencies: {
-        'dsh-archived-chats': `file:${join(packDirectory, filename)}`,
-        '@deepseek-ai/dsh-session': localPackage('dsh-session', '@deepseek-ai/dsh-session', '0.1.7-rc.2'),
-        '@deepseek-ai/cordis': localPackage('cordis', '@deepseek-ai/cordis', '4.0.4'),
-        react: localPackage('react', 'react', '18.3.1'),
-        fflate: localPackage('fflate', 'fflate', '0.8.3'),
-      },
-    }, null, 2)}\n`);
+    try {
+      const packed = spawnSync(npm, ['pack', '--json', '--pack-destination', packDirectory], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, npm_config_cache: cache },
+        shell: process.platform === 'win32',
+      });
+      assert.equal(packed.status, 0, packed.stderr || packed.stdout);
+      const [{ filename }] = JSON.parse(packed.stdout);
+      writeFileSync(join(consumer, 'package.json'), `${JSON.stringify({
+        name: 'dsh-archived-chats-peer-resolution-test',
+        version: '1.0.0',
+        private: true,
+        dependencies: {
+          'dsh-archived-chats': `file:${join(packDirectory, filename)}`,
+          '@deepseek-ai/dsh-session': localPackage('dsh-session', '@deepseek-ai/dsh-session', hostVersion),
+          '@deepseek-ai/cordis': localPackage('cordis', '@deepseek-ai/cordis', '4.0.4'),
+          react: localPackage('react', 'react', '18.3.1'),
+          fflate: localPackage('fflate', 'fflate', '0.8.3'),
+        },
+      }, null, 2)}\n`);
 
-    const installed = spawnSync(npm, ['install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], {
-      cwd: consumer,
-      encoding: 'utf8',
-      env: { ...process.env, npm_config_cache: cache },
-      shell: process.platform === 'win32',
-    });
+      const installed = spawnSync(npm, ['install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], {
+        cwd: consumer,
+        encoding: 'utf8',
+        env: { ...process.env, npm_config_cache: cache },
+        shell: process.platform === 'win32',
+      });
 
-    assert.equal(installed.status, 0, installed.stderr || installed.stdout);
-    assert(existsSync(join(consumer, 'node_modules', 'dsh-archived-chats', 'package.json')));
-  } finally {
-    rmSync(fixture, { recursive: true, force: true });
-  }
-});
+      assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+      assert(existsSync(join(consumer, 'node_modules', 'dsh-archived-chats', 'package.json')));
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+}
 
 test('client bootstrap declares only the locale injection dependency', () => {
   assert.deepEqual(packageManifest.dsh?.client?.inject, ['@deepseek-ai/dsh-client-locale']);
