@@ -335,8 +335,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 28, `twenty-eight archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['about', 'about/check-updates', 'state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
+assert(routes.size === 31, `thirty-one archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['about', 'about/check-updates', 'state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'orphans', 'orphans/delete', 'orphans/export', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 for (const path of ['history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all']) {
@@ -1956,6 +1956,19 @@ console.log('\n[10b] client model — sorting and visible selection');
   assert(previewRequest?.options.signal === previewController.signal, 'preview helper forwards cancellation');
   assert(previewRequest?.options.body === '{"sessionId":"session-a","offset":50,"limit":25}', 'preview helper sends the requested timeline window');
 
+  // Every non-default scope must reach the Host. Naming only "trash" here
+  // downgraded any other scope to "archive", and the Host then answered 404
+  // because the session is not archived at all.
+  await clientExports.__test.fetchArchivePreview?.('orphan-a', 0, 50, previewController.signal, 'orphan');
+  assert(inspectRequests.at(-1)?.options.body === '{"sessionId":"orphan-a","offset":0,"limit":50,"scope":"orphan"}',
+    'preview helper forwards an orphan scope instead of falling back to archive');
+  await clientExports.__test.fetchArchivePreview?.('session-a', 0, 50, previewController.signal, 'trash');
+  assert(inspectRequests.at(-1)?.options.body === '{"sessionId":"session-a","offset":0,"limit":50,"scope":"trash"}',
+    'preview helper still forwards the recycle scope');
+  await clientExports.__test.fetchArchivePreview?.('session-a', 0, 50, previewController.signal);
+  assert(inspectRequests.at(-1)?.options.body === '{"sessionId":"session-a","offset":0,"limit":50}',
+    'the default archive scope stays implicit');
+
   assert(typeof clientExports.__test.fetchArchiveSearch === 'function', 'client exposes the archive full-text request boundary');
   const searchController = new AbortController();
   const searchBody = await clientExports.__test.fetchArchiveSearch?.('needle', 20, searchController.signal);
@@ -2846,9 +2859,9 @@ console.log('\n[11a2] client half — modal focus, busy locks, tab navigation, a
     buttons[0].props.onKeyDown({ key: 'ArrowRight', currentTarget: controls[0], preventDefault() {} });
     buttons[4].props.onKeyDown({ key: 'Home', currentTarget: controls[4], preventDefault() {} });
     buttons[0].props.onKeyDown({ key: 'End', currentTarget: controls[0], preventDefault() {} });
-    assert(buttons.map((button) => button.props.tabIndex).join(',') === '0,-1,-1,-1,-1'
+    assert(buttons.map((button) => button.props.tabIndex).join(',') === '0,-1,-1,-1,-1,-1'
       && changes.join(',') === 'trash,archived,about'
-      && controls.focused === controls[4],
+      && controls.focused === controls[5],
     'tab strip has one tab stop and Arrow/Home/End both move focus and selection');
   }
 
@@ -2960,13 +2973,15 @@ console.log('\n[11c] client half — archive insights UI');
   const effectRecords = [];
 	// Positional pins into ArchivedChatsSection's useState order: sessions,
 	// tagFilter, metadataStatus, archiveTrashStatus, stats, metadataEdit, metaBusy.
+	// Adding a useState to that component shifts every pin after it, so re-derive
+	// these indices from the component whenever the list changes.
 	states[0] = { value: archivedRows, setter: null };
-	states[15] = { value: '', setter: null };
-	states[16] = { value: 'ready', setter: null };
-	states[17] = { value: 'ready', setter: null };
-	states[18] = { value: statsFixture, setter: null };
-	states[19] = { value: null, setter: null };
-	states[20] = { value: false, setter: null };
+	states[21] = { value: '', setter: null };
+	states[22] = { value: 'ready', setter: null };
+	states[23] = { value: 'ready', setter: null };
+	states[24] = { value: statsFixture, setter: null };
+	states[25] = { value: null, setter: null };
+	states[26] = { value: false, setter: null };
   const setterAt = (index) => (next) => {
     states[index].value = typeof next === 'function' ? next(states[index].value) : next;
   };
@@ -3031,7 +3046,7 @@ console.log('\n[11c] client half — archive insights UI');
 	  assert(elements.some((el) => el.props?.className === 'dac-toast' && elementText(el).includes('已开始下载备份')), 'export action announces that the download started');
 	  globalThis.fetch = savedUiExportFetch;
 	  windowMock.URL = savedUiExportUrl;
-	states[13].value = null;
+	states[19].value = null;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3052,7 +3067,7 @@ console.log('\n[11c] client half — archive insights UI');
   const importInput = elements.find((el) => el.type === 'input' && el.props?.type === 'file' && el.props?.accept === '.zip,application/zip');
   assert(importInput?.props.accept === '.zip,application/zip' && importInput?.props.hidden === true, 'import file picker is hidden and accepts ZIP backups');
 
-	states[21].value = {
+	states[27].value = {
     token: 'token-ui',
     nonce: 'nonce-ui',
     package: { generator: { name: 'dsh-archived-chats', version: '0.8.0' }, version: 1, sessionCount: 2 },
@@ -3063,7 +3078,7 @@ console.log('\n[11c] client half — archive insights UI');
     selectedIds: ['new-session'],
     result: null,
   };
-	states[22].value = false;
+	states[28].value = false;
   tree = renderSection();
   elements = collectElements(tree);
   const importDialog = elements.find((el) => el.props?.role === 'dialog' && el.props?.['aria-labelledby'] === 'dac-import-title');
@@ -3095,7 +3110,7 @@ console.log('\n[11c] client half — archive insights UI');
   busyImportOverlay?.props.onClick();
   busyImportDialog?.props.onKeyDown?.({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
   busyImportCancel?.props.onClick();
-  assert(states[21].value !== null && busyImportCancel?.props.disabled === true,
+  assert(states[27].value !== null && busyImportCancel?.props.disabled === true,
     'pending import remains visible and cannot be dismissed by Cancel, Escape, or the backdrop');
   finishRestore?.();
   await restorePending;
@@ -3109,7 +3124,7 @@ console.log('\n[11c] client half — archive insights UI');
     && collectElements(completedImport).some((el) => el.type === 'button' && elementText(el) === '关闭'),
 	  'completed import keeps its localized title-publication limitation associated with a Close action');
 	  collectElements(completedImport).find((el) => el.type === 'button' && elementText(el) === '关闭')?.props.onClick();
-	  states[21].value = {
+	  states[27].value = {
 	    token: 'failed-token', nonce: 'failed-nonce', package: { version: 1, sessionCount: 1 },
 	    sessions: [{ id: 'failed-session', title: 'Failed restore', conflict: false, warnings: [] }],
 	    selectedIds: ['failed-session'], result: null, error: null,
@@ -3137,8 +3152,8 @@ console.log('\n[11c] client half — archive insights UI');
       `import errors map ${code} to actionable localized copy`);
   }
   globalThis.fetch = savedImportFetch;
-	states[21].value = null;
-	states[18].value = statsFixture;
+	states[27].value = null;
+	states[24].value = statsFixture;
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3147,12 +3162,12 @@ console.log('\n[11c] client half — archive insights UI');
   assert(tagSelect?.props.value === '', 'tag filter defaults to the non-colliding no-filter sentinel');
   const importantOptions = tagSelect?.props.children.filter((option) => String(option.props.children).toLowerCase() === 'important') ?? [];
   assert(importantOptions.length === 1, 'tag filter options de-duplicate labels case-insensitively');
-	states[15].value = 'all';
+	states[21].value = 'all';
   tree = renderSection();
   elements = collectElements(tree);
   const filteredRows = elements.filter(isRow);
   assert(filteredRows.length === 1 && elementText(filteredRows[0]).includes('Beta'), 'selecting the literal all tag renders only sessions carrying that tag');
-	states[15].value = '';
+	states[21].value = '';
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3231,11 +3246,11 @@ console.log('\n[11c] client half — archive insights UI');
     stopPropagation: () => { stoppedEscape = true; },
   });
   assert(preventedEscape && stoppedEscape, 'metadata dialog stops Escape before the host settings dialog sees it');
-	assert(states[19].value === null, 'metadata Escape cancels only the metadata editor state');
+	assert(states[25].value === null, 'metadata Escape cancels only the metadata editor state');
   cleanupMeta?.();
   assert(editFocuses === 1 && documentMock.activeElement === editTrigger, 'metadata dialog restores focus to the row edit button');
 
-	states[19].value = archivedRows[0];
+	states[25].value = archivedRows[0];
   tree = renderSection();
   elements = collectElements(tree);
 
@@ -3259,7 +3274,7 @@ console.log('\n[11c] client half — archive insights UI');
   busyMetadataOverlay?.props.onClick();
   busyMetadataDialog?.props.onKeyDown?.({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
   busyMetadataCancel?.props.onClick();
-  assert(states[19].value?.id === 'session-a' && busyMetadataCancel?.props.disabled === true,
+  assert(states[25].value?.id === 'session-a' && busyMetadataCancel?.props.disabled === true,
     'pending metadata save remains visible and cannot be dismissed by Cancel, Escape, or the backdrop');
   finishMetadataSave?.();
   await metadataPending;
@@ -3291,7 +3306,7 @@ console.log('\n[11c] client half — archive insights UI');
   // Exercise the real MetadataDialog with persistent hooks so token semantics,
   // IME input, and effect cleanup are verified across actual re-renders.
   const commaTagSession = { ...archivedRows[1], tags: ['research,2026'], note: '' };
-	states[19].value = commaTagSession;
+	states[25].value = commaTagSession;
   const rawSectionTree = renderSection();
   const metadataElement = findComponentElement(rawSectionTree, 'MetadataDialog');
   assert(metadataElement !== undefined, 'metadata dialog component is present in the real section tree');
@@ -3430,8 +3445,8 @@ console.log('\n[11c] client half — archive insights UI');
   else documentListeners.delete('keydown');
 
   // Unavailable metadata disables only metadata editing and shows a warning.
-	states[16].value = 'unavailable';
-	states[19].value = null;
+	states[22].value = 'unavailable';
+	states[25].value = null;
   tree = renderSection();
   elements = collectElements(tree);
   const disabledEdits = elements.filter((el) => el.type === 'button' && el.props?.['aria-label'] === '编辑标签与备注');
@@ -3441,22 +3456,22 @@ console.log('\n[11c] client half — archive insights UI');
 
   // An unreadable recycle catalog means the listing cannot be trusted to exclude
   // already-deleted chats, so it has to be labelled rather than shown as normal.
-	states[16].value = 'ready';
-	states[17].value = 'unavailable';
+	states[22].value = 'ready';
+	states[23].value = 'unavailable';
   tree = renderSection();
   elements = collectElements(tree);
   const trashWarn = elements.filter((el) => el.props?.className === 'dac-warn');
   assert(trashWarn.length === 1 && elementText(trashWarn[0]).includes('回收站目录无法读取'),
     'an unreadable recycle catalog is surfaced on the archived list');
   assert(elements.filter(isRow).length === 3, 'the warning never hides rows');
-	states[17].value = 'ready';
+	states[23].value = 'ready';
   tree = renderSection();
   assert(collectElements(tree).filter((el) => el.props?.className === 'dac-warn').length === 0,
     'a readable recycle catalog shows no warning');
 
   // Statistics failure never removes rows or lifecycle actions.
-	states[18].value = { status: 'error', summary: null, sessions: {} };
-	states[16].value = 'ready';
+	states[24].value = { status: 'error', summary: null, sessions: {} };
+	states[22].value = 'ready';
   tree = renderSection();
   elements = collectElements(tree);
   assert(elements.filter(isRow).length === 3, 'statistics failure keeps all rows rendered');
@@ -3983,12 +3998,12 @@ console.log('\n[11f] client half — recycle navigation and management');
   harness.flushEffects();
   let elements = collectElements(tree);
   const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  assert(tabs.map((tab) => elementText(tab)).join(',') === '已归档,回收站,空间与策略,来源与分支,关于',
+  assert(tabs.map((tab) => elementText(tab)).join(',') === '已归档,回收站,空间与策略,来源与分支,孤儿会话,关于',
     'archive manager keeps management tabs before the final About tab');
   assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
   assert(requests.every((request) => !request.path.includes('/history')), 'retired History API is never requested');
 
-  for (const [index, actionCount] of [[0, 5], [1, 2], [2, 0], [3, 0], [4, 0]]) {
+  for (const [index, actionCount] of [[0, 5], [1, 2], [2, 0], [3, 0], [4, 0], [5, 0]]) {
     if (!tabs[index]) { assert(false, `tab ${index} exists`); continue; }
     tabs[index].props.onClick();
     const modeTree = harness.render({ t, refreshSidebar: () => {} });
@@ -6122,6 +6137,311 @@ console.log('\n[18] host half — modern persistence reads work while unsupporte
   assert(reads > 0 && closes === reads, 'every modern inspection closes its read handle');
   rmSync(modernHome, { recursive: true, force: true });
   process.env.DSH_HOME = testHome;
+}
+
+console.log('\n[19] host half — orphan sessions are listed, and only orphans may be deleted');
+{
+  const orphanId = 'session-orphan';
+  const blankId = 'session-blank';
+  const addedHeaders = [
+    // A subagent whose parent is not in the store at all.
+    { id: orphanId, createdAt: 1786726600000, cwd: '/ws/one', parentSession: 'session-gone', origin: 'subagent', delegationDepth: 1 },
+    // A top-level session that never recorded a turn.
+    { id: blankId, createdAt: 1786726650000, cwd: '/ws/one', delegationDepth: 0 },
+  ];
+  headerRows.push(...addedHeaders);
+  for (const header of addedHeaders) registry.headers.set(header.id, header);
+  events[orphanId] = [{ type: 'turn/start', data: {} }, { type: 'session/title', data: { title: '孤儿工作' } }];
+  events[blankId] = [];
+  for (const header of addedHeaders) {
+    const dir = join(tmp, header.id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'session.jsonl.zstd'), 'fake');
+  }
+
+  const listed = await call(routes, '/plugins/dsh-archived-chats/orphans', mockReq('GET', {}));
+  assert(listed.status === 200, `orphans list answers 200 (got ${listed.status})`);
+  const body = listed.json();
+  const ids = body.sessions.map((row) => row.id);
+  const orphanRow = body.sessions.find((row) => row.id === orphanId);
+  const blankRow = body.sessions.find((row) => row.id === blankId);
+  assert(orphanRow !== undefined, 'an orphaned subagent is listed');
+  assert(blankRow !== undefined, 'a blank top-level session is listed');
+  assert(!ids.includes('session-b'), 'a subagent whose parent still exists is not listed');
+  assert(!ids.includes('session-a'), 'an archived session is not listed');
+  assert(orphanRow?.kind === 'subagent' && blankRow?.kind === 'blank', 'each row carries its own kind');
+  assert(body.summary?.subagent >= 1 && body.summary?.blank >= 1, `the summary counts both kinds (${JSON.stringify(body.summary)})`);
+  assert(orphanRow?.sizeBytes > 0, `an orphan row carries its measured size (got ${orphanRow?.sizeBytes})`);
+
+  // Being an orphan is the only thing that authorizes deleting a session that
+  // was never archived, so a non-orphan id must be refused even with a valid
+  // guard header — otherwise this route could delete any chat by id.
+  const refused = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
+    mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: ['session-c'] })));
+  assert(refused.status === 409, `deleting a non-orphan is refused (got ${refused.status})`);
+  assert(refused.json().error === 'orphan-set-changed', 'the refusal names the changed orphan set');
+  assert(refused.json().sessionIds?.includes('session-c'), 'the refusal names the rejected id');
+  assert(headerRows.some((header) => header.id === 'session-c'), 'the refused session still exists');
+
+  const unguarded = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
+    mockReq('POST', {}, JSON.stringify({ sessionIds: [orphanId] })));
+  assert(unguarded.status === 403, `an unguarded orphan delete is refused (got ${unguarded.status})`);
+
+  const deleted = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
+    mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [orphanId] })));
+  assert(deleted.status === 200, `deleting an orphan succeeds (got ${deleted.status})`);
+  assert(deleted.json().deleted?.includes(orphanId), 'the deleted orphan is reported');
+  // The Host persistence list is the Host's to refresh; what this plugin owns is
+  // its registry header index, and leaving a stale entry there is what lets a
+  // deleted session come back as a ghost.
+  assert(!registry.headers.has(orphanId), 'the orphan is gone from the registry header index');
+  assert(!existsSync(join(tmp, orphanId)), 'the orphan session directory is gone');
+
+  // A blank row is only listed while its log reads. Authorization must not
+  // depend on that read, or one flaky read rejects the whole selected batch with
+  // `orphan-set-changed` — which is what made select-all export fail at random.
+  const savedInspect = persistence.inspect;
+  persistence.inspect = async (id) => {
+    if (id === blankId) throw new Error('log temporarily unreadable');
+    return savedInspect(id);
+  };
+  const unreadable = await call(routes, '/plugins/dsh-archived-chats/orphans', mockReq('GET', {}));
+  assert(!unreadable.json().sessions.map((row) => row.id).includes(blankId),
+    'an unreadable log drops the row from the display list');
+  const stillAuthorized = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
+    mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [blankId] })));
+  assert(stillAuthorized.status === 200,
+    `an unreadable log does not revoke a listed row's authorization (got ${stillAuthorized.status})`);
+  persistence.inspect = savedInspect;
+
+  // Restore the shared store so anything appended later starts from the baseline.
+  for (const header of addedHeaders) {
+    registry.headers.delete(header.id);
+    delete events[header.id];
+  }
+  for (let index = headerRows.length - 1; index >= 0; index -= 1) {
+    if (addedHeaders.some((header) => header.id === headerRows[index].id)) headerRows.splice(index, 1);
+  }
+}
+
+console.log('\n[20] client half — orphan sessions view');
+{
+  const savedFetch = globalThis.fetch;
+  const requests = [];
+  let orphanRows = [
+    { id: 'orphan-a', kind: 'subagent', title: 'Orphan Alpha', createdAt: 10, cwd: '/ws/one', parentSession: 'session-gone', delegationDepth: 1, sizeBytes: 2048 },
+    { id: 'orphan-blank', kind: 'blank', title: null, createdAt: 20, cwd: '/ws/two', parentSession: null, delegationDepth: 0, sizeBytes: 512 },
+  ];
+  const responseFor = (payload) => ({ ok: true, status: 200, json: async () => payload });
+  let failNextDelete = true;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    requests.push({ path, options });
+    if (path.endsWith('/state')) return responseFor({ metadataStatus: 'ready', sessions: [] });
+    if (path.endsWith('/stats')) return responseFor({ summary: { sessionCount: 0, totalBytes: 0, unavailableCount: 0 }, sessions: {} });
+    if (path.endsWith('/orphans/delete')) {
+      // The first attempt is rejected so the tab's own failure feedback is covered.
+      if (failNextDelete) {
+        failNextDelete = false;
+        return { ok: false, status: 409, json: async () => ({ ok: false, error: 'orphan-set-changed', message: 'the orphan set changed' }) };
+      }
+      const ids = JSON.parse(options.body).sessionIds;
+      orphanRows = orphanRows.filter((row) => !ids.includes(row.id));
+      return responseFor({ ok: true, deleted: ids, pending: [], failed: [] });
+    }
+    if (path.endsWith('/orphans/export')) {
+      // The writer refuses and names every session the refusal applies to.
+      const submitted = JSON.parse(new URLSearchParams(options.body).get('sessionIds'));
+      return {
+        ok: false,
+        status: 422,
+        headers: { get: (name) => (name === 'content-type' ? 'text/plain' : null) },
+        arrayBuffer: async () => new TextEncoder().encode(`export-limit-exceeded:${submitted.join(',')}`).buffer,
+      };
+    }
+    if (path.endsWith('/orphans')) {
+      return responseFor({
+        ok: true, trashStatus: 'ready',
+        summary: { total: orphanRows.length, subagent: 1, blank: 1, bytes: 2560 },
+        sessions: orphanRows,
+      });
+    }
+    return responseFor({});
+  };
+
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  const render = () => { const tree = harness.render({ t, refreshSidebar: () => {} }); harness.flushEffects(); return collectElements(tree); };
+
+  harness.render({ t, refreshSidebar: () => {} });
+  harness.flushEffects();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  let elements = render();
+  const tabs = elements.filter((el) => el.type === 'button' && el.props?.role === 'tab');
+  const orphanTab = tabs.find((tab) => elementText(tab) === '孤儿会话');
+  assert(orphanTab !== undefined, 'the orphan sessions tab is present');
+  assert(!requests.some((request) => request.path.endsWith('/orphans')),
+    'the orphan list is not fetched before the tab is opened');
+
+  orphanTab.props.onClick();
+  // First render flips the tab and starts the lazy fetch; the second one, after
+  // the fetch settles, is the one that has rows to assert on.
+  elements = render();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  elements = render();
+
+  const listRequest = requests.find((request) => request.path.endsWith('/orphans'));
+  assert(listRequest !== undefined, 'opening the tab fetches the orphan list');
+  assert((listRequest?.options?.method ?? 'GET') === 'GET', 'the orphan list is a plain GET');
+
+  const panelOf = (list) => list.find((el) => el.props?.id === 'dac-panel-orphans');
+  let panel = panelOf(elements);
+  assert(panel !== undefined, 'the orphan panel renders for its own tab');
+  const panelText = elementText(panel);
+  assert(panelText.includes('Orphan Alpha'), 'an orphan row renders its title');
+  assert(panelText.includes('孤儿子代理') && panelText.includes('空会话'), 'both orphan kinds are labelled in the row');
+  assert(panelText.includes('未命名会话'), 'a row without a title falls back to the localized placeholder');
+  // Orphan rows frequently share title, kind, parent, cwd and size, so the id is
+  // what keeps two distinct sessions from rendering identically.
+  assert(panelText.includes('orphan-a') && panelText.includes('orphan-blank'),
+    'every row shows its own id so identical rows stay distinguishable');
+
+  // A blank session never recorded a turn, so a preview control on it could only
+  // open "no previewable messages". Only rows that have a conversation offer one.
+  const isOrphanRow = (el) => el.type === 'article'
+    && String(el.props?.className ?? '').split(' ').includes('dac-orphan-row');
+  const hasClass = (el, name) => String(el.props?.className ?? '').split(' ').includes(name);
+  const articleWith = (list, needle) => collectElements(panelOf(list))
+    .filter(isOrphanRow)
+    .find((el) => elementText(el).includes(needle));
+  const subagentRow = articleWith(elements, 'Orphan Alpha');
+  const blankRow = articleWith(elements, '未命名会话');
+  assert(subagentRow !== undefined && blankRow !== undefined, 'both orphan kinds render as their own row');
+  assert(collectElements(subagentRow).filter((el) => el.type === 'button').length === 1,
+    'a subagent orphan offers a preview action');
+  assert(collectElements(blankRow).filter((el) => el.type === 'button').length === 0,
+    'a blank session offers no preview, because it has nothing to project');
+  // The action column is reserved on every row, so a row without actions still
+  // ends its content block at the same edge as the rows above it.
+  assert(collectElements(subagentRow).some((el) => hasClass(el, 'dac-row-actions'))
+    && collectElements(blankRow).some((el) => hasClass(el, 'dac-row-actions')),
+    'both rows reserve the action column so their content blocks stay aligned');
+
+  const buttonsIn = (list) => collectElements(panelOf(list)).filter((el) => el.type === 'button');
+  const selectAll = buttonsIn(elements).find((button) => elementText(button) === '全选');
+  assert(selectAll !== undefined, 'the orphan panel offers select all');
+  selectAll.props.onClick();
+  elements = render();
+
+  // A refused export must ASK before leaving chats out of a backup — dropping
+  // them silently hands back a backup that quietly omits what was requested.
+  const exportButton = buttonsIn(elements).find((button) => elementText(button) === '导出选中项');
+  assert(exportButton !== undefined && exportButton.props.disabled !== true, 'export is enabled once rows are selected');
+  const exportAttemptsBefore = requests.filter((request) => request.path.endsWith('/orphans/export')).length;
+  exportButton.props.onClick({ currentTarget: null });
+  for (let tick = 0; tick < 6; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  elements = render();
+  const exportAttempts = requests.filter((request) => request.path.endsWith('/orphans/export')).length - exportAttemptsBefore;
+  assert(exportAttempts === 1, `a refused export asks instead of retrying on its own (got ${exportAttempts} attempts)`);
+  const blockedChips = collectElements(panelOf(elements)).filter((el) => hasClass(el, 'dac-chip-warn'));
+  assert(blockedChips.length === 2, `every refused row is marked in the list (got ${blockedChips.length})`);
+  assert(elementText(panelOf(elements)).includes('Orphan Alpha'), 'a refused export leaves the rows in place');
+  const exportDialog = elements.find((el) => el.props?.role === 'alertdialog');
+  assert(exportDialog !== undefined && elementText(exportDialog).includes('超出导出预算'),
+    'the refusal asks the user instead of deciding for them');
+  assert(elementText(exportDialog).includes('2'), 'the question says how many chats are affected');
+  assert(elementText(exportDialog).includes('0'), 'the question says how many would still be exported');
+
+  // Cancel must not leak an exclusion. It used to leave the refused rows marked
+  // and then filter them out of the NEXT export, which silently trimmed the
+  // backup — the exact thing the question exists to prevent.
+  const cancelExport = collectElements(exportDialog).filter((el) => el.type === 'button')
+    .find((button) => elementText(button) === '取消');
+  assert(cancelExport !== undefined, 'the question offers a cancel control');
+  cancelExport.props.onClick();
+  elements = render();
+  assert(elements.find((el) => el.props?.role === 'alertdialog') === undefined, 'cancelling closes the question');
+  const retryExport = buttonsIn(elements).find((button) => elementText(button) === '导出选中项');
+  assert(retryExport !== undefined && retryExport.props.disabled !== true, 'cancelling keeps the selection');
+  retryExport.props.onClick({ currentTarget: null });
+  for (let tick = 0; tick < 6; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  elements = render();
+  assert(requests.filter((request) => request.path.endsWith('/orphans/export')).length === exportAttemptsBefore + 2,
+    'retrying after cancel asks the Host again instead of excluding rows locally');
+  const secondDialog = elements.find((el) => el.props?.role === 'alertdialog');
+  assert(secondDialog !== undefined, 'retrying after cancel asks the user again rather than dropping rows silently');
+
+  // Confirming with nothing left to export reports that rather than packaging an
+  // empty or silently-trimmed backup.
+  const confirmExport = collectElements(secondDialog).filter((el) => el.type === 'button')
+    .find((button) => elementText(button) === '取消勾选并导出');
+  assert(confirmExport !== undefined, 'the question offers a confirm control');
+  confirmExport.props.onClick();
+  for (let tick = 0; tick < 6; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  elements = render();
+  assert(elementText(panelOf(elements)).includes('都超出导出预算'), 'confirming with nothing left reports that');
+  assert(requests.filter((request) => request.path.endsWith('/orphans/export')).length === exportAttemptsBefore + 2,
+    'confirming sends no second export when nothing is left');
+
+  // A partial export succeeded, so it must not wear the error banner; it stays on
+  // screen because it reports an omission, which a four-second toast cannot.
+  const bannerProps = { t, interaction: {}, top: 0, onDismiss: () => {}, onUndoTrash: () => {}, onViewArchived: () => {} };
+  const partialBanner = clientExports.__test.NoticeBanner({ ...bannerProps, notice: { kind: 'partial', text: 'partial text' } });
+  assert(String(partialBanner.props.className).includes('dac-notice-ok'),
+    'a partial export uses the success banner, not the error one');
+  assert(partialBanner.props.role === 'status', 'a partial export is announced as a status, not an alert');
+  const errorBanner = clientExports.__test.NoticeBanner({ ...bannerProps, notice: { kind: 'error', text: 'boom' } });
+  assert(errorBanner.props.className === 'dac-notice' && errorBanner.props.role === 'alert',
+    'an error still uses the alert banner');
+
+  // Restore a selection so the delete flow below still has rows to act on.
+  buttonsIn(elements).find((button) => elementText(button) === '全选')?.props.onClick();
+  elements = render();
+  assert(buttonsIn(elements).find((button) => elementText(button) === '永久删除')?.props.disabled !== true,
+    'a row refused for export can still be selected and deleted');
+
+  const deleteRequests = () => requests.filter((request) => request.path.endsWith('/orphans/delete')).length;
+  const askDelete = (list) => {
+    const button = buttonsIn(list).find((item) => elementText(item) === '永久删除');
+    assert(button !== undefined && button.props.disabled !== true, 'delete is enabled once rows are selected');
+    assert(button.props.className !== undefined, 'orphan actions stay in the panel, not the shared header');
+    const before = deleteRequests();
+    button.props.onClick({ currentTarget: null });
+    const opened = render();
+    assert(deleteRequests() === before, 'opening the confirmation sends no mutation');
+    return opened;
+  };
+  const confirmDelete = async (list) => {
+    const dialog = list.find((el) => el.props?.role === 'alertdialog');
+    assert(dialog !== undefined && elementText(dialog).includes('永久删除孤儿会话'),
+      'deleting opens an irreversible confirmation naming the scope');
+    const button = collectElements(dialog).filter((el) => el.type === 'button').find((item) => elementText(item) === '永久删除');
+    assert(button !== undefined, 'the confirmation carries a destructive confirm control');
+    button.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return render();
+  };
+
+  // The first attempt is rejected by the Host. That failure has to be visible on
+  // this tab: a notice rendered only in the archive and recycle panels left this
+  // tab's actions looking like they did nothing at all.
+  elements = await confirmDelete(askDelete(elements));
+  assert(elementText(panelOf(elements)).includes('孤儿会话列表已变化'),
+    'a rejected orphan deletion is reported on the orphans tab');
+  assert(elementText(panelOf(elements)).includes('Orphan Alpha'), 'a rejected deletion leaves the rows in place');
+
+  // Retry with the set stable again: the same control must now succeed.
+  elements = await confirmDelete(askDelete(elements));
+  const deleteRequest = requests.filter((request) => request.path.endsWith('/orphans/delete')).at(-1);
+  assert(deleteRequest !== undefined, 'confirming posts the orphan deletion');
+  assert(deleteRequest?.options?.headers?.['x-dsh-archived-chats'] === '1', 'the orphan deletion carries the guard header');
+  assert(JSON.parse(deleteRequest?.options?.body ?? '{}').sessionIds?.length === 2, 'the deletion targets exactly the selected rows');
+  assert(elementText(panelOf(elements)).includes('没有孤儿会话'), 'the panel reports its empty state after the list drains');
+
+  harness.unmount();
+  globalThis.fetch = savedFetch;
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.

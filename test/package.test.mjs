@@ -41,6 +41,9 @@ const publicRoutes = [
   'POST /plugins/dsh-archived-chats/unarchive-all',
   'POST /plugins/dsh-archived-chats/delete',
   'POST /plugins/dsh-archived-chats/delete-all',
+  'GET  /plugins/dsh-archived-chats/orphans',
+  'POST /plugins/dsh-archived-chats/orphans/delete',
+  'POST /plugins/dsh-archived-chats/orphans/export',
 ];
 
 function parseArchitectureRoutes(contents) {

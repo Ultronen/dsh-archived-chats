@@ -11,7 +11,7 @@ The plugin supplements archive management; it does not replace DSH's main chat a
 | Module (under `lib/`) | Responsibility |
 | --- | --- |
 | `index.js` | Host capability resolution, routes, archive visibility, lifecycle queue, physical deletion |
-| `client.js` | Settings page, five views, dialogs, native archive notice, request state |
+| `client.js` | Settings page, six views, dialogs, native archive notice, request state |
 | `about.js` | Local plugin identity, bounded public version checks, in-memory cache |
 | `persistence-compat.js` | Legacy inspect and modern read-handle adaptation; separate title reads |
 | `workspace-bulk-archive.js` | Eligible workspace chats, short-lived confirmation, apply-time checks |
@@ -21,7 +21,7 @@ The plugin supplements archive management; it does not replace DSH's main chat a
 | `search.js`, `stats.js`, `insights.js` | Message projection/search, directory measurements, storage accounting |
 | `retention.js`, `retention-service.js`, `auto-retention.js` | Policy, confirmation/revalidation, startup recovery and scheduling |
 | `lineage.js` | Read-only source, fork, and subagent projection |
-| `session-graph.js` | Session-id normalization and subagent descendant resolution |
+| `session-graph.js` | Session-id normalization, subagent descendant resolution, orphan classification |
 
 The UI moves chats to the Recycle Bin only through workspace actions. Rows can permanently delete or unarchive. Workspace export and export-all remain. A compatibility backend endpoint accepting one ID does not imply a row-level recycle action.
 
@@ -58,6 +58,9 @@ POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
+GET  /plugins/dsh-archived-chats/orphans
+POST /plugins/dsh-archived-chats/orphans/delete
+POST /plugins/dsh-archived-chats/orphans/export
 ```
 
 Except for export, these POST routes require `x-dsh-archived-chats: 1`. Content preview, images, and search also use guarded POST. Export separately accepts a bounded native form without this header guard and checks current archive visibility for the requested sessions. Other routes parse their respective bounded payloads.
@@ -67,6 +70,10 @@ All `/history` and `/history/*` routes are removed; their former 410 response is
 `/delete` accepts `sessionId`; `/delete-all` accepts `sessionIds`. By default they call recycle `move`; only `permanent: true` invokes `deleteArchived`. Direct archive purge returns `{ deleted, pending, failed }`. With failures and no successful deletions it returns HTTP 409; partial success can return 200. Consumers must inspect the result arrays rather than the status alone.
 
 Recycle endpoints call `restore`, `purge`, and `empty`. Empty requires the exact `trashed`/`degraded` record incarnations captured by the confirmation, including recycle and snapshot identity. The service purges only those targets: later records are excluded, and changed targets fail instead of expanding or recomputing the scope. Existing `purge-pending` tasks continue only through their independent retry flow. Canonical exclusive-directory checks authorize session-owned deletion; they do not claim broad filesystem deletion guarantees, and uncertain outcomes retain their durable records.
+
+The orphan routes are the only place this plugin destroys a session that was never archived. `GET /orphans` lists the residue: subagent sessions whose parent no longer exists, plus top-level sessions that never recorded a turn. A subagent whose parent is still stored is reachable through that parent and is not listed, and neither is a branched chat, which is an independent conversation. Blankness cannot be read from a header, so it is decided by reading the log, and that scan is bounded — a store with very many candidates lists fewer rather than reading without limit.
+
+`POST /orphans/delete` and `POST /orphans/export` never trust the id list they are handed: both recompute the orphan set and refuse the entire request with `orphan-set-changed` when any id is no longer an orphan. Being an orphan is what replaces the archive precondition, so without that check the route would delete any session by id. Delete reuses the whole permanent-delete path — exclusive-directory verification, snapshot sweeping, live disposal, the durable `purge-pending` intent, and the registry index purge — with the archive precondition as the single step lifted. Export reuses the archive export writer and its budgets, and like `/export` it accepts a bounded native form with no guard header. Preview and preview-image accept `scope: "orphan"`, whose visibility authority is the same recomputed orphan set.
 
 ## State, ownership, and durability
 

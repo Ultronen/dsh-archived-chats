@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  classifyUnaccountedSessions,
   indexSessionHeaders,
   normalizeSessionId,
   resolveSubagentDescendants,
@@ -150,4 +151,63 @@ test('enforces the descendant bound', () => {
     (error) => error.code === 'session-graph-limit-exceeded',
   );
   assert.throws(() => resolveSubagentDescendants(headers, ['r'], { maxNodes: 0 }), TypeError);
+});
+
+test('classifies a subagent with a missing parent as an orphan', () => {
+  const headers = [root('kept'), subagent('lost', 'deleted-parent')];
+  const { orphans, topLevel } = classifyUnaccountedSessions(headers, []);
+  assert.deepEqual(orphans.map((node) => node.rawId), ['lost']);
+  assert.deepEqual(topLevel.map((node) => node.rawId), ['kept']);
+});
+
+test('a subagent whose parent exists is not an orphan, in either dialect', () => {
+  // This is the failure that matters most: `parentSession` uses the other
+  // dialect than the stored parent id, so a raw comparison reports a healthy
+  // child as an orphan and the count inflates.
+  const headers = [
+    root('session-parent'),
+    subagent('prefixed-child', 'session-parent'),
+    subagent('bare-child', 'parent'),
+    subagent('lost', 'genuinely-gone'),
+  ];
+  const { orphans } = classifyUnaccountedSessions(headers, []);
+  assert.deepEqual(orphans.map((node) => node.rawId), ['lost']);
+});
+
+test('accounted sessions are never classified, in either dialect', () => {
+  // The archive set stores `session-owned`; asking with the bare dialect must
+  // still exclude it, and its subagent stays reachable through it.
+  const headers = [root('session-owned'), root('session-free'), subagent('child-of-owned', 'session-owned')];
+  const { orphans, topLevel } = classifyUnaccountedSessions(headers, ['owned']);
+  assert.deepEqual(orphans.map((node) => node.rawId), []);
+  assert.deepEqual(topLevel.map((node) => node.rawId), ['session-free']);
+});
+
+test('a fork is not an orphan of the chat it branched from', () => {
+  // Even when the origin session is gone, the fork is an independent chat that
+  // someone may still want, so it must never be offered as residue.
+  const headers = [fork('forked', 'deleted-origin')];
+  const { orphans, topLevel } = classifyUnaccountedSessions(headers, []);
+  assert.deepEqual(orphans, []);
+  assert.deepEqual(topLevel, []);
+});
+
+test('a self-parented subagent is an orphan rather than a phantom parent', () => {
+  const headers = [{ id: 'loop', createdAt: 1, cwd: '/p', parentSession: 'loop', origin: 'subagent', delegationDepth: 1 }];
+  const { orphans } = classifyUnaccountedSessions(headers, []);
+  assert.deepEqual(orphans.map((node) => node.rawId), ['loop']);
+});
+
+test('classification is sorted oldest-first and tolerates bad input', () => {
+  const headers = [
+    { ...subagent('late', 'gone-a'), createdAt: 5 },
+    subagent('early', 'gone-b'),
+    { ...subagent('undated', 'gone-c'), createdAt: undefined },
+    null,
+    'nope',
+  ];
+  const { orphans } = classifyUnaccountedSessions(headers, []);
+  assert.deepEqual(orphans.map((node) => node.rawId), ['early', 'late', 'undated']);
+  assert.deepEqual(classifyUnaccountedSessions(undefined, undefined), { orphans: [], topLevel: [] });
+  assert.deepEqual(classifyUnaccountedSessions(headers, null).orphans.length, 3);
 });

@@ -102,6 +102,16 @@ Once deletion starts, the plugin saves a non-restorable deletion task, removes a
 
 Missing required Host capabilities cause refusal before a deletion task is committed. Removing snapshot attachment copies does not guarantee immediate reclamation of matching bytes in Harness's global attachment store; other references and Host caching or garbage collection may retain them.
 
+## Orphan sessions
+
+A subagent chat belongs to the chat that spawned it. When a parent was permanently deleted without its subagents — which is what earlier versions did — those subagents stayed on disk while belonging to no workspace, so no list could show them and no action could reach them. The Orphan sessions tab collects that residue.
+
+It lists two kinds. Orphan subagents are subagent chats whose parent no longer exists. Blank chats are top-level chats that were created but never recorded a single turn. A subagent whose parent still exists is reachable through that parent and is not listed, and a branched chat is never treated as an orphan of the chat it branched from.
+
+Select rows to export them as a ZIP in the same format as the archive export, or to delete them permanently. Deletion is irreversible and asks for confirmation first; it removes each chat's session directory, so those chats cannot be restored afterwards. Deleting is safe for the rest of your data: the Host recomputes the list immediately before deleting, and if any selected row is no longer an orphan the whole request fails instead of removing something you did not select.
+
+Permanently deleting a chat now also deletes its subagent descendants, so this tab only fills up with residue left behind by an earlier version.
+
 ## Export and import
 
 Choose Export all from the header's More menu to export every archived chat, or from a workspace menu to export only that workspace's archive. Both ask you to confirm the full scope and chat count and exclude Recycle Bin contents. Restore recycled chats to Archived first if you need to export them. Import backup is also in the header's More menu.

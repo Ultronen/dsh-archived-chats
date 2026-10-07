@@ -11,7 +11,7 @@
 | 模块（均位于 `lib/`） | 职责 |
 | --- | --- |
 | `index.js` | Host 能力解析、路由、归档可见性、生命周期队列及物理删除 |
-| `client.js` | 设置页、五个主视图、弹窗、原生归档提示与请求状态 |
+| `client.js` | 设置页、六个主视图、弹窗、原生归档提示与请求状态 |
 | `about.js` | 本地插件信息、受限的公开版本查询与运行期缓存 |
 | `persistence-compat.js` | 旧版 inspect 与新版只读句柄适配，独立标题读取 |
 | `workspace-bulk-archive.js` | 工作区归档候选、短效确认、执行重检 |
@@ -21,7 +21,7 @@
 | `search.js`、`stats.js`、`insights.js` | 消息投影与搜索、会话目录测量、空间分账 |
 | `retention.js`、`retention-service.js`、`auto-retention.js` | 策略、确认与重检、启动恢复及定时任务 |
 | `lineage.js` | 只读来源、分叉与子代理关系投影 |
-| `session-graph.js` | 会话 ID 归一化与子代理后代解析 |
+| `session-graph.js` | 会话 ID 归一化、子代理后代解析与孤儿分类 |
 
 界面仅通过工作区操作移入回收站；单条可永久删除或取消归档。保留工作区导出与全部导出。后端兼容接口可接收单条 ID，不代表界面提供单条移入入口。
 
@@ -58,6 +58,9 @@ POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
+GET  /plugins/dsh-archived-chats/orphans
+POST /plugins/dsh-archived-chats/orphans/delete
+POST /plugins/dsh-archived-chats/orphans/export
 ```
 
 除导出外，上述 POST 路由要求 `x-dsh-archived-chats: 1`。读取对话内容的预览、图片、搜索也使用受保护 POST。导出单独接受有界原生表单，不使用此 header 守卫，并检查所请求会话的当前归档可见性；其余路由按各自限定解析载荷。
@@ -67,6 +70,10 @@ POST /plugins/dsh-archived-chats/delete-all
 `/delete` 接收 `sessionId`，`/delete-all` 接收 `sessionIds`。默认调用回收服务 `move`；仅 `permanent: true` 调用 `deleteArchived`。归档直接永久删除返回 `{ deleted, pending, failed }`；全部失败且没有删除成功项时为 HTTP 409，部分成功仍可返回 200，调用方必须检查结果数组，不能只看状态码。
 
 回收接口分别调用 `restore`、`purge`、`empty`。empty 要求确认时捕获的精确 `trashed`／`degraded` 记录实例，包括回收与快照身份。服务只清理这些目标：之后新增的记录被排除，已变更目标失败，不扩大或重算范围。已有 `purge-pending` 任务只由独立重试流程续作。规范的独占目录检查只授权删除会话所有的目标，不是广义文件系统删除保证；结果不确定时保留持久记录。
+
+孤儿路由是本插件唯一销毁从未归档会话的地方。`GET /orphans` 列出残留：父会话已不存在的子代理会话，以及从未记录任何轮次的顶层会话。父会话仍在存储中的子代理可经由该父访问，因此不列出；分叉会话是独立会话，同样不列出。空白无法从 header 判断，只能读取日志决定，且该扫描有界——候选极多时宁可少列，也不无界读取。
+
+`POST /orphans/delete` 与 `POST /orphans/export` 绝不信任收到的 ID 列表：两者都重新计算孤儿集合，只要有一个 ID 已不再是孤儿，就整体拒绝并返回 `orphan-set-changed`。孤儿身份正是替代归档前置校验的东西；没有这项检查，该路由就能按 ID 删除任意会话。删除完整复用永久删除路径——独占目录校验、快照清扫、活动会话处置、持久 `purge-pending` 意图与注册表索引清理——仅解除归档前置校验这一步。导出复用归档导出写入器及其预算，并且与 `/export` 一样接受有界原生表单、不使用 guard header。预览与图片预览接受 `scope: "orphan"`，其可见性依据是同一个重新计算的孤儿集合。
 
 ## 状态、所有权与持久化
 
