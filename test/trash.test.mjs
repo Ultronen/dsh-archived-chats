@@ -179,3 +179,15 @@ test('legacy pending accepts only the exact ids array shape', async () => {
   await writeFile(path, '{broken', 'utf8');
   assert.equal((await readLegacyPending(path)).status, 'unavailable');
 });
+
+
+test('cascade purge intent survives disk reload without changing legacy records', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dac-cascade-trash-'));
+  const path = join(root, 'trash.json');
+  const record = { ...readyRecord(), state: 'purge-pending', purgeRequestedAt: readyRecord().trashedAt,
+    cascadeSessionIds: ['child', 'grandchild'] };
+  await createTrashStore({ path }).put(record);
+  assert.deepEqual((await createTrashStore({ path }).get('session-a')).cascadeSessionIds, ['child', 'grandchild']);
+  assert.throws(() => normalizeTrashRecord({ ...record, cascadeSessionIds: ['session-a'] }));
+  assert.throws(() => normalizeTrashRecord({ ...record, state: 'trashed', purgeRequestedAt: null }));
+});

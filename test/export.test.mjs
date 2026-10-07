@@ -10,6 +10,7 @@ import {
   createSessionRecord,
   renderTranscript,
   createExportZip,
+  validateExport,
 } from '../lib/export.js';
 import { IMPORT_LIMITS, inspectImport } from '../lib/import.js';
 
@@ -456,4 +457,13 @@ test('export enforces every import-facing byte, structure, and source budget bef
     () => createExportZip({ plan: one, inspect: async (id) => ({ meta: { id, isSeeded: true }, events: [] }), generatorVersion: '0.7.0' }),
     (error) => error.code === 'export-source-invalid',
   );
+});
+
+
+test('export preflight checks import budgets without creating an unconsumed ZIP stream', async () => {
+  const plan = planExport([{ id: 'session-a' }]);
+  const inspect = async () => ({ meta: { id: 'session-a', version: 1, createdAt: 0, cwd: '/workspace' }, events: [] });
+  assert.equal(await validateExport({ plan, inspect, generatorVersion: '1.4.6' }), undefined);
+  await assert.rejects(validateExport({ plan, inspect, generatorVersion: '1.4.6', limits: { maxJsonBytes: 1 } }),
+    { code: 'export-limit-exceeded', sessionId: 'session-a' });
 });

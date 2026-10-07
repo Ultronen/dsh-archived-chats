@@ -24,7 +24,7 @@ Alternatively, run this command on the computer running DSH:
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH and open **Settings → Archive Management** (Chinese: **设置 → 归档管理**). The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
+Restart DSH and open **Settings → Archive Management** (Chinese: **设置 → 归档管理**). The views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, **Orphan sessions**, and **About**.
 
 Before updating an older installation, read “Upgrades, old data, and downgrades” below, especially the snapshot-cleanup warning.
 
@@ -104,11 +104,13 @@ Missing required Host capabilities cause refusal before a deletion task is commi
 
 ## Orphan sessions
 
+Rows show full session IDs. Use **Refresh list** to rescan. Blank chats whose contents cannot be verified are preserved.
+
 A subagent chat belongs to the chat that spawned it. When a parent was permanently deleted without its subagents — which is what earlier versions did — those subagents stayed on disk while belonging to no workspace, so no list could show them and no action could reach them. The Orphan sessions tab collects that residue.
 
 It lists two kinds. Orphan subagents are subagent chats whose parent no longer exists. Blank chats are top-level chats that were created but never recorded a single turn. A subagent whose parent still exists is reachable through that parent and is not listed, and a branched chat is never treated as an orphan of the chat it branched from.
 
-Select rows to export them as a ZIP in the same format as the archive export, or to delete them permanently. Deletion is irreversible and asks for confirmation first; it removes each chat's session directory, so those chats cannot be restored afterwards. Deleting is safe for the rest of your data: the Host recomputes the list immediately before deleting, and if any selected row is no longer an orphan the whole request fails instead of removing something you did not select.
+Select rows to export them as a ZIP in the same format as the archive export, or to delete them permanently. Deletion is irreversible and asks for confirmation first; it removes each chat's session directory, so those chats cannot be restored afterwards. At the start of deletion the Host rechecks every selected row; if any is no longer an orphan, the whole request fails. Each item is checked again before deletion. Later Host changes or disk failures can produce partial results with visible failures and pending retries.
 
 Permanently deleting a chat now also deletes its subagent descendants, so this tab only fills up with residue left behind by an earlier version.
 

@@ -327,3 +327,52 @@ test('official modern backend: purge and empty succeed with compressed historica
     await assert.rejects(access(dirname(paths.get(id))), { code: 'ENOENT' });
   }
 });
+
+test('official modern backend: cascade preserves forks and orphan backups remain importable', { skip: !nativeRoot }, async t => {
+  const f = await fixture(t);
+  const parent = 'session-native-parent';
+  const headers = [
+    { id: parent },
+    { id: 'native-child', parentSession: 'native-parent', origin: 'subagent', delegationDepth: 1 },
+    { id: 'native-grandchild', parentSession: 'native-child', origin: 'subagent', delegationDepth: 2 },
+    { id: 'native-fork', parentSession: parent },
+    { id: 'native-fork-child', parentSession: 'native-fork', origin: 'subagent', delegationDepth: 1 },
+    { id: 'native-orphan', parentSession: 'missing-parent', origin: 'subagent', delegationDepth: 1 },
+    { id: 'native-blank' },
+  ];
+  for (const fields of headers) {
+    const header = { version: sessionFormatVersion, createdAt: 42, cwd: f.root, isSeeded: false, ...fields };
+    const handle = await f.raw.create(header);
+    if (fields.id === 'native-orphan') await handle.append([{ seq: 0, time: 42, type: 'user/message', surfaceOp: 'append', data: {
+      id: 'orphan-message', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Synthetic orphan content' }],
+    } }]);
+    await handle.flush(); await handle.close();
+  }
+  f.registry.state.archivedSessionIds = [parent];
+  await f.workspace.attachSession(parent);
+  const removed = await f.call('/delete-all', { sessionIds: [parent], permanent: true });
+  assert.equal(removed.status, 200, removed.bytes.toString());
+  assert.deepEqual(removed.json().deleted.sort(), ['native-child', 'native-grandchild', parent].sort());
+  const remaining = (await f.raw.list()).map(item => item.header.id);
+  assert.equal(remaining.includes('native-fork'), true);
+  assert.equal(remaining.includes('native-fork-child'), true);
+  const listed = await f.call('/orphans');
+  assert.deepEqual(listed.json().sessions.map(row => row.id).sort(), ['native-blank', 'native-orphan']);
+  const preview = await f.call('/preview', { sessionId: 'native-orphan', scope: 'orphan' });
+  assert.equal(preview.status, 200, preview.bytes.toString());
+  assert.equal(preview.json().messages[0].segments[0].text, 'Synthetic orphan content');
+  const exported = await f.call('/orphans/export', Buffer.from(new URLSearchParams({ sessionIds: JSON.stringify(['native-orphan']) }).toString()),
+    { 'content-type': 'application/x-www-form-urlencoded' });
+  assert.equal(exported.status, 200, exported.bytes.toString());
+  assert.equal(JSON.parse(Buffer.from(unzipSync(exported.bytes)['manifest.json'])).version, 2);
+  const deleted = await f.call('/orphans/delete', { sessionIds: ['native-orphan', 'native-blank'] });
+  assert.equal(deleted.status, 200, deleted.bytes.toString());
+  const plan = await f.inspect(exported.bytes);
+  assert.equal((await f.call('/import/restore', { token: plan.token, nonce: plan.nonce, sessionIds: ['native-orphan'] })).status, 200);
+  const reopened = await f.raw.open('native-orphan', 'read');
+  assert.equal((await reopened.read()).events[0].data.content[0].text, 'Synthetic orphan content');
+  await reopened.close();
+  const last = (await f.raw.list()).map(item => item.header.id);
+  assert.equal(last.includes('native-fork'), true);
+  assert.equal(last.includes('native-fork-child'), true);
+});

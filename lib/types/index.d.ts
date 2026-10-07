@@ -9,13 +9,13 @@
  * preview, preview/image, search,
  * export, import/inspect, import/restore,
  * metadata, trash, trash/restore, trash/purge, trash/empty, unarchive,
- * unarchive-all, delete, delete-all), streams
+ * unarchive-all, delete, delete-all, orphans, orphans/delete, orphans/export), streams
  * JSON/Markdown backup ZIPs, and wires archive insights:
  * per-session tags/notes joined into `/state`, storage statistics from
  * `/stats`, guarded projected-message reads through `/preview` and `/search`.
  * `/preview` returns bounded structured tool/image descriptors. The separately
  * listed `/preview/image` route is guarded and read-only, authorizes each stored
- * image against the archived or explicitly trash-scoped session's projected
+ * image against the archived, trash, or orphan session's projected
  * attachment descriptors, and
  * degrades only image loading when the optional attachment service is absent.
  * Metadata mutation remains guarded through `/metadata`, and archive restore is
@@ -60,6 +60,19 @@ export interface RecycleSessionRow {
   snapshotBytes: number;
   snapshotAttachmentCount: number;
   liveDisposition: RecycleLiveDisposition;
+  /** Durable subagent targets retained until the complete cascade finishes. */
+  cascadeSessionIds?: string[];
+}
+
+export interface OrphanSessionRow {
+  id: string;
+  kind: 'subagent' | 'blank';
+  title: string | null;
+  createdAt: number | null;
+  cwd: string | null;
+  parentSession: string | null;
+  delegationDepth: number | null;
+  sizeBytes: number | null;
 }
 
 export interface RecycleSummary {

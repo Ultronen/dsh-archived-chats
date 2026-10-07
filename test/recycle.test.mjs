@@ -162,6 +162,11 @@ function recycleFixture(options = {}) {
     async get(sessionId) { return records.has(sessionId) ? structuredClone(records.get(sessionId)) : null; },
     async list() { return [...records.values()].map((record) => structuredClone(record)); },
     async put(record) { calls.push(`trash:put:${record.sessionId}`); records.set(record.sessionId, structuredClone(record)); return structuredClone(record); },
+    async setCascadeTargets(id, ids) {
+      const record = records.get(id);
+      record.cascadeSessionIds ??= [...ids];
+      return structuredClone(record);
+    },
     async transition(sessionId, state, patch = {}) {
       calls.push(`trash:transition:${sessionId}:${state}`);
       const current = records.get(sessionId);
@@ -275,6 +280,7 @@ function recycleFixture(options = {}) {
   const disposeStarted = new Promise((resolve) => { markDisposeStarted = resolve; });
   const disposeLive = async (sessionId) => {
     calls.push(`dispose:${sessionId}`);
+    await options.onDispose?.(sessionId, persistence, headers);
     if (options.pauseDispose) {
       markDisposeStarted();
       await new Promise((resolve) => { releaseDispose = resolve; });
@@ -285,6 +291,7 @@ function recycleFixture(options = {}) {
   const pendingPath = join(root, 'pending-deletions.json');
   const purgePhysical = options.unsupportedPurge ? undefined : async (sessionId) => {
     calls.push(`physical:purge:${sessionId}`);
+    if (options.purgeErrorFor?.(sessionId)) throw options.purgeErrorFor(sessionId);
     if (options.purgeError) throw options.purgeError;
     purgedIds.push(sessionId);
     persistence.ids.delete(sessionId);
@@ -924,4 +931,55 @@ test('a session with no descendants is unaffected by the cascade', async () => {
   const fixture = recycleFixture();
   const result = await fixture.service.deleteArchived(['session-a']);
   assert.deepEqual(result, { deleted: ['session-a'], pending: [], failed: [] });
+});
+
+
+test('an unavailable header inventory refuses permanent deletion before removing a parent', async () => {
+  const f = recycleFixture({ extraHeaders: [subagentHeader('child', 'session-a')] });
+  f.persistence.list = async () => { throw new Error('inventory offline'); };
+  await assert.rejects(f.service.deleteArchived(['session-a']), { code: 'session-inventory-unavailable' });
+  assert.deepEqual(f.purgedIds, []);
+});
+
+test('startup recovery also deletes descendants of a pending parent', async () => {
+  const f = recycleFixture({ records: [trashRecord('session-a', 'purge-pending')],
+    extraHeaders: [subagentHeader('child', 'session-a'), subagentHeader('grandchild', 'child', 2)] });
+  await f.service.recoverStartup();
+  assert.deepEqual([...f.purgedIds].sort(), ['child', 'grandchild', 'session-a']);
+});
+
+test('a cascade failure retains durable targets after the parent has disappeared', async () => {
+  let failChild = true;
+  const f = recycleFixture({ extraHeaders: [subagentHeader('child', 'session-a'), subagentHeader('grandchild', 'child', 2)],
+    purgeErrorFor: id => id === 'child' && failChild ? Object.assign(new Error('busy'), { code: 'EBUSY' }) : null });
+  const result = await f.service.deleteArchived(['session-a']);
+  assert.equal(result.failed.length > 0, true);
+  assert.equal(f.persistence.ids.has('session-a'), false);
+  assert.deepEqual((await f.trashStore.get('session-a')).cascadeSessionIds, ['child', 'grandchild']);
+  failChild = false;
+  await f.service.recoverStartup();
+  assert.equal(f.persistence.ids.size, 0);
+  assert.equal((await f.trashStore.get('session-a')), null);
+});
+
+
+test('a recycled descendant also preserves its own subagents', async () => {
+  const f = recycleFixture({ extraHeaders: [subagentHeader('child', 'session-a'), subagentHeader('grandchild', 'child', 2)],
+    records: [trashRecord('child')] });
+  const result = await f.service.deleteArchived(['session-a']);
+  assert.deepEqual(result.deleted, ['session-a']);
+  assert.equal(f.persistence.ids.has('grandchild'), true);
+});
+
+
+test('live disposal happens before the final cascade inventory', async () => {
+  let spawned = false;
+  const f = recycleFixture({ onDispose: (id, persistence, headers) => {
+    if (id !== 'session-a' || spawned) return;
+    spawned = true;
+    persistence.ids.add('late-child');
+    headers.set('late-child', subagentHeader('late-child', 'session-a'));
+  } });
+  const result = await f.service.deleteArchived(['session-a']);
+  assert.deepEqual(result.deleted.sort(), ['late-child', 'session-a']);
 });

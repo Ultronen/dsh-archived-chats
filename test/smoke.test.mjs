@@ -893,6 +893,43 @@ console.log('\n[1c] POST /import inspect and restore token flow');
   assert(malformed.status === 400, `import inspect rejects a multipart body without a ZIP field (got ${malformed.status})`);
 }
 
+// The request body can be fully consumed before the download is cancelled.
+{
+  const req = mockReq('POST', { 'content-type': 'application/x-www-form-urlencoded' }, 'sessionIds=%5B%22session-a%22%5D');
+  const res = mockRes();
+  res.once('data', () => res.destroy());
+  const handler = routes.get('/plugins/dsh-archived-chats/export');
+  let settled = false;
+  const done = handler(req, res).then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert(settled && req.listenerCount('aborted') === 0, 'cancelled export response settles and releases abort listeners without a request abort');
+  // Release the old implementation's blocked producer so the regression can finish.
+  if (!settled) req.emit('aborted');
+  await done;
+}
+
+{
+  const originalInspect = persistence.inspect;
+  let begin;
+  let resume;
+  const started = new Promise(resolve => { begin = resolve; });
+  const released = new Promise(resolve => { resume = resolve; });
+  persistence.inspect = async id => { begin(); await released; return originalInspect(id); };
+  const req = mockReq('POST', { 'content-type': 'application/x-www-form-urlencoded' }, 'sessionIds=%5B%22session-a%22%5D');
+  const res = mockRes();
+  const handler = routes.get('/plugins/dsh-archived-chats/export');
+  let settled = false;
+  const done = handler(req, res).then(() => { settled = true; });
+  await started;
+  res.destroy();
+  resume();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert(settled && req.listenerCount('aborted') === 0, 'disconnect during export preparation destroys the prepared ZIP and settles');
+  if (!settled) req.emit('aborted');
+  await done;
+  persistence.inspect = originalInspect;
+}
+
 console.log('\n[2] GET /state');
 {
   const res = await call(routes, '/plugins/dsh-archived-chats/state', mockReq('GET', {}));
@@ -6143,21 +6180,31 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
 {
   const orphanId = 'session-orphan';
   const blankId = 'session-blank';
+  const nonemptyId = 'session-unowned-content';
   const addedHeaders = [
     // A subagent whose parent is not in the store at all.
     { id: orphanId, createdAt: 1786726600000, cwd: '/ws/one', parentSession: 'session-gone', origin: 'subagent', delegationDepth: 1 },
     // A top-level session that never recorded a turn.
     { id: blankId, createdAt: 1786726650000, cwd: '/ws/one', delegationDepth: 0 },
+    { id: nonemptyId, createdAt: 1786726650000, cwd: '/ws/one' },
   ];
   headerRows.push(...addedHeaders);
   for (const header of addedHeaders) registry.headers.set(header.id, header);
   events[orphanId] = [{ type: 'turn/start', data: {} }, { type: 'session/title', data: { title: '孤儿工作' } }];
   events[blankId] = [];
+  events[nonemptyId] = [{ type: 'turn/start', data: {} }];
   for (const header of addedHeaders) {
     const dir = join(tmp, header.id);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'session.jsonl.zstd'), 'fake');
   }
+
+  const earlier = Array.from({ length: 201 }, (_, n) => ({ id: `earlier-content-${n}`, createdAt: n, cwd: '/ws/one' }));
+  headerRows.push(...earlier);
+  for (const h of earlier) events[h.id] = [{ type: 'turn/start', data: {} }];
+  const beyondPrefix = await call(routes, '/plugins/dsh-archived-chats/orphans', mockReq('GET', {}));
+  assert(beyondPrefix.json().sessions.some(row => row.id === blankId), 'blank sessions beyond the first 200 candidates remain discoverable');
+  for (const h of earlier) { headerRows.splice(headerRows.indexOf(h), 1); delete events[h.id]; }
 
   const listed = await call(routes, '/plugins/dsh-archived-chats/orphans', mockReq('GET', {}));
   assert(listed.status === 200, `orphans list answers 200 (got ${listed.status})`);
@@ -6183,6 +6230,11 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
   assert(refused.json().sessionIds?.includes('session-c'), 'the refusal names the rejected id');
   assert(headerRows.some((header) => header.id === 'session-c'), 'the refused session still exists');
 
+  const contentRefused = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
+    mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [blankId, nonemptyId] })));
+  assert(contentRefused.status === 409, 'a mixed orphan request containing an unowned conversation is rejected as a whole');
+  assert(existsSync(join(tmp, blankId)) && existsSync(join(tmp, nonemptyId)), 'mixed rejection preserves both directories');
+
   const unguarded = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
     mockReq('POST', {}, JSON.stringify({ sessionIds: [orphanId] })));
   assert(unguarded.status === 403, `an unguarded orphan delete is refused (got ${unguarded.status})`);
@@ -6197,9 +6249,7 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
   assert(!registry.headers.has(orphanId), 'the orphan is gone from the registry header index');
   assert(!existsSync(join(tmp, orphanId)), 'the orphan session directory is gone');
 
-  // A blank row is only listed while its log reads. Authorization must not
-  // depend on that read, or one flaky read rejects the whole selected batch with
-  // `orphan-set-changed` — which is what made select-all export fail at random.
+  // Unreadable blankness cannot authorize irreversible deletion.
   const savedInspect = persistence.inspect;
   persistence.inspect = async (id) => {
     if (id === blankId) throw new Error('log temporarily unreadable');
@@ -6210,8 +6260,8 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
     'an unreadable log drops the row from the display list');
   const stillAuthorized = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
     mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [blankId] })));
-  assert(stillAuthorized.status === 200,
-    `an unreadable log does not revoke a listed row's authorization (got ${stillAuthorized.status})`);
+  assert(stillAuthorized.status === 409 && existsSync(join(tmp, blankId)),
+    'an unreadable log is refused and its directory is preserved');
   persistence.inspect = savedInspect;
 
   // Restore the shared store so anything appended later starts from the baseline.

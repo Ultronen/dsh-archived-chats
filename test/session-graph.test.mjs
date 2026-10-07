@@ -32,10 +32,9 @@ test('normalizes both id dialects and rejects unusable identities', () => {
   assert.equal(normalizeSessionId({}), null);
 });
 
-test('indexes headers by normalized id and keeps the first duplicate', () => {
+test('indexes usable headers by normalized id', () => {
   const byId = indexSessionHeaders([
     subagent('session-abc', 'session-parent'),
-    subagent('abc', 'parent'),
     null,
     'not-a-header',
     { createdAt: 1 },
@@ -210,4 +209,12 @@ test('classification is sorted oldest-first and tolerates bad input', () => {
   assert.deepEqual(orphans.map((node) => node.rawId), ['early', 'late', 'undated']);
   assert.deepEqual(classifyUnaccountedSessions(undefined, undefined), { orphans: [], topLevel: [] });
   assert.deepEqual(classifyUnaccountedSessions(headers, null).orphans.length, 3);
+});
+
+
+test('ambiguous normalized identities cannot authorize orphan cleanup', () => {
+  assert.throws(() => classifyUnaccountedSessions([
+    { id: 'session-a', origin: 'subagent', parentSession: 'missing' },
+    { id: 'a', parentSession: 'different' },
+  ], []), { code: 'session-identity-ambiguous' });
 });
