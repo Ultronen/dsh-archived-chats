@@ -7,10 +7,12 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 ## 未发布 / Unreleased
 
 - 永久删除、清空回收站及重启重试一并清理子代理后代，保留独立分叉；删除目标持久化，活动代理先停止，失败可重试（#57）。
-- 新增「未归档」视图，支持按工作区筛选并勾选归档；其「可清理」筛选支持完整 ID、刷新、预览、可重新导入的 ZIP 导出及确认后的永久删除；超预算导出须确认取消勾选，无法核验的空会话保留（#58）。
+- 新增「未归档」视图，复用已归档的工作区分组排版；搜索在顶部，筛选行右侧提供刷新图标。仅提供单条归档、工作区全部归档及全局全部归档，均先确认；搜索和筛选不缩小批量范围。保留旧版残留会话核验接口兼容（#58）。
+- 修复弹窗、对话预览顶栏、菜单及成功提示的背景穿透，使用随明暗主题变化的不透明宿主层。
 - 修复下载中断后的导出流释放，以及部分删除后的回收站和侧栏刷新。
 - Cascade permanent deletion and recovery through subagent descendants while preserving forks and independent recycle records. Persist targets before removal and quiesce live agents (#57).
-- Add Unarchived with workspace filters and checked-session archiving; its Ready to clean up filter provides full IDs, refresh, preview, restorable ZIP export, and confirmed deletion. Oversized selections require explicit deselection; unverifiable blank chats are preserved (#58).
+- Add Unarchived using Archived’s workspace-group layout, with search above filters and a refresh icon at the right. Offer confirmed individual, workspace-wide, and global archiving only; search and filters do not narrow bulk scope. Retain verified residual-session APIs for compatibility (#58).
+- Fix transparent dialog, preview-header, menu, and success-toast backgrounds with opaque Host surfaces that follow light and dark themes.
 - Release interrupted export streams and refresh the sidebar and recycle list after partial deletion.
 
 ## 1.4.6 — 2026-10-02

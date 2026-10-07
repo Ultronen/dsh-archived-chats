@@ -57,14 +57,14 @@ dsh plugin --profile web update dsh-archived-chats
 | Area | Current behavior |
 | --- | --- |
 | Browse and search | Workspace-grouped archived chats, full-text search, filters, sorting, tags, and notes. |
-| Workspace archiving | A settings-owned workspace chooser supports one or more workspaces and one aggregate confirmation; blank, active, or unreadable chats are skipped. |
+| Workspace archiving | Unarchived offers individual, workspace-wide, and global archiving with aggregate confirmation; blank, active, or unreadable chats are skipped. |
 | Read-only preview | Conversations, reasoning, tool activity, Markdown, JSON, code, and readable stored images without unarchiving. |
 | Backup | Export one workspace or the entire archive as JSON + Markdown ZIP; preview imports and skip conflicting IDs. |
 | Recycle Bin | Move archived chats by workspace; restore one chat, a workspace, or the entire Recycle Bin back to Archived. |
 | Permanent deletion | Delete one archived chat, a workspace's archive, or all archived chats after confirmation. Recycle Bin deletion is separate. |
 | Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
 
-The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Unarchived supports selecting workspace conversations for archiving; its Ready to clean up filter supports preview, export, and confirmed deletion of residual and blank chats. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
+The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Unarchived shares Archived’s search, filters, and workspace-group layout, offering individual, workspace-wide, and global archiving only. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
 
 ## Screenshots
 

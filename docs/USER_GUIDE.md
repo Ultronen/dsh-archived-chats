@@ -32,14 +32,13 @@ Before updating an older installation, read “Upgrades, old data, and downgrade
 
 Use DSH's normal session menu to archive one chat. The success notice offers View and Undo and closes after about three seconds. The plugin groups archived chats by workspace.
 
-To archive in bulk:
+In **Unarchived**, search titles or IDs at the top. The next row provides time/title sorting, workspace filtering, and a refresh icon at the far right. Workspace groups and chat rows use the same layout as Archived.
 
-1. Switch to **Unarchived**. Search by title or ID, or filter by workspace.
-2. Select individual conversations, or use Select all for the visible eligible rows.
-3. Click **Archive selected** and review the count and workspace destination.
-4. Confirm archiving; review the itemized results if anything was skipped or failed.
+- Click **Archive** on an individual chat.
+- The workspace three-dot menu offers **Archive all** for that workspace.
+- The header **Archive all** covers every workspace in the list.
 
-Running chats remain visible with selection disabled. New chats after preparation are excluded, and a chat that starts running or changes workspace is skipped at apply time. Selection resets when search or workspace filters change. Unarchived also supports read-only preview and ZIP export; prior tags and notes are preserved. If metadata cannot be read, the list warns and export is unavailable until it is readable. Normal conversations are deleted through Archived after archiving. This operation does not change workspace directories.
+Search and workspace filters only change display; they do not narrow workspace or global archiving. Review the eligible chat and workspace counts before confirming. Running chats remain visible with individual archiving disabled. Bulk actions skip running, blank, or unverifiable chats. New chats after preparation are excluded; chats that start running or change workspace before apply are skipped. Unarchived only offers archiving, without selection, export, deletion, or a cleanup entry. Archiving preserves workspace directories and prior tags and notes.
 
 Search Archived by title, workspace, tags, notes, messages, and tool results. Filter by type, workspace, and tag; sort by time or title. Content matches show excerpts. Long workspace titles wrap to remain fully visible. Click a workspace folder or title to expand or collapse its chats; the open or closed folder reflects the current state. Group collapse state is saved in the browser.
 
@@ -65,8 +64,9 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 | --- | --- | --- |
 | Archived: chat row | Preview, edit tags and note, Unarchive, Delete | One chat |
 | Archived: workspace More menu | Unarchive all, Move all to Recycle Bin, Export all; separator; Delete all | All archived chats in that workspace |
-| Unarchived: list | Select, preview, export selected, Archive selected | Checked eligible conversations in the visible list |
-| Unarchived: Ready to clean up filter | Select, preview, export selected, Delete permanently | Verified residual and blank chats after confirmation |
+| Unarchived: chat row | Archive | One chat after confirmation |
+| Unarchived: workspace three-dot menu | Archive all | Every eligible chat in that workspace |
+| Unarchived: header | Archive all | Eligible chats across all workspaces |
 | Archived: header | More | Open the global action menu |
 | Archived: header More menu | Import backup, Export all, Unarchive all; separator; Delete all | Export, unarchive, and delete cover archived chats across all workspaces; Import uses the selected ZIP |
 | Recycle Bin: chat row | Preview icon, Restore and Delete text buttons | One recycle record; Delete is permanent after confirmation |
@@ -74,7 +74,7 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 | Recycle Bin: header | Restore all | Restore eligible entries across all workspaces after confirmation |
 | Recycle Bin: header | Empty Recycle Bin | Permanently delete recycle records across all workspaces after confirmation |
 
-**Moving to the Recycle Bin is available only through workspace actions, not individual rows or a global move-all action.** The Archived view has no single-chat export or list multi-select mode; Unarchived operates on checked rows. Search and filters do not narrow workspace or global bulk actions.
+**Moving to the Recycle Bin is available only through workspace actions, not individual rows or a global move-all action.** The Archived view has no single-chat export or list multi-select mode; Unarchived only provides archiving. Search and filters do not narrow workspace or global bulk actions.
 
 Every archive workspace action asks for confirmation with the full workspace name and its complete archive count. Global Export all, Unarchive all, and Delete all confirmations count archived chats across every workspace, excluding the Recycle Bin. Check these counts even when the list is filtered. The header keeps consistent dimensions when switching tabs.
 
@@ -104,17 +104,7 @@ Once deletion starts, the plugin saves a non-restorable deletion task, removes a
 
 Missing required Host capabilities cause refusal before a deletion task is committed. Removing snapshot attachment copies does not guarantee immediate reclamation of matching bytes in Harness's global attachment store; other references and Host caching or garbage collection may retain them.
 
-## Clean up residual chats
-
-Rows show full session IDs. Use **Refresh list** to rescan. Blank chats whose contents cannot be verified are preserved.
-
-A subagent chat belongs to the chat that spawned it. When a parent was permanently deleted without its subagents — which is what earlier versions did — those subagents stayed on disk while belonging to no workspace, so no list could show them and no action could reach them. The **Unarchived → Ready to clean up** filter collects that residue.
-
-It lists two kinds. Residual chats are subagent chats whose parent no longer exists. Blank chats are top-level chats that were created but never recorded a single turn. A subagent whose parent still exists is reachable through that parent and is not listed, and a branched chat is never treated as an orphan of the chat it branched from.
-
-Select rows to export them as a ZIP in the same format as the archive export, or to delete them permanently. Deletion is irreversible and asks for confirmation first; it removes each chat's session directory, so those chats cannot be restored afterwards. At the start of deletion the Host rechecks every selected row; if any is no longer an orphan, the whole request fails. Each item is checked again before deletion. Later Host changes or disk failures can produce partial results with visible failures and pending retries.
-
-Permanently deleting a chat now also deletes its subagent descendants, so this tab only fills up with residue left behind by an earlier version.
+Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Verified residual-session APIs remain for compatibility, without a product-page entry.
 
 ## Export and import
 
