@@ -335,8 +335,8 @@ assert(name === 'archived-chats', `plugin name is "archived-chats" (got "${name}
 assert(routes.size === 0, 'no routes while webServer is unbound');
 services.webServer = { register: (route) => { routes.set(route.path, route.handler); return () => routes.delete(route.path); } };
 listeners.find(([event]) => event === 'internal/service')?.[1]('webServer');
-assert(routes.size === 31, `thirty-one archive-management routes registered after webServer binds (got ${routes.size})`);
-for (const path of ['about', 'about/check-updates', 'state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'orphans', 'orphans/delete', 'orphans/export', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
+assert(routes.size === 33, `thirty-three archive-management routes registered after webServer binds (got ${routes.size})`);
+for (const path of ['about', 'about/check-updates', 'state', 'stats', 'insights', 'retention/policy', 'retention/preview', 'retention/apply', 'lineage', 'preview', 'preview/image', 'search', 'export', 'import/inspect', 'import/restore', 'metadata', 'trash', 'trash/restore', 'trash/purge', 'trash/empty', 'unarchive', 'unarchive-all', 'delete', 'delete-all', 'unarchived', 'unarchived/export', 'orphans', 'orphans/delete', 'orphans/export', 'workspace-archive/workspaces', 'workspace-archive/preview', 'workspace-archive/apply']) {
   assert(routes.has(`/plugins/dsh-archived-chats/${path}`), `route /${path} registered`);
 }
 for (const path of ['history/capture', 'history', 'history/preview', 'history/preview/image', 'history/restore/preview', 'history/restore', 'history/delete', 'history/delete-all']) {
@@ -2890,6 +2890,7 @@ console.log('\n[11a2] client half — modal focus, busy locks, tab navigation, a
   if (typeof ArchiveTabs === 'function') {
     const changes = [];
     const tabsTree = ArchiveTabs({ pageMode: 'archived', onChange: (mode) => changes.push(mode), t });
+    assert(elementText(tabsTree).includes('未归档') && !elementText(tabsTree).includes('孤儿会话'), 'primary navigation exposes Unarchived rather than an internal orphan category');
     const buttons = collectElements(tabsTree).filter((element) => element.props?.role === 'tab');
     const controls = buttons.map(() => ({ focus() { controls.focused = this; } }));
     for (const control of controls) control.parentElement = { querySelectorAll: () => controls };
@@ -2897,7 +2898,7 @@ console.log('\n[11a2] client half — modal focus, busy locks, tab navigation, a
     buttons[4].props.onKeyDown({ key: 'Home', currentTarget: controls[4], preventDefault() {} });
     buttons[0].props.onKeyDown({ key: 'End', currentTarget: controls[0], preventDefault() {} });
     assert(buttons.map((button) => button.props.tabIndex).join(',') === '0,-1,-1,-1,-1,-1'
-      && changes.join(',') === 'trash,archived,about'
+      && changes.join(',') === 'unarchived,archived,about'
       && controls.focused === controls[5],
     'tab strip has one tab stop and Arrow/Home/End both move focus and selection');
   }
@@ -4035,12 +4036,12 @@ console.log('\n[11f] client half — recycle navigation and management');
   harness.flushEffects();
   let elements = collectElements(tree);
   const tabs = elements.filter((element) => element.type === 'button' && element.props?.role === 'tab');
-  assert(tabs.map((tab) => elementText(tab)).join(',') === '已归档,回收站,空间与策略,来源与分支,孤儿会话,关于',
+  assert(tabs.map((tab) => elementText(tab)).join(',') === '已归档,未归档,回收站,空间与策略,来源与分支,关于',
     'archive manager keeps management tabs before the final About tab');
   assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
   assert(requests.every((request) => !request.path.includes('/history')), 'retired History API is never requested');
 
-  for (const [index, actionCount] of [[0, 5], [1, 2], [2, 0], [3, 0], [4, 0], [5, 0]]) {
+  for (const [index, actionCount] of [[0, 4], [1, 0], [2, 2], [3, 0], [4, 0], [5, 0]]) {
     if (!tabs[index]) { assert(false, `tab ${index} exists`); continue; }
     tabs[index].props.onClick();
     const modeTree = harness.render({ t, refreshSidebar: () => {} });
@@ -4781,7 +4782,7 @@ console.log('\n[11f2] client half — global recycle restore and About');
   render(); harness.flushEffects();
   await new Promise(resolve => setTimeout(resolve, 0));
   let tree = render();
-  assert(elementText(tree).includes('批量归档') && !elementText(tree).includes('批量归档工作区'), 'archive toolbar uses the shorter bulk archive label');
+  assert(elementText(tree).includes('未归档') && !elementText(tree).includes('批量归档'), 'archive toolbar integrates bulk archive into the Unarchived view');
   assert(elementText(tree).includes('v1.3.3'), 'title row displays the loaded backend version');
   const updateLink = collectElements(tree).find(el => el.type === 'a' && elementText(el) === '去更新');
   assert(updateLink?.props.href === about.links.marketplace, 'new-version header action opens the market rather than running installation');
@@ -5714,16 +5715,31 @@ console.log('\n[11j] client half — workspace archive final coverage');
   let pageTree = pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise((resolve) => setTimeout(resolve, 0));
   let pageElements = collectElements(pageHarness.render(pageProps));
   let restoredSettingsFocus = 0;
-  const settingsTrigger = pageElements.find((element) => element.type === 'button' && elementText(element) === t('workspaceArchive.settingsAction'));
-  settingsTrigger?.props.onClick({ currentTarget: { focus: () => { restoredSettingsFocus += 1; } } });
+  assert(!pageElements.some(element => element.type === 'button' && elementText(element) === t('workspaceArchive.settingsAction')), 'settings removes the standalone bulk archive trigger');
+  const unarchivedRows = [
+    { id: 'chosen-a', title: 'First chat', workspaceId: 'workspace-settings', workspaceTitle: 'Settings Project', busy: false },
+    { id: 'other-a', title: 'Other chat', workspaceId: 'workspace-settings', workspaceTitle: 'Settings Project', busy: false },
+    { id: 'chosen-b', title: 'Second chat', workspaceId: 'workspace-two', workspaceTitle: 'Second Project', busy: false },
+    { id: 'live-a', title: 'Running chat', workspaceId: 'workspace-two', workspaceTitle: 'Second Project', busy: true },
+  ];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => String(url).endsWith('/unarchived')
+    ? { ok: true, status: 200, json: async () => ({ sessions: unarchivedRows }) } : previousFetch(url, options);
+  pageElements.find(el => el.props?.id === 'dac-tab-unarchived').props.onClick();
+  pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise(resolve => setTimeout(resolve, 0));
   pageTree = pageHarness.render(pageProps);
-  const chooser = findComponentElement(pageTree, 'WorkspaceArchiveChooserDialog');
-  assert(chooser !== undefined, 'settings trigger opens the workspace chooser without a Host workspace-menu slot');
-  chooser.props.onChoose([{ id: 'workspace-settings', title: 'Settings Project' }, { id: 'workspace-two', title: 'Second Project' }]);
+  pageElements = collectElements(pageTree);
+  assert(elementText(pageTree).includes('First chat') && elementText(pageTree).includes('Running chat'), 'Unarchived lists regular and live workspace conversations');
+  const checkboxes = pageElements.filter(el => el.type?.name === 'SelectionCheckbox');
+  assert(checkboxes.find(el => el.props.ariaLabel === 'Running chat')?.props.disabled === true, 'a live conversation is visible but cannot be selected for archive');
+  checkboxes.find(el => el.props.ariaLabel === 'First chat').props.onChange();
+  checkboxes.find(el => el.props.ariaLabel === 'Second chat').props.onChange();
+  pageElements = collectElements(pageHarness.render(pageProps));
+  pageElements.find(el => el.type === 'button' && elementText(el) === '归档选中项').props.onClick({ currentTarget: { focus: () => { restoredSettingsFocus += 1; } } });
   pageTree = pageHarness.render(pageProps);
   const refreshDialog = findComponentElement(pageTree, 'WorkspaceArchiveDialog');
-  assert(refreshDialog?.props.workspaces?.map((workspace) => workspace.id).join(',') === 'workspace-settings,workspace-two',
-    'the settings-owned chooser opens one confirmation for every selected workspace');
+  assert(JSON.stringify(refreshDialog?.props.workspaces?.map(({ id, sessionIds }) => [id, sessionIds])) === JSON.stringify([['workspace-settings', ['chosen-a']], ['workspace-two', ['chosen-b']]]),
+    'checked conversations open one confirmation bound to exactly those IDs across workspaces');
   const findTab = (label) => pageElements.find((element) => element.type === 'button' && element.props?.role === 'tab' && elementText(element) === label);
   const archivedTab = findTab(t('tab.archived'));
   const insightsTab = findTab(t('tab.insights'));
@@ -6220,6 +6236,36 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
   assert(body.summary?.subagent >= 1 && body.summary?.blank >= 1, `the summary counts both kinds (${JSON.stringify(body.summary)})`);
   assert(orphanRow?.sizeBytes > 0, `an orphan row carries its measured size (got ${orphanRow?.sizeBytes})`);
 
+  // A regular unarchived conversation retains metadata after unarchiving.
+  workspaces[0].sessionIds.push(nonemptyId);
+  workspaceState.archivedSessionIds.push(nonemptyId);
+  const savedMeta = await call(routes, '/plugins/dsh-archived-chats/metadata', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: nonemptyId, tags: ['keep'], note: 'preserve this note' })));
+  assert(savedMeta.status === 200, 'metadata is set before unarchiving the fixture');
+  workspaceState.archivedSessionIds.splice(workspaceState.archivedSessionIds.indexOf(nonemptyId), 1);
+  const unarchived = await call(routes, '/plugins/dsh-archived-chats/unarchived', mockReq('GET', {}));
+  assert(unarchived.status === 200 && unarchived.json().sessions.some(row => row.id === nonemptyId && row.note === 'preserve this note' && row.tags?.[0] === 'keep'), 'the Unarchived list retains metadata from an earlier archive');
+  const previewRegular = await call(routes, '/plugins/dsh-archived-chats/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: nonemptyId, scope: 'unarchived' })));
+  assert(previewRegular.status === 200, 'regular unarchived chats can be previewed before archiving');
+  const exportedRegular = await call(routes, '/plugins/dsh-archived-chats/unarchived/export', mockReq('POST', { 'content-type': 'application/x-www-form-urlencoded' }, new URLSearchParams({ sessionIds: JSON.stringify([nonemptyId]) }).toString()));
+  assert(exportedRegular.status === 200, 'regular unarchived chats can be exported before archiving');
+  if (exportedRegular.status === 200) {
+    const files = unzipSync(exportedRegular.bytes());
+    const sessionFile = Object.keys(files).find(path => path.endsWith('/session.json'));
+    const archive = JSON.parse(strFromU8(files[sessionFile])).archive;
+    assert(archive.note === 'preserve this note' && archive.tags?.[0] === 'keep', 'unarchived backup preserves tags and notes');
+  }
+  const noLongerVisible = await call(routes, '/plugins/dsh-archived-chats/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: orphanId, scope: 'unarchived' })));
+  assert(noLongerVisible.status === 404, 'the regular unarchived scope cannot preview a cleanup-only candidate');
+  const metadataBeforeFailure = readFileSync(metadataFile, 'utf8');
+  writeFileSync(metadataFile, '{ broken', 'utf8');
+  try {
+    const degradedList = await call(routes, '/plugins/dsh-archived-chats/unarchived', mockReq('GET', {}));
+    assert(degradedList.status === 200 && degradedList.json().metadataStatus === 'unavailable', 'unreadable metadata is surfaced without hiding unarchived conversations');
+    const refusedBackup = await call(routes, '/plugins/dsh-archived-chats/unarchived/export', mockReq('POST', { 'content-type': 'application/x-www-form-urlencoded' }, new URLSearchParams({ sessionIds: JSON.stringify([nonemptyId]) }).toString()));
+    assert(refusedBackup.status === 503 && !String(refusedBackup.headers['content-type']).includes('zip'), 'unarchived export refuses unreadable metadata rather than silently dropping tags and notes');
+  } finally { writeFileSync(metadataFile, metadataBeforeFailure, 'utf8'); }
+  workspaces[0].sessionIds.splice(workspaces[0].sessionIds.indexOf(nonemptyId), 1);
+
   // Being an orphan is the only thing that authorizes deleting a session that
   // was never archived, so a non-orphan id must be refused even with a valid
   // guard header — otherwise this route could delete any chat by id.
@@ -6329,7 +6375,7 @@ console.log('\n[20] client half — orphan sessions view');
 
   let elements = render();
   const tabs = elements.filter((el) => el.type === 'button' && el.props?.role === 'tab');
-  const orphanTab = tabs.find((tab) => elementText(tab) === '孤儿会话');
+  const orphanTab = tabs.find((tab) => elementText(tab) === '未归档');
   assert(orphanTab !== undefined, 'the orphan sessions tab is present');
   assert(!requests.some((request) => request.path.endsWith('/orphans')),
     'the orphan list is not fetched before the tab is opened');
@@ -6341,16 +6387,21 @@ console.log('\n[20] client half — orphan sessions view');
   await new Promise((resolve) => setTimeout(resolve, 0));
   elements = render();
 
+  const cleanupFilter = elements.find(el => el.props?.ariaLabel === '会话筛选');
+  cleanupFilter?.props.onChange('cleanup');
+  elements = render();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  elements = render();
   const listRequest = requests.find((request) => request.path.endsWith('/orphans'));
   assert(listRequest !== undefined, 'opening the tab fetches the orphan list');
   assert((listRequest?.options?.method ?? 'GET') === 'GET', 'the orphan list is a plain GET');
 
-  const panelOf = (list) => list.find((el) => el.props?.id === 'dac-panel-orphans');
+  const panelOf = (list) => list.find((el) => el.props?.id === 'dac-cleanup-list');
   let panel = panelOf(elements);
   assert(panel !== undefined, 'the orphan panel renders for its own tab');
   const panelText = elementText(panel);
   assert(panelText.includes('Orphan Alpha'), 'an orphan row renders its title');
-  assert(panelText.includes('孤儿子代理') && panelText.includes('空会话'), 'both orphan kinds are labelled in the row');
+  assert(panelText.includes('残留会话') && panelText.includes('空会话'), 'both orphan kinds are labelled in the row');
   assert(panelText.includes('未命名会话'), 'a row without a title falls back to the localized placeholder');
   // Orphan rows frequently share title, kind, parent, cwd and size, so the id is
   // what keeps two distinct sessions from rendering identically.
@@ -6464,7 +6515,7 @@ console.log('\n[20] client half — orphan sessions view');
   };
   const confirmDelete = async (list) => {
     const dialog = list.find((el) => el.props?.role === 'alertdialog');
-    assert(dialog !== undefined && elementText(dialog).includes('永久删除孤儿会话'),
+    assert(dialog !== undefined && elementText(dialog).includes('永久删除可清理会话'),
       'deleting opens an irreversible confirmation naming the scope');
     const button = collectElements(dialog).filter((el) => el.type === 'button').find((item) => elementText(item) === '永久删除');
     assert(button !== undefined, 'the confirmation carries a destructive confirm control');
@@ -6478,7 +6529,7 @@ console.log('\n[20] client half — orphan sessions view');
   // this tab: a notice rendered only in the archive and recycle panels left this
   // tab's actions looking like they did nothing at all.
   elements = await confirmDelete(askDelete(elements));
-  assert(elementText(panelOf(elements)).includes('孤儿会话列表已变化'),
+  assert(elementText(panelOf(elements)).includes('可清理会话列表已变化'),
     'a rejected orphan deletion is reported on the orphans tab');
   assert(elementText(panelOf(elements)).includes('Orphan Alpha'), 'a rejected deletion leaves the rows in place');
 
@@ -6488,7 +6539,7 @@ console.log('\n[20] client half — orphan sessions view');
   assert(deleteRequest !== undefined, 'confirming posts the orphan deletion');
   assert(deleteRequest?.options?.headers?.['x-dsh-archived-chats'] === '1', 'the orphan deletion carries the guard header');
   assert(JSON.parse(deleteRequest?.options?.body ?? '{}').sessionIds?.length === 2, 'the deletion targets exactly the selected rows');
-  assert(elementText(panelOf(elements)).includes('没有孤儿会话'), 'the panel reports its empty state after the list drains');
+  assert(elementText(panelOf(elements)).includes('没有可清理会话'), 'the panel reports its empty state after the list drains');
 
   harness.unmount();
   globalThis.fetch = savedFetch;

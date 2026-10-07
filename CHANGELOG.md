@@ -7,10 +7,10 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 ## 未发布 / Unreleased
 
 - 永久删除、清空回收站及重启重试一并清理子代理后代，保留独立分叉；删除目标持久化，活动代理先停止，失败可重试（#57）。
-- 新增「孤儿会话」视图，支持完整 ID、刷新、预览、可重新导入的 ZIP 导出及确认后的永久删除；超预算导出须确认取消勾选，无法核验的空会话保留（#58）。
+- 新增「未归档」视图，支持按工作区筛选并勾选归档；其「可清理」筛选支持完整 ID、刷新、预览、可重新导入的 ZIP 导出及确认后的永久删除；超预算导出须确认取消勾选，无法核验的空会话保留（#58）。
 - 修复下载中断后的导出流释放，以及部分删除后的回收站和侧栏刷新。
 - Cascade permanent deletion and recovery through subagent descendants while preserving forks and independent recycle records. Persist targets before removal and quiesce live agents (#57).
-- Add Orphan sessions with full IDs, refresh, preview, restorable ZIP export, and confirmed deletion. Oversized selections require explicit deselection; unverifiable blank chats are preserved (#58).
+- Add Unarchived with workspace filters and checked-session archiving; its Ready to clean up filter provides full IDs, refresh, preview, restorable ZIP export, and confirmed deletion. Oversized selections require explicit deselection; unverifiable blank chats are preserved (#58).
 - Release interrupted export streams and refresh the sidebar and recycle list after partial deletion.
 
 ## 1.4.6 — 2026-10-02

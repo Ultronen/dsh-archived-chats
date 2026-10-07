@@ -57,6 +57,7 @@ async function fixture(t) {
   const registry = { state: { archivedSessionIds: [], workspaceIds: [workspace.id] },
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => [workspace], get: id => id === workspace.id ? workspace : undefined,
+    async archiveSession(id) { if (!this.state.archivedSessionIds.includes(id)) this.state.archivedSessionIds.push(id); },
     async setState(state) { this.state = state; } };
   const routes = new Map();
   const services = { workspaceRegistry: registry, sessionPersistence: raw,
@@ -164,10 +165,17 @@ test('official modern backend: a fork backup restores its inherited cut without 
   const seed = [{ seq: 0, time: 42, type: 'session/title', data: { title: 'Parent title', messageSeqs: [], source: { kind: 'user' } } }];
   const session = Session.create(id, seed, header, 1);
   session.append('session/title', { title: 'Fork title', messageSeqs: [], source: { kind: 'user' } });
+  session.append('turn/start', { turn: 1 });
   const events = session.snapshotEvents();
   const handle = await f.raw.create(header, { inheritedEventCount: 1 });
   await handle.append(events); await handle.flush(); await handle.close();
   await f.workspace.attachSession(id);
+  const unarchived = await f.call('/unarchived');
+  assert.equal(unarchived.status, 200, unarchived.bytes.toString());
+  assert.ok(unarchived.json().sessions.some(row => row.id === id), 'a cold fork with inherited events stays visible in Unarchived');
+  assert.equal((await f.call('/preview', { sessionId: id, scope: 'unarchived' })).status, 200);
+  const forkExport = await f.call('/unarchived/export', Buffer.from(new URLSearchParams({ sessionIds: JSON.stringify([id]) }).toString()), { 'content-type': 'application/x-www-form-urlencoded' });
+  assert.equal(forkExport.status, 200, forkExport.bytes.toString());
   f.registry.state.archivedSessionIds = [id];
   const exported = await f.call('/export', Buffer.from(new URLSearchParams({ sessionIds: JSON.stringify([id]) }).toString()), { 'content-type': 'application/x-www-form-urlencoded' });
   assert.equal(exported.status, 200, exported.bytes.toString());

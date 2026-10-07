@@ -64,7 +64,7 @@ dsh plugin --profile web update dsh-archived-chats
 | Permanent deletion | Delete one archived chat, a workspace's archive, or all archived chats after confirmation. Recycle Bin deletion is separate. |
 | Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
 
-The six views are **Archived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, **Orphan sessions**, and **About**. Orphan sessions lets you preview, export, and permanently delete unreachable subagents and blank chats. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
+The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Unarchived supports selecting workspace conversations for archiving; its Ready to clean up filter supports preview, export, and confirmed deletion of residual and blank chats. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
 
 ## Screenshots
 

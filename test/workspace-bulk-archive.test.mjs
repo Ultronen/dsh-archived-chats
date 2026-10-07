@@ -283,3 +283,46 @@ test('workspace archive no longer requires a history capture service', async () 
   const preview = await service.preview('workspace-a');
   assert.deepEqual((await service.execute(preview.token, preview.nonce)).archived, ['cold']);
 });
+
+
+test('selected archive confirmation archives only checked sessions', async () => {
+  const item = fixture();
+  const preview = await item.service.preview('workspace-a', ['cold-a']);
+  assert.deepEqual(preview.sessions.map(row => row.id), ['cold-a']);
+  assert.deepEqual((await item.service.execute(preview.token, preview.nonce)).archived, ['cold-a']);
+  assert.equal(item.archived.has('cold-b'), false);
+});
+
+test('rejects invalid or stale selected sessions instead of expanding to the workspace', async () => {
+  const item = fixture();
+  for (const ids of [[], ['missing'], ['cold-a', 'session-live'], ['cold-a', 'already-archived'], 'cold-a']) {
+    await assert.rejects(item.service.preview('workspace-a', ids), error => error.code === 'workspace-archive-selection-changed' && error.status === 409);
+  }
+  assert.equal(item.calls.archive.length, 0);
+});
+
+test('unarchived list includes conversations and disabled live rows without issuing confirmations', async () => {
+  const item = fixture();
+  const rows = await item.service.listSessions();
+  assert.deepEqual(rows.map(row => [row.id, row.workspaceId, row.busy]), [
+    ['cold-b', 'workspace-a', false], ['cold-a', 'workspace-a', false], ['session-live', 'workspace-a', true],
+  ]);
+  assert.equal(item.calls.archive.length, 0);
+  assert.equal(JSON.stringify(rows).includes('private note'), false);
+});
+
+test('a session that starts during execution inspection is not archived', async () => {
+  const item = fixture({ sessionIds: ['cold-a'] });
+  let status = 'idle';
+  let executing = false;
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies,
+    agents: { get: () => ({ status }) },
+    inspectConversation: async () => { if (executing) status = 'running'; return { hasConversation: true }; },
+  });
+  const prepared = await service.preview('workspace-a', ['cold-a']);
+  executing = true;
+  const result = await service.execute(prepared.token, prepared.nonce);
+  assert.deepEqual(result.archived, []);
+  assert.deepEqual(result.skipped, [{ id: 'cold-a', reason: 'session-live' }]);
+  assert.equal(item.calls.archive.length, 0);
+});

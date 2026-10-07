@@ -58,6 +58,8 @@ POST /plugins/dsh-archived-chats/unarchive
 POST /plugins/dsh-archived-chats/unarchive-all
 POST /plugins/dsh-archived-chats/delete
 POST /plugins/dsh-archived-chats/delete-all
+GET  /plugins/dsh-archived-chats/unarchived
+POST /plugins/dsh-archived-chats/unarchived/export
 GET  /plugins/dsh-archived-chats/orphans
 POST /plugins/dsh-archived-chats/orphans/delete
 POST /plugins/dsh-archived-chats/orphans/export
@@ -94,12 +96,12 @@ Metadata and recycle writes are serialized and published through temporary files
 
 ## Workspace bulk archive
 
-The client registers `settings.section` and `shell.overlay`. Its workspace chooser lives in **Settings → Archive Management / 设置 → 归档管理**, without depending on a workspace-menu extension or shared client store.
+The client registers `settings.section` and `shell.overlay`. Its Unarchived conversation list lives in **Settings → Archive Management / 设置 → 归档管理**, without depending on a workspace-menu extension or shared client store.
 
-1. List workspaces containing at least one eligible chat.
-2. Prepare each selected workspace separately. A preview binds at most 2,000 ordered IDs to a five-minute, single-use token/nonce.
-3. Skip workspaces that became empty; show one aggregate confirmation, or return to the refreshed chooser if all are empty.
-4. Apply credentials in selection order and combine results; partial failure in one workspace does not automatically stop later workspaces.
+1. List workspace conversations in Unarchived, excluding archived, recycled, pending deletion, and subagent rows. Use `readSession` for cold forks; retain metadata in backups.
+2. Group checked IDs by workspace and prepare each workspace with optional `sessionIds`. Stale selections fail rather than expand to the whole workspace.
+3. Show one aggregate confirmation. Empty preparations return to the refreshed list.
+4. Apply token/nonce confirmations, rechecking membership and running status after asynchronous inspection. Refresh archive, Unarchived, sidebar, and storage consumers after success.
 
 Apply accepts credentials, not caller-added session IDs. Under the lifecycle queue, each chat is rechecked for workspace membership, archive state, agent state, and a real `turn/start`. Blank chats yield `session-empty`; unverifiable content yields `session-unavailable`. Older Hosts without agent status conservatively skip loaded chats. Candidate inspection concurrency is eight.
 
@@ -133,7 +135,7 @@ Turn projection retains recorded boundaries and process/final-response positions
 
 Export download uses a guarded fetch, validates status, ZIP content type, and attachment disposition, then buffers the complete response before creating a Blob URL. It has a five-minute end-to-end timeout and a 320 MiB response-byte cap for declared and streamed bodies. The cap is not a peak-heap guarantee because chunks, the contiguous buffer, and Blob can coexist; the non-stream WebView fallback has no stronger universal memory ceiling. Completion says the download started, not that the browser saved it to disk.
 
-Archive row actions are preview, edit tags/note, Unarchive, and Delete. The header exposes Bulk archive and More; More contains Import backup, Export all, Unarchive all, a separator, and Delete all. Header geometry stays consistent across tabs. Workspace menus contain Unarchive all, Move all to Recycle Bin, Export all, a separator, and Delete all; every action confirms the full workspace name and complete archive count. Global export/unarchive/delete confirms all archived chats across workspaces, excluding trash. Filters do not narrow these scopes. Delete/Delete all labels lead to concise irreversible-action confirmation naming the chat, workspace, or global scope. Recycle rows retain the preview icon and use compact Restore/Delete text buttons matching archive rows. Recycle workspace actions are Restore all and Delete all; its header directly offers text-only Restore all and Empty Recycle Bin, without a More menu. Empty still requires irreversible-action confirmation. Primary buttons and selected tabs use neutral theme colors that invert in dark mode, while destructive actions remain red. Workspace/global restoration separately confirms the workspace name or global workspace count, eligible chat counts, and Archived destination, skipping purge-pending. A synchronous submission lock prevents duplicates; results retain actual success/failure counts and View Archived navigation. Both deleted and pending IDs leave actionable archive rows while failures remain explained and related state refreshes.
+Archive row actions are preview, edit tags/note, Unarchive, and Delete. The header exposes More; Unarchived replaces the standalone bulk-archive entry with checked-row archiving, and cleanup candidates appear in its Ready to clean up filter; More contains Import backup, Export all, Unarchive all, a separator, and Delete all. Header geometry stays consistent across tabs. Workspace menus contain Unarchive all, Move all to Recycle Bin, Export all, a separator, and Delete all; every action confirms the full workspace name and complete archive count. Global export/unarchive/delete confirms all archived chats across workspaces, excluding trash. Filters do not narrow these scopes. Delete/Delete all labels lead to concise irreversible-action confirmation naming the chat, workspace, or global scope. Recycle rows retain the preview icon and use compact Restore/Delete text buttons matching archive rows. Recycle workspace actions are Restore all and Delete all; its header directly offers text-only Restore all and Empty Recycle Bin, without a More menu. Empty still requires irreversible-action confirmation. Primary buttons and selected tabs use neutral theme colors that invert in dark mode, while destructive actions remain red. Workspace/global restoration separately confirms the workspace name or global workspace count, eligible chat counts, and Archived destination, skipping purge-pending. A synchronous submission lock prevents duplicates; results retain actual success/failure counts and View Archived navigation. Both deleted and pending IDs leave actionable archive rows while failures remain explained and related state refreshes.
 
 ## About and version discovery
 
@@ -231,3 +233,5 @@ The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fix
 The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (6/6) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
 
 Permanent deletion quiesces live agents before the final descendant inventory. Optional `cascadeSessionIds` in the parent purge-pending record persist the complete targets until every descendant finishes, so startup can recover after the parent directory disappears. Forks and subtrees with independent recycle records remain outside the cascade. Do not downgrade to a version that does not understand this field while these records are pending.
+
+`GET /unarchived` is read-only; `/unarchived/export` and preview `scope: "unarchived"` validate current workspace visibility. Normal conversations gain no direct permanent-delete route. Cleanup UI retains `/orphans` authority checks.
