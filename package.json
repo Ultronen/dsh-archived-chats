@@ -65,6 +65,7 @@
     "lib/auto-retention.js",
     "lib/retention-service.js",
     "lib/lineage.js",
+    "lib/session-graph.js",
     "lib/workspace-bulk-archive.js",
     "lib/persistence-compat.js",
     "lib/search.js",

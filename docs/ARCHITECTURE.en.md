@@ -21,6 +21,7 @@ The plugin supplements archive management; it does not replace DSH's main chat a
 | `search.js`, `stats.js`, `insights.js` | Message projection/search, directory measurements, storage accounting |
 | `retention.js`, `retention-service.js`, `auto-retention.js` | Policy, confirmation/revalidation, startup recovery and scheduling |
 | `lineage.js` | Read-only source, fork, and subagent projection |
+| `session-graph.js` | Session-id normalization and subagent descendant resolution |
 
 The UI moves chats to the Recycle Bin only through workspace actions. Rows can permanently delete or unarchive. Workspace export and export-all remain. A compatibility backend endpoint accepting one ID does not imply a row-level recycle action.
 
@@ -162,6 +163,10 @@ Both paths share purge: persist intent → remove and recheck all associated sna
 Snapshot sweeping uses manifest ownership and the record's named snapshotId to cover corrupted protection data. Unrelated unassignable corruption does not block a session's purge. The log must reside in a directory named for that session ID; shared directories are not purge targets. Safety checks use the actual session directory as the removal scope. If the current-generation log named by `locate()` is absent, inspect canonical generation logs that exist in the directory; empty directories still undergo ancestry and overlap checks. Inventory entries with absent directories are treated as missing and do not block other purges. Links/junctions, non-file logs, overlapping directories, and unreadable inventory still refuse deletion. A missing log or archive index is not proof of completion: durable intent authorizes remaining cleanup.
 
 Failures retain purge-pending. Startup and runtime retries continue these tasks, never restore them to ordinary chats. Archive deletion rejects existing recycle records, protecting the Recycle Bin from archive-wide Delete all. Purging snapshot copies does not promise global attachment cleanup or Host session_projcache eviction; no corresponding safe public eviction API is used.
+
+Destroying a session also destroys its subagent descendants, transitively, so a deletion cannot strand sessions that no workspace owns and no view lists. Session ids are stored in two dialects — a bare UUID and the same UUID behind `session-` — and one edge may mix them, so every parent/child comparison normalizes first; without that, each parent looks absent and the cascade silently finds nothing. Only `origin: "subagent"` edges are followed. A branched chat keeps a pointer to the chat it came from but is an independent conversation, so neither it nor its own subagents are cascade targets. Descendants are resolved *before* the parent is destroyed, because a child edge is only visible while its parent is still listed; resolving afterwards would strand exactly the sessions the cascade exists to remove.
+
+Cascade runs on the permanent paths only: direct archive deletion, recycle purge, Empty Recycle Bin, and automatic retention. A move to the Recycle Bin leaves the original log on disk, so its subagents are not orphans yet — they become orphans exactly when the parent's log is destroyed, which is where the cascade runs. Descendants are never archived, so they take the direct permanent-delete path with only the archive precondition lifted; exclusive-directory verification, snapshot sweeping, live disposal, and registry index cleanup are all shared with an archived session. A descendant that already owns a recycle record keeps its own lifecycle, and a parent whose own deletion failed still exists, so its subagents are kept.
 
 ## Startup recovery and old-data cleanup
 

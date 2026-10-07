@@ -59,12 +59,19 @@ function recycleFixture(options = {}) {
   const calls = options.calls ?? [];
   const id = 'session-a';
   const headers = new Map([[id, { id, version: 1, cwd: '/project', createdAt: 10, origin: null }]]);
+  // Extra headers model sessions that hang off a stored one. A subagent is never
+  // archived, which is exactly what a cascade target looks like.
+  const seeded = options.originalMissing ? [] : [id];
+  for (const header of options.extraHeaders ?? []) {
+    headers.set(header.id, header);
+    seeded.push(header.id);
+  }
   const root = mkdtempSync(join(tmpdir(), 'dac-recycle-'));
   tempRoots.add(root);
   const sessionDir = join(root, id);
   let listCalls = 0;
   const persistence = {
-    ids: new Set(options.originalMissing ? [] : [id]),
+    ids: new Set(seeded),
     writeCalls: 0,
     created: [],
     appended: [],
@@ -806,4 +813,115 @@ test('legacy migration removes only unarchived markers and preserves malformed o
   assert.deepEqual(await malformed.service.recoverStartup({ legacyPendingPath: malformed.pendingPath }), { status: 'legacy-pending-unavailable' });
   assert.equal(readFileSync(malformed.pendingPath, 'utf8'), '{broken');
   assert.deepEqual(malformed.purgedIds, []);
+});
+
+//#region cascade deletion
+
+const subagentHeader = (id, parentSession, delegationDepth = 1) => ({
+  id, version: 1, cwd: '/project', createdAt: 20, parentSession, origin: 'subagent', delegationDepth,
+});
+// A branched chat points at the chat it came from but is an independent
+// conversation, so it is neither a target nor a bridge to its own subagents.
+const forkHeader = (id, parentSession) => ({ id, version: 1, cwd: '/project', createdAt: 20, parentSession });
+
+test('permanent archive deletion destroys the subagent descendants it would strand', async () => {
+  const fixture = recycleFixture({
+    extraHeaders: [subagentHeader('child', 'session-a'), subagentHeader('grandchild', 'child', 2)],
+  });
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual([...result.deleted].sort(), ['child', 'grandchild', 'session-a']);
+  assert.deepEqual(result.failed, []);
+  assert.deepEqual([...fixture.purgedIds].sort(), ['child', 'grandchild', 'session-a']);
+  // Every descendant went through the full permanent-delete path, not a shortcut.
+  for (const id of ['child', 'grandchild']) {
+    assert.equal(fixture.calls.includes(`trash:put:${id}`), true);
+    assert.equal(fixture.calls.includes(`cache:invalidate:${id}`), true);
+  }
+});
+
+test('descendants are resolved before the parent log disappears', async () => {
+  // A child edge is only visible while its parent is still listed. Resolving
+  // after the parent purge would find nothing and strand the child, so this
+  // asserts the ordering rather than just the outcome.
+  const fixture = recycleFixture({ extraHeaders: [subagentHeader('child', 'session-a')] });
+  await fixture.service.deleteArchived(['session-a']);
+  assert.equal(fixture.persistence.ids.has('session-a'), false);
+  assert.equal(fixture.persistence.ids.has('child'), false);
+});
+
+test('cascade matches a parent stored under the other id dialect', async () => {
+  // The stored edge mixes dialects: prefixed parent, bare parentSession.
+  const fixture = recycleFixture({ extraHeaders: [subagentHeader('child', 'a')] });
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual([...result.deleted].sort(), ['child', 'session-a']);
+});
+
+test('a branched chat and its subagents survive their origin session', async () => {
+  const fixture = recycleFixture({
+    extraHeaders: [
+      forkHeader('fork', 'session-a'),
+      subagentHeader('fork-agent', 'fork'),
+      subagentHeader('direct-agent', 'session-a'),
+    ],
+  });
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual([...result.deleted].sort(), ['direct-agent', 'session-a']);
+  assert.equal(fixture.purgedIds.includes('fork'), false);
+  assert.equal(fixture.purgedIds.includes('fork-agent'), false);
+  assert.equal(fixture.persistence.ids.has('fork'), true);
+  assert.equal(fixture.persistence.ids.has('fork-agent'), true);
+});
+
+test('a descendant with its own recycle record keeps its own lifecycle', async () => {
+  const fixture = recycleFixture({
+    extraHeaders: [subagentHeader('child', 'session-a')],
+    records: [trashRecord('child', 'trashed')],
+  });
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual(result.deleted, ['session-a']);
+  assert.equal(fixture.purgedIds.includes('child'), false);
+  assert.equal(fixture.persistence.ids.has('child'), true);
+});
+
+test('a parent whose own deletion failed does not take its subagents with it', async () => {
+  const fixture = recycleFixture({
+    extraHeaders: [subagentHeader('child', 'session-a')],
+    purgeError: Object.assign(new Error('purge failed'), { code: 'purge-failed' }),
+  });
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual(result.deleted, []);
+  assert.equal(fixture.purgedIds.includes('child'), false);
+  assert.equal(fixture.persistence.ids.has('child'), true);
+});
+
+test('purging a recycled parent destroys the subagents it stranded', async () => {
+  const fixture = recycleFixture({ trashed: true, extraHeaders: [subagentHeader('child', 'session-a')] });
+  const result = await fixture.service.purge(['session-a']);
+  assert.deepEqual([...result.purged].sort(), ['child', 'session-a']);
+  assert.deepEqual(result.failed, []);
+  assert.equal(fixture.persistence.ids.has('child'), false);
+});
+
+test('emptying the Recycle Bin destroys stranded subagents', async () => {
+  const fixture = recycleFixture({ trashed: true, extraHeaders: [subagentHeader('child', 'session-a')] });
+  const target = purgeTarget(await fixture.trashStore.get('session-a'));
+  const result = await fixture.service.empty([target]);
+  assert.deepEqual([...result.purged].sort(), ['child', 'session-a']);
+  assert.deepEqual(result.failed, []);
+});
+
+test('moving to the recycle bin leaves descendants in place', async () => {
+  // The parent's log still exists after a soft delete, so its subagents are not
+  // orphans yet and a restore must find them untouched.
+  const fixture = recycleFixture({ extraHeaders: [subagentHeader('child', 'session-a')] });
+  const result = await fixture.service.move(['session-a']);
+  assert.deepEqual(result.trashed, ['session-a']);
+  assert.equal(fixture.persistence.ids.has('child'), true);
+  assert.equal(fixture.purgedIds.includes('child'), false);
+});
+
+test('a session with no descendants is unaffected by the cascade', async () => {
+  const fixture = recycleFixture();
+  const result = await fixture.service.deleteArchived(['session-a']);
+  assert.deepEqual(result, { deleted: ['session-a'], pending: [], failed: [] });
 });

@@ -287,6 +287,7 @@ test(`published ${packageVersion} package contains public docs and runtime but n
     'lib/retention-service.js',
     'lib/retention.js',
     'lib/search.js',
+    'lib/session-graph.js',
     'lib/snapshot.js',
     'lib/stats.js',
     'lib/trash.js',
