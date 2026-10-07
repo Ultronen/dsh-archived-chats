@@ -34,11 +34,11 @@ Use DSH's normal session menu to archive one chat. The success notice offers Vie
 
 In **Unarchived**, search titles or IDs at the top. The next row provides time/title sorting, workspace filtering, and a refresh icon at the far right. Workspace groups and chat rows use the same layout as Archived.
 
-- Click **Archive** on an individual chat.
+- Click the eye icon for a read-only preview, or **Archive** on an individual chat.
 - The workspace three-dot menu offers **Archive all** for that workspace.
 - The header **Archive all** covers every workspace in the list.
 
-Search and workspace filters only change display; they do not narrow workspace or global archiving. Review the eligible chat and workspace counts before confirming. Running chats remain visible with individual archiving disabled. Bulk actions skip running, blank, or unverifiable chats. New chats after preparation are excluded; chats that start running or change workspace before apply are skipped. Unarchived only offers archiving, without selection, export, deletion, or a cleanup entry. Archiving preserves workspace directories and prior tags and notes.
+Search and workspace filters only change display; they do not narrow workspace or global archiving. Review the eligible chat and workspace counts before confirming. Running chats remain visible with individual archiving disabled. Bulk actions skip running, blank, or unverifiable chats. New chats after preparation are excluded; chats that start running or change workspace before apply are skipped. Unarchived offers read-only previews and archiving, without selection, export, deletion, or a cleanup entry. Archiving preserves workspace directories and prior tags and notes.
 
 Search Archived by title, workspace, tags, notes, messages, and tool results. Filter by type, workspace, and tag; sort by time or title. Content matches show excerpts. Long workspace titles wrap to remain fully visible. Click a workspace folder or title to expand or collapse its chats; the open or closed folder reflects the current state. Group collapse state is saved in the browser.
 
@@ -64,7 +64,7 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 | --- | --- | --- |
 | Archived: chat row | Preview, edit tags and note, Unarchive, Delete | One chat |
 | Archived: workspace More menu | Unarchive all, Move all to Recycle Bin, Export all; separator; Delete all | All archived chats in that workspace |
-| Unarchived: chat row | Archive | One chat after confirmation |
+| Unarchived: chat row | Preview icon, Archive | One chat; archiving requires confirmation |
 | Unarchived: workspace three-dot menu | Archive all | Every eligible chat in that workspace |
 | Unarchived: header | Archive all | Eligible chats across all workspaces |
 | Archived: header | More | Open the global action menu |
@@ -74,7 +74,7 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 | Recycle Bin: header | Restore all | Restore eligible entries across all workspaces after confirmation |
 | Recycle Bin: header | Empty Recycle Bin | Permanently delete recycle records across all workspaces after confirmation |
 
-**Moving to the Recycle Bin is available only through workspace actions, not individual rows or a global move-all action.** The Archived view has no single-chat export or list multi-select mode; Unarchived only provides archiving. Search and filters do not narrow workspace or global bulk actions.
+**Moving to the Recycle Bin is available only through workspace actions, not individual rows or a global move-all action.** The Archived view has no single-chat export or list multi-select mode; Unarchived provides read-only previews and archiving. Search and filters do not narrow workspace or global bulk actions.
 
 Every archive workspace action asks for confirmation with the full workspace name and its complete archive count. Global Export all, Unarchive all, and Delete all confirmations count archived chats across every workspace, excluding the Recycle Bin. Check these counts even when the list is filtered. The header keeps consistent dimensions when switching tabs.
 

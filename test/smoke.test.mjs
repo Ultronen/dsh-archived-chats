@@ -5716,8 +5716,16 @@ console.log('\n[11j] client half — workspace archive final coverage');
     { id: 'live-a', title: 'Running chat', workspaceId: 'workspace-two', workspaceTitle: 'Second Project', busy: true },
   ];
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options) => String(url).endsWith('/unarchived')
-    ? { ok: true, status: 200, json: async () => ({ sessions: unarchivedRows }) } : previousFetch(url, options);
+  const unarchivedPreviewRequests = [];
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/unarchived')) return { ok: true, status: 200, json: async () => ({ sessions: unarchivedRows }) };
+    if (String(url).endsWith('/preview')) {
+      const body = JSON.parse(options.body);
+      unarchivedPreviewRequests.push(body);
+      return { ok: true, status: 200, json: async () => ({ session: unarchivedRows.find(row => row.id === body.sessionId), messages: [], total: 0, nextOffset: null }) };
+    }
+    return previousFetch(url, options);
+  };
   pageElements.find(el => el.props?.id === 'dac-tab-unarchived').props.onClick();
   pageHarness.render(pageProps); pageHarness.flushEffects(); await new Promise(resolve => setTimeout(resolve, 0));
   pageTree = pageHarness.render(pageProps);
@@ -5758,6 +5766,14 @@ console.log('\n[11j] client half — workspace archive final coverage');
   scopedDialog?.props.onClose();
   try { scopedDialog?.props.restoreFocus(); assert(workspaceMenuFocus === 2, 'cancelling workspace archive restores the stable three-dot trigger'); }
   catch { assert(false, 'cancelling workspace archive restores the stable three-dot trigger'); }
+  const rowActions = collectElements(groupTree).find(el => el.props?.className === 'dac-row-actions');
+  const rowButtons = collectElements(rowActions).filter(el => el.type === 'button');
+  assert(rowButtons.length === 2 && rowButtons[0]?.props['aria-label'] === '查看对话 First chat' && elementText(rowButtons[1]) === '归档', 'Unarchived puts the preview icon before Archive');
+  await rowButtons.find(el => el.props['aria-label'] === '查看对话 First chat')?.props.onClick();
+  let openedPreview = findComponentElement(pageHarness.render(pageProps), 'PreviewDialog');
+  assert(unarchivedPreviewRequests.length === 1 && unarchivedPreviewRequests[0].sessionId === 'chosen-a' && unarchivedPreviewRequests[0].scope === 'unarchived'
+    && openedPreview?.props.preview.scope === 'unarchived' && openedPreview.props.preview.status === 'ready', 'Unarchived preview requests the correct scope and opens the shared read-only dialog');
+  openedPreview?.props.onCancel();
   const rowArchive = collectElements(groupTree).find(el => el.type === 'button' && elementText(el) === '归档');
   rowArchive?.props.onClick({ currentTarget: null });
   scopedDialog = findComponentElement(pageHarness.render(pageProps), 'WorkspaceArchiveDialog');
@@ -5765,6 +5781,13 @@ console.log('\n[11j] client half — workspace archive final coverage');
   scopedDialog?.props.onClose();
   groupTree = groupHarness.render({ ...group.props, group: { ...group.props.group, items: [unarchivedRows[3]], sessionIds: ['live-a'] }, menuOpen: false });
   assert(collectElements(groupTree).find(el => el.type === 'button' && elementText(el) === '归档')?.props.disabled === true, 'running chats remain visible with archiving disabled');
+  const runningPreview = collectElements(groupTree).find(el => el.type === 'button' && el.props['aria-label'] === '查看对话 Running chat');
+  assert(runningPreview?.props.disabled !== true && runningPreview !== undefined, 'running chats still allow read-only preview');
+  await runningPreview?.props.onClick();
+  openedPreview = findComponentElement(pageHarness.render(pageProps), 'PreviewDialog');
+  assert(unarchivedPreviewRequests.at(-1)?.sessionId === 'live-a' && openedPreview?.props.preview.session.id === 'live-a', 'running chat preview targets that conversation');
+  openedPreview?.props.onCancel();
+
   groupHarness.unmount();
   archiveAll.props.onClick({ currentTarget: { focus: () => { restoredSettingsFocus += 1; } } });
   const findTab = (label) => pageElements.find((element) => element.type === 'button' && element.props?.role === 'tab' && elementText(element) === label);
