@@ -191,3 +191,14 @@ test('cascade purge intent survives disk reload without changing legacy records'
   assert.throws(() => normalizeTrashRecord({ ...record, cascadeSessionIds: ['session-a'] }));
   assert.throws(() => normalizeTrashRecord({ ...record, state: 'trashed', purgeRequestedAt: null }));
 });
+
+test('selected-only deletion scope survives catalog reload and rejects invalid combinations', async () => {
+  const record = { ...readyRecord(), state: 'purge-pending', purgeRequestedAt: '2026-08-24T00:00:00.000Z', purgeSelectedOnly: true };
+  const root = await mkdtemp(join(tmpdir(), 'dac-trash-selected-'));
+  const path = join(root, 'trash.json');
+  await createTrashStore({ path }).put(record);
+  assert.equal((await createTrashStore({ path }).get('session-a')).purgeSelectedOnly, true);
+  for (const bad of [{ ...record, purgeSelectedOnly: false }, { ...record, state: 'trashed', purgeRequestedAt: null }, { ...record, cascadeSessionIds: ['child'] }]) {
+    assert.throws(() => normalizeTrashRecord(bad), error => error.code === 'trash-store-unavailable');
+  }
+});

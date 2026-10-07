@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main` and covers 1.4.6 behavior. This release fixes permanent deletion and Recycle Bin cleanup when historical and current session log generations coexist. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main` and covers 1.5.0 behavior. This release adds Unarchived management and on-demand residual chat checks, and fixes subagent cascade deletion and overlay backgrounds. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -76,6 +76,8 @@ Recycle endpoints call `restore`, `purge`, and `empty`. Empty requires the exact
 The orphan routes are the only place this plugin destroys a session that was never archived. `GET /orphans` lists the residue: subagent sessions whose parent no longer exists, plus top-level sessions that never recorded a turn. A subagent whose parent is still stored is reachable through that parent and is not listed, and neither is a branched chat, which is an independent conversation. Blankness cannot be read from a header, so it is decided by reading the log, and the scan yields cooperatively and supports cancellation instead of silently truncating a fixed prefix. Operation checks inspect only selected blank candidates and preserve unreadable logs.
 
 `POST /orphans/delete` and `POST /orphans/export` never trust the id list they are handed: both recompute the orphan set and refuse the entire request with `orphan-set-changed` when any id is invalid at the start of the operation. Each item is checked again before its deletion; later external Host changes can produce partial results. Being an orphan is what replaces the archive precondition, so without that check the route would delete any session by id. Delete reuses the whole permanent-delete path — exclusive-directory verification, snapshot sweeping, live disposal, the durable `purge-pending` intent, and the registry index purge — with the archive precondition as the single step lifted. Export reuses the archive export writer and its budgets, and like `/export` it accepts a bounded native form with no guard header. Preview and preview-image accept `scope: "orphan"`, whose visibility authority is the same recomputed orphan set.
+
+The product entry uses `kind=subagent` for scan, export and delete, with `scope: "orphan-subagent"` for strict previews. Requests without kind retain legacy compatibility. Strict deletion persists `purgeSelectedOnly: true` on pending records and removes selected IDs only; restart recovery does not expand the descendant tree.
 
 ## State, ownership, and durability
 
@@ -230,9 +232,9 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all six native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
+The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all seven native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (6/6) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (7/7) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
 
 Permanent deletion quiesces live agents before the final descendant inventory. Optional `cascadeSessionIds` in the parent purge-pending record persist the complete targets until every descendant finishes, so startup can recover after the parent directory disappears. Forks and subtrees with independent recycle records remain outside the cascade. Do not downgrade to a version that does not understand this field while these records are pending.
 

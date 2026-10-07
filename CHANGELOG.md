@@ -4,16 +4,19 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
-## 未发布 / Unreleased
+## 1.5.0 — 2026-10-08
 
 - 永久删除、清空回收站及重启重试一并清理子代理后代，保留独立分叉；删除目标持久化，活动代理先停止，失败可重试（#57）。
-- 新增「未归档」视图，复用已归档的工作区分组排版；搜索在顶部，筛选行右侧提供刷新图标。会话行提供只读预览图标，支持单条归档、工作区全部归档及全局全部归档，归档均先确认；搜索和筛选不缩小批量范围。保留旧版残留会话核验接口兼容（#58）。
+- 新增「未归档」视图，复用已归档的工作区分组排版；搜索在顶部，筛选行右侧提供刷新图标。会话行提供只读预览图标，支持单条归档、工作区全部归档及全局全部归档，归档均先确认；搜索和筛选不缩小批量范围。
 - 修复弹窗、对话预览顶栏、菜单及成功提示的背景穿透，使用随明暗主题变化的不透明宿主层。
 - 修复下载中断后的导出流释放，以及部分删除后的回收站和侧栏刷新。
 - Cascade permanent deletion and recovery through subagent descendants while preserving forks and independent recycle records. Persist targets before removal and quiesce live agents (#57).
-- Add Unarchived using Archived’s workspace-group layout, with search above filters and a refresh icon at the right. Offer read-only chat previews and confirmed individual, workspace-wide, and global archiving; search and filters do not narrow bulk scope. Retain verified residual-session APIs for compatibility (#58).
+- Add Unarchived using Archived’s workspace-group layout, with search above filters and a refresh icon at the right. Offer read-only chat previews and confirmed individual, workspace-wide, and global archiving; search and filters do not narrow bulk scope.
 - Fix transparent dialog, preview-header, menu, and success-toast backgrounds with opaque Host surfaces that follow light and dark themes.
 - Release interrupted export streams and refresh the sidebar and recycle list after partial deletion.
+
+- 在「空间与策略」新增按需残留会话检查：仅处理明确缺父的子代理，提供完整 ID、搜索多选、只读预览、备份及确认删除。超限先询问，删除与重启重试只处理选中项（#58）。
+- Add an on-demand residual check in Storage & Retention for subagents with confirmed missing parents: full IDs, search, selection, read-only previews, backups and confirmed deletion. Ask before excluding oversized backups; delete and retry only selected records (#58).
 
 ## 1.4.6 — 2026-10-02
 

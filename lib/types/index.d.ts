@@ -62,6 +62,8 @@ export interface RecycleSessionRow {
   liveDisposition: RecycleLiveDisposition;
   /** Durable subagent targets retained until the complete cascade finishes. */
   cascadeSessionIds?: string[];
+  /** Pending residual cleanup never expands beyond explicitly selected IDs. */
+  purgeSelectedOnly?: true;
 }
 
 export interface OrphanSessionRow {

@@ -983,3 +983,32 @@ test('live disposal happens before the final cascade inventory', async () => {
   const result = await f.service.deleteArchived(['session-a']);
   assert.deepEqual(result.deleted.sort(), ['late-child', 'session-a']);
 });
+
+test('selected residual cleanup preserves unselected descendants and their ownership', async () => {
+  const f = recycleFixture({ unarchived: true, workspaceDetached: true,
+    extraHeaders: [subagentHeader('child', 'session-a'), subagentHeader('grandchild', 'child', 2)] });
+  f.workspace.sessionIds.add('child');
+  f.registry.state.archivedSessionIds.push('child');
+  const validate = async ids => assert.deepEqual(ids, ['session-a']);
+  const result = await f.service.deleteOrphans(['session-a'], validate, { selectedOnly: true });
+  assert.deepEqual(result.deleted, ['session-a']);
+  assert.equal(f.persistence.ids.has('child'), true);
+  assert.equal(f.persistence.ids.has('grandchild'), true);
+  assert.equal(f.workspace.sessionIds.has('child'), true);
+  assert.equal(f.registry.archivedSessionIds.includes('child'), true);
+  assert.equal(f.calls.some(value => value === 'trash:put:child'), false);
+});
+
+test('selected residual cleanup retries after restart without expanding to descendants', async () => {
+  let fail = true;
+  const f = recycleFixture({ unarchived: true, workspaceDetached: true,
+    extraHeaders: [subagentHeader('child', 'session-a')],
+    purgeErrorFor: id => id === 'session-a' && fail ? Object.assign(new Error('busy'), { code: 'EBUSY' }) : null });
+  const result = await f.service.deleteOrphans(['session-a'], async () => {}, { selectedOnly: true });
+  assert.deepEqual(result.pending, ['session-a']);
+  assert.equal((await f.trashStore.get('session-a')).purgeSelectedOnly, true);
+  fail = false;
+  await f.service.recoverStartup();
+  assert.equal(f.persistence.ids.has('session-a'), false);
+  assert.equal(f.persistence.ids.has('child'), true);
+});

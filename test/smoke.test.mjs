@@ -4789,7 +4789,7 @@ console.log('\n[11f2] client half — global recycle restore and About');
   assert(aboutPanel !== undefined && elementText(tree).includes('Ultronen') && elementText(tree).includes('MIT'), 'About shows package identity and license');
   if (aboutPanel) {
     assert(!collectElements(aboutPanel).some(el => /^h[1-6]$/.test(el.type)), 'About does not repeat the plugin title already shown in the page heading');
-    assert(elementText(aboutPanel).startsWith('本插件用于查看和管理 DeepSeek Harness 的归档会话，支持按工作区批量归档、备份导入导出及回收站恢复。'), 'About opens directly with the agreed plugin description');
+    assert(elementText(aboutPanel).startsWith('本插件用于查看和管理 DeepSeek Harness 的归档会话，支持未归档管理、按工作区批量归档、备份、回收站恢复及按需残留会话检查。'), 'About opens directly with the agreed plugin description');
     const en = clientCalls.localeRegister[0].dicts.en;
     const englishPanel = aboutPanel.type({ ...aboutPanel.props, t: key => en[key] ?? key });
     assert(!collectElements(englishPanel).some(el => /^h[1-6]$/.test(el.type)) && elementText(englishPanel).startsWith('This plugin'), 'English About also starts with an introduction without a repeated title');
@@ -6272,6 +6272,30 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
   assert(beyondPrefix.json().sessions.some(row => row.id === blankId), 'blank sessions beyond the first 200 candidates remain discoverable');
   for (const h of earlier) { headerRows.splice(headerRows.indexOf(h), 1); delete events[h.id]; }
 
+  const scopedOrphanRequest = (method, body, suffix = '') => {
+    const req = mockReq(method, method === 'POST' ? { 'x-dsh-archived-chats': '1' } : {}, body);
+    req.url = `/plugins/dsh-archived-chats/orphans${suffix}?kind=subagent`;
+    return req;
+  };
+  const scopedList = await call(routes, '/plugins/dsh-archived-chats/orphans', scopedOrphanRequest('GET'));
+  assert(scopedList.json().sessions.map(row => row.id).join(',') === orphanId, 'residual checks only list subagents with a missing parent, never empty chats');
+  const invalidKindRequest = mockReq('GET', {}); invalidKindRequest.url = '/plugins/dsh-archived-chats/orphans?kind=blank';
+  const invalidKind = await call(routes, '/plugins/dsh-archived-chats/orphans', invalidKindRequest);
+  assert(invalidKind.status === 400, 'residual scan rejects unsupported kinds');
+  const badParentHeaders = [
+    { id: 'session-parentless-subagent', origin: 'subagent', createdAt: 30 },
+    { id: 'session-self-subagent', origin: 'subagent', parentSession: 'self-subagent', createdAt: 40 },
+  ];
+  headerRows.push(...badParentHeaders);
+  const excludesCorrupt = await call(routes, '/plugins/dsh-archived-chats/orphans', scopedOrphanRequest('GET'));
+  assert(excludesCorrupt.json().sessions.map(row => row.id).join(',') === orphanId, 'residual checks preserve subagents with missing or self-referential parent metadata');
+  for (const header of badParentHeaders) headerRows.splice(headerRows.indexOf(header), 1);
+  const scopedExport = await call(routes, '/plugins/dsh-archived-chats/orphans/export', scopedOrphanRequest('POST', new URLSearchParams({ sessionIds: JSON.stringify([blankId]) }).toString(), '/export'));
+  assert(scopedExport.status === 409, 'residual backups refuse a blank chat rather than broadening the accepted scope');
+  const scopedPreview = await call(routes, '/plugins/dsh-archived-chats/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: orphanId, scope: 'orphan-subagent' })));
+  const blankPreview = await call(routes, '/plugins/dsh-archived-chats/preview', mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionId: blankId, scope: 'orphan-subagent' })));
+  assert(scopedPreview.status === 200 && blankPreview.status === 404, 'residual preview accepts missing-parent subagents and refuses empty chats');
+
   const listed = await call(routes, '/plugins/dsh-archived-chats/orphans', mockReq('GET', {}));
   assert(listed.status === 200, `orphans list answers 200 (got ${listed.status})`);
   const body = listed.json();
@@ -6335,6 +6359,9 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
     mockReq('POST', {}, JSON.stringify({ sessionIds: [orphanId] })));
   assert(unguarded.status === 403, `an unguarded orphan delete is refused (got ${unguarded.status})`);
 
+  const refusedBlankCleanup = await call(routes, '/plugins/dsh-archived-chats/orphans/delete', scopedOrphanRequest('POST', JSON.stringify({ sessionIds: [blankId] }), '/delete'));
+  assert(refusedBlankCleanup.status === 409 && existsSync(join(tmp, blankId)), 'residual deletion cannot delete an empty chat even if its ID is submitted');
+
   const deleted = await call(routes, '/plugins/dsh-archived-chats/orphans/delete',
     mockReq('POST', { 'x-dsh-archived-chats': '1' }, JSON.stringify({ sessionIds: [orphanId] })));
   assert(deleted.status === 200, `deleting an orphan succeeds (got ${deleted.status})`);
@@ -6344,6 +6371,21 @@ console.log('\n[19] host half — orphan sessions are listed, and only orphans m
   // deleted session come back as a ghost.
   assert(!registry.headers.has(orphanId), 'the orphan is gone from the registry header index');
   assert(!existsSync(join(tmp, orphanId)), 'the orphan session directory is gone');
+
+  const strictRoot = { id: 'session-strict-root', createdAt: 10, cwd: '/ws/one', parentSession: 'session-missing-parent', origin: 'subagent', delegationDepth: 1 };
+  const reachableChild = { id: 'session-reachable-child', createdAt: 20, cwd: '/ws/one', parentSession: strictRoot.id, origin: 'subagent', delegationDepth: 2 };
+  for (const header of [strictRoot, reachableChild]) {
+    headerRows.push(header); registry.headers.set(header.id, header); events[header.id] = [{ type: 'turn/start', data: {} }];
+    mkdirSync(join(tmp, header.id), { recursive: true }); writeFileSync(join(tmp, header.id, 'session.jsonl.zstd'), 'fake');
+  }
+  workspaceState.archivedSessionIds.push(reachableChild.id);
+  workspaces[0].sessionIds.push(reachableChild.id);
+  const strictDeletion = await call(routes, '/plugins/dsh-archived-chats/orphans/delete', scopedOrphanRequest('POST', JSON.stringify({ sessionIds: [strictRoot.id] }), '/delete'));
+  assert(strictDeletion.status === 200 && strictDeletion.json().deleted.join(',') === strictRoot.id, 'strict residual route deletes only selected records without cascading');
+  assert(existsSync(join(tmp, reachableChild.id)) && registry.headers.has(reachableChild.id) && workspaceState.archivedSessionIds.includes(reachableChild.id) && workspaces[0].sessionIds.includes(reachableChild.id), 'strict residual cleanup preserves unselected workspace and archived descendants');
+  workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter(id => id !== reachableChild.id);
+  workspaces[0].sessionIds = workspaces[0].sessionIds.filter(id => id !== reachableChild.id);
+  for (const header of [strictRoot, reachableChild]) { const index = headerRows.indexOf(header); if (index !== -1) headerRows.splice(index, 1); registry.headers.delete(header.id); delete events[header.id]; }
 
   // Unreadable blankness cannot authorize irreversible deletion.
   const savedInspect = persistence.inspect;
@@ -6389,6 +6431,109 @@ console.log('\n[20] client half — archive-only unarchived requests');
   assert(requests.some(path => path.endsWith('/unarchived')) && !requests.some(path => path.includes('/orphans')), 'opening Unarchived loads ordinary conversations without requesting cleanup data');
   assert(elementText(tree).includes('没有未归档会话'), 'Unarchived displays an empty state');
   harness.unmount(); globalThis.fetch = savedFetch;
+}
+
+console.log('\n[21] client half — on-demand residual storage checks');
+{
+  const savedFetch = globalThis.fetch;
+  const savedHooks = { ...moduleTable.react };
+  const requests = [];
+  let rows = [
+    { id: 'residual-alpha', kind: 'subagent', title: 'Same title', parentSession: 'deleted-parent', cwd: '/fixture/one', createdAt: 10, sizeBytes: 2048 },
+    { id: 'residual-beta', kind: 'subagent', title: 'Same title', parentSession: 'deleted-parent', cwd: '/fixture/two', createdAt: 20, sizeBytes: 1024 },
+  ];
+  let failScan = false;
+  let failDelete = true;
+  const ok = payload => ({ ok: true, status: 200, json: async () => payload });
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url); requests.push({ path, options });
+    if (path.endsWith('/state')) return ok({ metadataStatus: 'ready', sessions: [] });
+    if (path.includes('/orphans/export')) {
+      const ids = JSON.parse(new URLSearchParams(options.body).get('sessionIds'));
+      if (ids.includes('residual-beta')) return { ok: false, status: 422, headers: { get: () => 'text/plain' }, arrayBuffer: async () => new TextEncoder().encode('export-limit-exceeded:residual-beta').buffer };
+      return { ok: true, status: 200, headers: { get: name => name === 'content-type' ? 'application/zip' : name === 'content-disposition' ? 'attachment; filename="backup.zip"' : null }, arrayBuffer: async () => new Uint8Array([80,75,5,6,...Array(18).fill(0)]).buffer };
+    }
+    if (path.includes('/orphans/delete')) {
+      if (failDelete) { failDelete = false; return { ok: false, status: 409, json: async () => ({ error: 'orphan-set-changed' }) }; }
+      const ids = JSON.parse(options.body).sessionIds; rows = rows.filter(row => !ids.includes(row.id));
+      return ok({ deleted: ids, pending: [], failed: [] });
+    }
+    if (path.includes('/orphans')) {
+      if (failScan) throw new Error('scan unavailable');
+      return ok({ trashStatus: 'ready', sessions: rows, summary: { subagent: rows.length, bytes: rows.reduce((sum,row) => sum+row.sizeBytes,0) } });
+    }
+    if (path.endsWith('/preview')) { const body = JSON.parse(options.body); return ok({ session: rows.find(row => row.id === body.sessionId), messages: [], total: 0, nextOffset: null }); }
+    if (path.endsWith('/insights')) return ok({ summary: {}, sessions: [], snapshots: [], policy: { recycleAutoDelete: false, recycleMaxAgeDays: null } });
+    return ok({});
+  };
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  const props = { t, refreshSidebar: () => {} };
+  const settle = async () => { for (let n=0;n<3;n++) await new Promise(resolve => setTimeout(resolve,0)); };
+  const render = () => { const tree=harness.render(props); harness.flushEffects(); return tree; };
+  render(); await settle();
+  collectElements(render()).find(el=>el.props?.id==='dac-tab-insights').props.onClick();
+  let tree=render(); await settle(); tree=render();
+  assert(!requests.some(req=>req.path.includes('/orphans')), 'Storage does not scan residual sessions until requested');
+  let card = findComponentElement(tree, 'ResidualCheckCard');
+  assert(card !== undefined, 'Storage includes an on-demand residual check card');
+  if (card) {
+    await card.props.onCheck(); tree=render();
+    card=findComponentElement(tree,'ResidualCheckCard');
+    assert(requests.find(req=>req.path.includes('/orphans'))?.path.endsWith('/orphans?kind=subagent'), 'manual storage scan requests only missing-parent subagents');
+    assert(card.props.state.sessions.length===2 && elementText(card).includes('3 KB'), 'scan results show record count and measured space before opening details');
+    assert(!findComponentElement(tree,'ResidualSessionsDialog'), 'scanning does not automatically open a management dialog');
+    card.props.onView({ currentTarget: { focus() {} } }); tree=render();
+    let dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    assert(elementText(dialog).includes('residual-alpha') && elementText(dialog).includes('residual-beta') && elementText(dialog).includes('deleted-parent') && elementText(dialog).includes('/fixture/one'), 'details distinguish identical titles with full IDs and source metadata');
+    const detailHarness=createHookHarness(dialog.type);
+    let detailTree=detailHarness.render(dialog.props);
+    const checkbox=collectElements(detailTree).find(el=>el.type?.name==='SelectionCheckbox' && el.props.ariaLabel.includes('residual-alpha'));
+    checkbox.props.onChange(true); tree=render(); dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    assert(dialog.props.selected.has('residual-alpha'), 'checking a residual row selects its exact ID');
+    detailTree=detailHarness.render(dialog.props);
+    const preview=collectElements(detailTree).find(el=>el.type==='button' && el.props['aria-label']==='查看对话 Same title');
+    await preview.props.onClick(); tree=render();
+    const previewDialog=findComponentElement(tree,'PreviewDialog');
+    assert(previewDialog.props.preview.scope==='orphan-subagent' && findComponentElement(tree,'ResidualSessionsDialog').props.suspended, 'nested preview uses residual scope and suspends the parent focus trap');
+    previewDialog.props.onCancel(); tree=render(); dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    // Search and select-all must preserve selections outside the visible subset.
+    detailTree=detailHarness.render(dialog.props);
+    collectElements(detailTree).find(el=>el.type==='input' && el.props.type==='search').props.onChange({ target: { value: 'residual-beta' } });
+    detailTree=detailHarness.render(dialog.props);
+    assert(!elementText(detailTree).includes('residual-alpha') && elementText(detailTree).includes('residual-beta'), 'detail search filters rows by full ID');
+    const selectVisible=collectElements(detailTree).find(el=>el.type?.name==='SelectionCheckbox' && el.props.ariaLabel==='选择当前结果');
+    selectVisible.props.onChange(true); tree=render(); dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    assert(dialog.props.selected.size===2, 'selecting search results preserves previously selected hidden rows');
+    await dialog.props.onExport({currentTarget:null}); await settle(); tree=render();
+    const exportQuestions=collectElements(tree).filter(el=>el.type?.name==='ConfirmDialog');
+    let question=exportQuestions.find(el=>elementText(el).includes('备份限制'));
+    assert(question!==undefined && requests.filter(req=>req.path.includes('/orphans/export')).length===1, 'oversized residual backups ask before excluding any record');
+    question.props.onCancel(); tree=render(); dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    await dialog.props.onExport({currentTarget:null}); await settle(); tree=render();
+    const exportRequests=requests.filter(req=>req.path.includes('/orphans/export'));
+    assert(JSON.parse(new URLSearchParams(exportRequests.at(-1).options.body).get('sessionIds')).join(',')==='residual-alpha,residual-beta', 'cancelling backup exclusion keeps every selected record on the next export');
+    question=collectElements(tree).find(el=>el.type?.name==='ConfirmDialog' && elementText(el).includes('备份限制'));
+    await question.props.onConfirm(); await settle(); tree=render(); dialog=findComponentElement(tree,'ResidualSessionsDialog');
+    assert(dialog.props.selected.size===1 && dialog.props.selected.has('residual-alpha'), 'explicit backup exclusion only deselects the identified oversized record');
+    const beforeDelete=requests.filter(req=>req.path.includes('/orphans/delete')).length;
+    dialog.props.onDelete({currentTarget:null}); tree=render();
+    let deleteQuestion=collectElements(tree).find(el=>el.type?.name==='ConfirmDialog' && el.props.confirmLabel==='永久删除');
+    assert(deleteQuestion!==undefined && requests.filter(req=>req.path.includes('/orphans/delete')).length===beforeDelete, 'cleanup first opens irreversible confirmation without mutating data');
+    await deleteQuestion.props.onConfirm(); await settle(); tree=render();
+    assert(elementText(tree).includes('列表已变化') && rows.length===2, 'changed residual membership reports a visible error and preserves records');
+    dialog=findComponentElement(tree,'ResidualSessionsDialog'); dialog.props.onDelete({currentTarget:null}); tree=render();
+    deleteQuestion=collectElements(tree).find(el=>el.type?.name==='ConfirmDialog' && el.props.confirmLabel==='永久删除');
+    const first=deleteQuestion.props.onConfirm(); const second=deleteQuestion.props.onConfirm(); await Promise.all([first,second]); await settle(); tree=render();
+    assert(requests.filter(req=>req.path.includes('/orphans/delete')).length===beforeDelete+2, 'repeated confirm clicks issue only one cleanup request');
+    assert(rows.length===1 && rows[0].id==='residual-beta', 'cleanup removes only the explicitly selected record');
+    dialog=findComponentElement(tree,'ResidualSessionsDialog'); dialog.props.onClose(); tree=render();
+    card=findComponentElement(tree,'ResidualCheckCard'); failScan=true; await card.props.onCheck(); tree=render();
+    card=findComponentElement(tree,'ResidualCheckCard');
+    assert(card.props.state.status==='error' && collectElements(card).some(el=>el.type==='button' && el.props.disabled!==true), 'a failed manual scan offers an enabled retry');
+    detailHarness.unmount();
+  }
+  harness.unmount(); globalThis.fetch=savedFetch; Object.assign(moduleTable.react,savedHooks);
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.

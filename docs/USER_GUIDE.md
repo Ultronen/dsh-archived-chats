@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.4.6. This release fixes permanent deletion and Recycle Bin cleanup when historical and current session log generations coexist. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.5.0. This release adds Unarchived management and on-demand residual chat checks, and fixes subagent cascade deletion and overlay backgrounds. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -104,7 +104,15 @@ Once deletion starts, the plugin saves a non-restorable deletion task, removes a
 
 Missing required Host capabilities cause refusal before a deletion task is committed. Removing snapshot attachment copies does not guarantee immediate reclamation of matching bytes in Harness's global attachment store; other references and Host caching or garbage collection may retain them.
 
-Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Verified residual-session APIs remain for compatibility, without a product-page entry.
+Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Storage & Retention offers an on-demand residual check, described below.
+
+## Residual chat check
+
+In **Storage & Retention**, choose **Start check**. Results show a count, measured storage and check time; opening the page does not start a scan. Open details separately to manage the results. Only subagents with an explicit parent ID whose parent no longer exists are listed. Workspace, archived, recycled and pending-deletion records, empty chats, invalid parent relationships and independent forks are excluded.
+
+Details include full IDs, parent IDs, working directories, dates, sizes and read-only preview icons. Search and select current results without clearing hidden selections. Backups include selected records. When records exceed the backup limit, they are marked and you are asked whether to deselect them and export the rest. Cancelling keeps the original selection.
+
+Permanent deletion requires confirmation and removes selected records and their directories only, preserving unselected descendants. Retries and restart recovery retain that scope. Descendants may become new residual records after their parent is deleted; check, review and back them up separately before cleanup. Changed membership is refused with a visible prompt to select again. Unavailable sizes display “—”; measured bytes include only measured records.
 
 ## Export and import
 
@@ -202,7 +210,7 @@ Features depend on public Host capabilities, not just a version number:
 - Version 2 protection records require this or a newer plugin. Before downgrading, restore recycled chats you need to retain and back up plugin data.
 - If `trash.json` cannot be read, Archived is marked unverified, the Recycle Bin is unavailable, and archive mutations such as unarchive, tag/note editing, and deletion are refused instead of guessing.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (6/6) and package checks, including the v4 session format.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (7/7) and package checks, including the v4 session format.
 
 ## Local data and uninstall
 
