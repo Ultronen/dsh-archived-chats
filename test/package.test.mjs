@@ -56,7 +56,7 @@ function parseArchitectureRoutes(contents) {
 test('package and lock root publish one approved identity', () => {
   assert.equal(
     packageManifest.description,
-    '查看、搜索和恢复已归档会话，支持未归档管理、工作区批量归档、备份、回收站与按需残留会话检查。',
+    '查看、搜索和恢复已归档会话，支持未归档管理、工作区批量归档、备份、回收站与残留会话检查。',
   );
   assert.equal(packageManifest.author, 'Ultronen');
   assert.equal(packageLock.name, packageManifest.name);

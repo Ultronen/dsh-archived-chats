@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch and targets 1.5.0. This release adds Unarchived management and on-demand residual chat checks, and fixes subagent cascade deletion and overlay backgrounds. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch and targets 1.5.1. This release streamlines selected actions, adds global recycling, and checks residual chats automatically from the final storage summary card. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
@@ -60,9 +60,9 @@ dsh plugin --profile web update dsh-archived-chats
 | Workspace archiving | Unarchived offers individual, workspace-wide, and global archiving with aggregate confirmation; blank, active, or unreadable chats are skipped. |
 | Read-only preview | Conversations, reasoning, tool activity, Markdown, JSON, code, and readable stored images without unarchiving. |
 | Backup | Export one workspace or the entire archive as JSON + Markdown ZIP; preview imports and skip conflicting IDs. |
-| Recycle Bin | Move archived chats by workspace; restore one chat, a workspace, or the entire Recycle Bin back to Archived. |
+| Recycle Bin | Move archived chats by workspace or selection; restore one chat, a workspace, or the entire Recycle Bin back to Archived. |
 | Permanent deletion | Delete one archived chat, a workspace's archive, or all archived chats after confirmation. Recycle Bin deletion is separate. |
-| Residual chat check | Start a manual check in Storage & Retention for subagents whose parent no longer exists; search, select, preview, back up and confirm permanent deletion of selected records only. Empty chats are excluded. |
+| Residual chat check | Entering Storage & Retention automatically checks for subagents whose parent no longer exists; search, select, preview, back up and confirm permanent deletion of selected records only. Empty chats are excluded. |
 | Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
 
 The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Unarchived shares Archived’s search, filters, and workspace-group layout, offering read-only chat previews and individual, workspace-wide, and global archiving. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
@@ -72,7 +72,7 @@ The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Ret
 These screenshots show the current interface with synthetic example chats; they contain no private conversations. The [marketplace screenshot list](screenshots.json) uses the same files in the same order.
 
 1. [Archived chats](assets/screenshots/preview-01.png)
-2. [Full-text search](assets/screenshots/preview-02.png)
+2. [Full-text search and selected actions](assets/screenshots/preview-02.png)
 3. [Unarchived and workspace archiving](assets/screenshots/preview-03.png)
 4. [Read-only preview](assets/screenshots/preview-04.png)
 5. [Recycle Bin](assets/screenshots/preview-05.png)
@@ -80,7 +80,7 @@ These screenshots show the current interface with synthetic example chats; they 
 7. [Storage & Retention](assets/screenshots/preview-07.png)
 8. [Origins & Branches](assets/screenshots/preview-08.png)
 
-The Archived header has **More**. More contains Import backup, Export all, Unarchive all, then Delete all after a separator. The Recycle Bin header directly shows **Restore all** and **Empty Recycle Bin** without a More menu. Recycle rows retain the preview icon and use compact **Restore** and **Delete** text buttons. Workspace and global restoration separately confirm scope, counts, and the Archived destination, skipping pending deletions. Empty Recycle Bin still requires irreversible-action confirmation. The header keeps consistent dimensions across tabs. Workspace actions and global export, unarchive, and deletion ask you to confirm the complete archive scope and chat count.
+The Archived header has **Select** and **More**. More contains Import backup, Export all, Unarchive all, Move all to Recycle Bin, then Delete all after a separator. The Recycle Bin header directly shows **Restore all** and **Empty Recycle Bin** without a More menu. Recycle rows retain the preview icon and use compact **Restore** and **Delete** text buttons. Workspace and global restoration separately confirm scope, counts, and the Archived destination, skipping pending deletions. Empty Recycle Bin still requires irreversible-action confirmation. The header keeps consistent dimensions across tabs. Workspace actions and global export, unarchive, and deletion ask you to confirm the complete archive scope and chat count.
 
 **About** shows the running version, author, license, guides, project and feedback links, and Check for updates. Opening the page checks public npm version metadata in the background, at most once every 12 hours during a running backend session; failures never block archive management. A newer version adds a **Get update** link beside the title, opening the plugin market without installing or restarting anything. Follow the host's restart guidance when convenient; a browser refresh alone may not load an updated backend. No chat or backup content is sent during update checks.
 
@@ -89,11 +89,11 @@ Preview keeps real user messages on the right and the assistant's work on the le
 ## Archive, recycle, or delete?
 
 - **Archive:** retain a chat outside the main chat area. Unarchive returns it there.
-- **Move to Recycle Bin:** available only through an archived workspace's menu. Recovery returns the chat to Archived; Unarchive then returns it to the main chat area.
+- **Move to Recycle Bin:** available through workspace menus, header More → Move all to Recycle Bin, or More in selection mode. Recovery returns the chat to Archived; Unarchive then returns it to the main chat area.
 - **Delete all on Archived:** permanently delete archived chats across all workspaces, not existing Recycle Bin entries.
 - **Empty Recycle Bin:** permanently delete recycled chats and their associated protection data.
 
-There is no row-level Recycle Bin move or single-chat export. Workspace and global actions include chats hidden by filters. Workspace actions do not delete workspace/project directories. See the [action scope table](docs/USER_GUIDE.md#actions-and-their-scope) before bulk operations.
+Choose Select to check one or more chats, then Unarchive or Delete permanently. More contains Export selected and Move to Recycle Bin. Select all checks only current search/filter results; hidden selections remain selected with a visible count. Cancel exits and clears the selection. Ordinary rows have no export or recycle buttons. Workspace and global actions include chats hidden by filters. Workspace actions do not delete workspace/project directories. See the [action scope table](docs/USER_GUIDE.md#actions-and-their-scope) before bulk operations.
 
 Empty Recycle Bin acts only on the exact recycle-record incarnations shown at confirmation. Records added afterward are excluded; a changed target fails instead of widening the confirmed scope. A chat without a working directory remains in Archived because this Host cannot make it reachable from the main chat list; a missing workspace alone can still restore as ungrouped.
 

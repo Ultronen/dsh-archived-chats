@@ -2378,7 +2378,7 @@ console.log('\n[11] client half — settings section registration');
   assert(zhDict['confirm.deleteOne.title'] === '移至回收站？', 'move-one confirmation title is localized');
   assert(zhDict['confirm.deleteOne.body'].includes('保护快照'), 'move-one confirmation explains recoverability');
   assert(zhDict['group.collapse'] === '折叠' && zhDict['group.expand'] === '展开', 'collapse/expand labels present');
-  assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中项', 'Chinese export actions are localized');
+  assert(zhDict['export.all'] === '全部导出' && zhDict['export.selected'] === '导出选中', 'Chinese export actions are localized');
   assert(zhDict['archiveNotice.title'] === '已归档的聊天'
     && zhDict['archiveNotice.view'] === '查看'
     && zhDict['archiveNotice.undo'] === '撤销',
@@ -2473,7 +2473,7 @@ console.log('\n[11] client half — settings section registration');
 }
 
 function renderTestComponent(node) {
-  if (!['NotePreview', 'HelpTooltip'].includes(node.type.name)) return node.type(node.props ?? {});
+  if (!['NotePreview', 'HelpTooltip', 'SelectionCheckbox', 'ChatActionMenu', 'GroupSection'].includes(node.type.name)) return node.type(node.props ?? {});
   // A nested note owns hooks independently of the enclosing page/dialog.
   const savedHooks = { ...moduleTable.react };
   try { return createHookHarness(node.type).render(node.props ?? {}); }
@@ -2970,6 +2970,56 @@ console.log('\n[11b] client half — simplified archive actions');
   harness.unmount();
   globalThis.fetch = savedFetch;
   Object.assign(moduleTable.react, savedHooks);
+}
+console.log('\n[11b-global-recycle] global actions retain the complete archive scope');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  const rows = [
+    { id: 'global-a', title: 'Alpha', workspaceId: 'ws-1', workspaceTitle: 'One', createdAt: 10 },
+    { id: 'global-b', title: 'Beta', workspaceId: 'ws-1', workspaceTitle: 'One', createdAt: 20 },
+    { id: 'global-c', title: 'Gamma', workspaceId: 'ws-2', workspaceTitle: 'Two', createdAt: 30 },
+  ];
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/delete-all') && options.method === 'POST') {
+      const body = JSON.parse(options.body); requests.push(body);
+      return new Response(JSON.stringify({ trashed: body.sessionIds, failed: [] }));
+    }
+    const payload = path.endsWith('/state') ? { metadataStatus: 'ready', trashStatus: 'ready', sessions: rows } : {};
+    return new Response(JSON.stringify(payload));
+  };
+  const t = clientCtx.locale.bind('settings.archived-chats');
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  const render = () => harness.render({ t, refreshSidebar() {} });
+  const elements = () => collectElements(render());
+  const headAction = label => collectElements(elements().find(el => el.props?.className === 'dac-head-actions'))
+    .find(el => el.type === 'button' && elementText(el) === label);
+  render(); harness.flushEffects(); await new Promise(resolve => setTimeout(resolve, 0));
+  elements().find(el => el.type === 'select' && el.props['aria-label'] === t('filter.allProjects'))
+    ?.props.onChange({ target: { value: 'ws-2' } });
+  assert(headAction('全部移入回收站') !== undefined, 'header More offers Move all to Recycle Bin');
+  for (const label of ['全部取消归档', '全部删除', '全部移入回收站']) {
+    const action = headAction(label);
+    if (!action) continue;
+    action.props.onClick();
+    const dialog = findComponentElement(render(), 'ConfirmDialog');
+    assert(String(dialog?.props.body).includes('全部 2 个工作区中的 3 个已归档聊天'),
+      `${label} confirms every workspace and chat despite the filter`);
+    if (label === '全部移入回收站') assert(dialog?.props.title === '将全部已归档聊天移入回收站？',
+      'global recycling confirmation has a global title');
+    dialog?.props.onCancel();
+  }
+  assert(requests.length === 0, 'cancelled global confirmations do not mutate chats');
+  const recycle = headAction('全部移入回收站');
+  if (recycle) {
+    recycle.props.onClick();
+    await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+    assert(requests.length === 1 && requests[0].sessionIds.join(',') === 'global-a,global-b,global-c'
+      && requests[0].permanent !== true, 'global recycling moves the full archive snapshot without permanent deletion');
+  }
+  harness.unmount(); globalThis.fetch = savedFetch; Object.assign(moduleTable.react, savedHooks);
 }
 console.log('\n[11c] client half — archive insights UI');
 {
@@ -4034,7 +4084,7 @@ console.log('\n[11f] client half — recycle navigation and management');
   assert(tabs[0]?.props['aria-selected'] === true && tabs.slice(1).every((tab) => tab.props['aria-selected'] === false), 'Archived is the default selected tab');
   assert(requests.every((request) => !request.path.includes('/history')), 'retired History API is never requested');
 
-  for (const [index, actionCount] of [[0, 4], [1, 1], [2, 2], [3, 0], [4, 0], [5, 0]]) {
+  for (const [index, actionCount] of [[0, 6], [1, 1], [2, 2], [3, 0], [4, 0], [5, 0]]) {
     if (!tabs[index]) { assert(false, `tab ${index} exists`); continue; }
     tabs[index].props.onClick();
     const modeTree = harness.render({ t, refreshSidebar: () => {} });
@@ -4103,12 +4153,27 @@ console.log('\n[11f] client half — recycle navigation and management');
     const storageText = elementText(storageTree);
     const insightCards = storageElements.filter((element) => element.props?.className === 'dac-insights-card');
     const insightDetailButtons = storageElements.filter((element) => element.props?.className === 'dac-insights-open');
-    assert(insightCards.length === 5
+    assert(insightCards.length === 4
       && insightCards.every((card) => card.props?.style?.textAlign === 'center' && card.props?.style?.alignItems === 'center'),
       'storage summary cards center their labels, values, and detail actions');
     assert(insightDetailButtons.length === 2
       && insightDetailButtons.every((button) => button.props?.style?.alignSelf === 'center'),
       'storage summary detail buttons are centered inside their cards');
+    assert(!storageElements.some(element => element.props?.className === 'dac-insights-warning'),
+      'healthy storage cards omit diagnostic warnings');
+    const storageHooks = { ...moduleTable.react };
+    const healthySummary = storageInsightsPayload.summary;
+    storageInsightsPayload.summary = { ...healthySummary, sessionUnavailableCount: 2, degradedSnapshotCount: 1 };
+    const issueHarness = createHookHarness(StorageRetentionPanel);
+    issueHarness.render({ t }); issueHarness.flushEffects();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const issueCards = collectElements(issueHarness.render({ t })).filter(element => element.props?.className === 'dac-insights-card');
+    assert(issueCards.length === 4 && elementText(issueCards[0]).includes('2 个目录无法统计')
+      && elementText(issueCards[1]).includes('1 个恢复快照异常')
+      && !elementText(issueCards[2]).includes('异常') && !elementText(issueCards[3]).includes('异常'),
+      'measurement and snapshot issues appear only inside their respective storage cards');
+    issueHarness.unmount(); storageInsightsPayload.summary = healthySummary;
+    Object.assign(moduleTable.react, storageHooks);
     assert(storageElements.some((element) => element.props?.role === 'note' && elementText(element).includes('归档列表为空')),
       'storage view explains why retained snapshots can remain without archived chats');
     assert(!storageText.includes('Alpha 归档') && !storageText.includes('snapshot-active')
@@ -4789,7 +4854,7 @@ console.log('\n[11f2] client half — global recycle restore and About');
   assert(aboutPanel !== undefined && elementText(tree).includes('Ultronen') && elementText(tree).includes('MIT'), 'About shows package identity and license');
   if (aboutPanel) {
     assert(!collectElements(aboutPanel).some(el => /^h[1-6]$/.test(el.type)), 'About does not repeat the plugin title already shown in the page heading');
-    assert(elementText(aboutPanel).startsWith('本插件用于查看和管理 DeepSeek Harness 的归档会话，支持未归档管理、按工作区批量归档、备份、回收站恢复及按需残留会话检查。'), 'About opens directly with the agreed plugin description');
+    assert(elementText(aboutPanel).startsWith('本插件用于查看和管理 DeepSeek Harness 的归档会话，支持未归档管理、按工作区批量归档、备份、回收站恢复及残留会话检查。'), 'About opens directly with the agreed plugin description');
     const en = clientCalls.localeRegister[0].dicts.en;
     const englishPanel = aboutPanel.type({ ...aboutPanel.props, t: key => en[key] ?? key });
     assert(!collectElements(englishPanel).some(el => /^h[1-6]$/.test(el.type)) && elementText(englishPanel).startsWith('This plugin'), 'English About also starts with an introduction without a repeated title');
@@ -6433,7 +6498,7 @@ console.log('\n[20] client half — archive-only unarchived requests');
   harness.unmount(); globalThis.fetch = savedFetch;
 }
 
-console.log('\n[21] client half — on-demand residual storage checks');
+console.log('\n[21] client half — automatic residual storage checks');
 {
   const savedFetch = globalThis.fetch;
   const savedHooks = { ...moduleTable.react };
@@ -6474,13 +6539,15 @@ console.log('\n[21] client half — on-demand residual storage checks');
   render(); await settle();
   collectElements(render()).find(el=>el.props?.id==='dac-tab-insights').props.onClick();
   let tree=render(); await settle(); tree=render();
-  assert(!requests.some(req=>req.path.includes('/orphans')), 'Storage does not scan residual sessions until requested');
+  assert(requests.filter(req=>req.path.includes('/orphans')).length === 1, 'entering Storage automatically scans residual sessions once');
   let card = findComponentElement(tree, 'ResidualCheckCard');
-  assert(card !== undefined, 'Storage includes an on-demand residual check card');
+  assert(card !== undefined, 'Storage includes a residual summary card');
+  const storageElement = findComponentElement(tree, 'StorageRetentionPanel');
+  assert(findComponentElement(storageElement?.props.children, 'ResidualCheckCard') !== undefined, 'residual summary is embedded in the storage statistics panel');
   if (card) {
     await card.props.onCheck(); tree=render();
     card=findComponentElement(tree,'ResidualCheckCard');
-    assert(requests.find(req=>req.path.includes('/orphans'))?.path.endsWith('/orphans?kind=subagent'), 'manual storage scan requests only missing-parent subagents');
+    assert(requests.find(req=>req.path.includes('/orphans'))?.path.endsWith('/orphans?kind=subagent'), 'automatic storage scan requests only missing-parent subagents');
     assert(card.props.state.sessions.length===2 && elementText(card).includes('3 KB'), 'scan results show record count and measured space before opening details');
     assert(!findComponentElement(tree,'ResidualSessionsDialog'), 'scanning does not automatically open a management dialog');
     card.props.onView({ currentTarget: { focus() {} } }); tree=render();
@@ -6530,10 +6597,221 @@ console.log('\n[21] client half — on-demand residual storage checks');
     dialog=findComponentElement(tree,'ResidualSessionsDialog'); dialog.props.onClose(); tree=render();
     card=findComponentElement(tree,'ResidualCheckCard'); failScan=true; await card.props.onCheck(); tree=render();
     card=findComponentElement(tree,'ResidualCheckCard');
-    assert(card.props.state.status==='error' && collectElements(card).some(el=>el.type==='button' && el.props.disabled!==true), 'a failed manual scan offers an enabled retry');
+    assert(card.props.state.status==='error' && collectElements(card).some(el=>el.type==='button' && el.props.disabled!==true), 'a failed residual scan offers an enabled retry');
     detailHarness.unmount();
+    const scansBefore = requests.filter(req => /\/orphans\?/.test(req.path)).length;
+    collectElements(render()).find(el => el.props?.id === 'dac-tab-archived').props.onClick(); render();
+    failScan = false;
+    collectElements(render()).find(el => el.props?.id === 'dac-tab-insights').props.onClick(); render(); await settle(); tree = render();
+    assert(requests.filter(req => /\/orphans\?/.test(req.path)).length === scansBefore + 1,
+      'returning to Storage starts a fresh residual scan');
+    const childHooks = { ...moduleTable.react };
+    const panel = findComponentElement(tree, 'StorageRetentionPanel');
+    const panelHarness = createHookHarness(panel.type);
+    panelHarness.render(panel.props); panelHarness.flushEffects(); await settle();
+    const panelTree = panelHarness.render(panel.props);
+    const grid = collectElements(panelTree).find(el => el.props?.className === 'dac-insights-grid');
+    const gridCards = collectElements(grid).filter(el => el.props?.className?.split(' ').includes('dac-insights-card'));
+    assert(gridCards.length === 5 && elementText(gridCards.at(-1)).includes('残留会话'),
+      'residual sessions occupy the last of five statistics cards');
+    assert(!elementText(grid).includes('不可用会话 / 降级快照'), 'statistics omit the separate ambiguous unavailable card');
+    panelHarness.unmount();
+    const goodFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error('storage unavailable'); };
+    const failedPanelHarness = createHookHarness(panel.type);
+    const loadingPanel = failedPanelHarness.render(panel.props);
+    assert(findComponentElement(loadingPanel, 'ResidualCheckCard') !== undefined,
+      'residual access remains visible while storage statistics load');
+    failedPanelHarness.flushEffects(); await settle();
+    const failedPanel = failedPanelHarness.render(panel.props);
+    const failedGrid = collectElements(failedPanel).find(el => el.props?.className === 'dac-insights-grid');
+    const failedCards = collectElements(failedGrid).filter(el => el.props?.className?.split(' ').includes('dac-insights-card'));
+    assert(failedCards.length === 5 && elementText(failedCards.at(-1)).includes('残留会话')
+      && collectElements(failedCards.at(-1)).some(el => el.type === 'button' && !el.props.disabled)
+      && failedCards.slice(0, 4).every(el => elementText(el).includes('—')),
+      'failed storage statistics preserve ready residual details without showing false zero totals');
+    failedPanelHarness.unmount(); globalThis.fetch = goodFetch;
+    Object.assign(moduleTable.react, childHooks);
   }
   harness.unmount(); globalThis.fetch=savedFetch; Object.assign(moduleTable.react,savedHooks);
+}
+
+console.log('\n[21a] residual scans ignore late responses after tab changes');
+{
+  const savedFetch = globalThis.fetch, savedHooks = { ...moduleTable.react };
+  const scans = [];
+  const ok = body => ({ ok: true, status: 200, json: async () => body });
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('/orphans?')) return new Promise(resolve => scans.push({ resolve, signal: options.signal }));
+    if (path.endsWith('/state')) return ok({ metadataStatus: 'ready', trashStatus: 'ready', sessions: [] });
+    if (path.endsWith('/insights')) return ok({ summary: {}, sessions: [], snapshots: [], policy: {} });
+    return ok({});
+  };
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  const props = { t: clientCtx.locale.bind('settings.archived-chats') };
+  const render = () => { const tree = harness.render(props); harness.flushEffects(); return tree; };
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  const switchTab = id => { collectElements(render()).find(el => el.props?.id === id)?.props.onClick(); return render(); };
+  render(); await settle();
+  assert(scans.length === 0, 'opening Archived does not run a residual scan');
+  let tree = switchTab('dac-tab-insights'); tree = render();
+  const loading = findComponentElement(tree, 'ResidualCheckCard');
+  assert(scans.length === 1 && loading?.props.state.status === 'loading'
+    && collectElements(loading).some(el => el.type === 'button' && el.props.disabled === true),
+    'automatic checking exposes loading state and disables View until ready');
+  switchTab('dac-tab-archived');
+  assert(scans[0]?.signal.aborted === true, 'leaving Storage cancels the in-flight residual scan');
+  switchTab('dac-tab-insights');
+  assert(scans.length === 2, 're-entering Storage starts exactly one new scan');
+  scans[1]?.resolve(ok({ trashStatus: 'ready', sessions: [{ id: 'new-result', sizeBytes: 4096 }], summary: { bytes: 4096 } }));
+  await settle(); tree = render();
+  scans[0]?.resolve(ok({ trashStatus: 'ready', sessions: [{ id: 'stale-result', sizeBytes: 1024 }], summary: { bytes: 1024 } }));
+  await settle(); tree = render();
+  const ready = findComponentElement(tree, 'ResidualCheckCard');
+  assert(ready?.props.state.sessions.map(row => row.id).join(',') === 'new-result',
+    'a late cancelled scan cannot overwrite the current tab results');
+  assert(!findComponentElement(tree, 'ResidualSessionsDialog'), 'background checks do not open a dialog or modify records');
+  harness.unmount(); globalThis.fetch = savedFetch; Object.assign(moduleTable.react, savedHooks);
+}
+console.log('\n[selection] exact archived selections and cancellation');
+{
+  const savedHooks = { ...moduleTable.react };
+  const savedFetch = globalThis.fetch;
+  let rows = [
+    { id: 'select-a', title: 'Alpha', createdAt: 10, workspaceId: 'ws-1', workspaceTitle: 'One' },
+    { id: 'select-b', title: 'Beta', createdAt: 20, workspaceId: 'ws-1', workspaceTitle: 'One' },
+    { id: 'select-c', title: 'Gamma', createdAt: 30, workspaceId: 'ws-2', workspaceTitle: 'Two' },
+  ];
+  const requests = [];
+  let failNextDelete = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.endsWith('/export')) {
+      requests.push({ path, ids: JSON.parse(new URLSearchParams(options.body).get('sessionIds')) });
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'application/zip' } });
+    }
+    let payload = {};
+    if (options.method === 'POST' && /\/(delete-all|unarchive-all)$/.test(path)) {
+      const body = JSON.parse(options.body);
+      requests.push({ path, body });
+      if (path.endsWith('/delete-all') && failNextDelete) {
+        failNextDelete = false;
+        return new Response(JSON.stringify({ trashed: [], failed: body.sessionIds.map(id => ({ id, error: 'fixture-failure' })) }), { headers: { 'content-type': 'application/json' } });
+      }
+      rows = rows.filter(row => !body.sessionIds.includes(row.id));
+      payload = path.endsWith('/unarchive-all') ? { ok: true }
+        : body.permanent ? { deleted: body.sessionIds, pending: [], failed: [] }
+          : { trashed: body.sessionIds, failed: [] };
+    } else if (path.endsWith('/state')) payload = { metadataStatus: 'ready', trashStatus: 'ready', sessions: rows };
+    else if (path.endsWith('/stats')) payload = { summary: { sessionCount: rows.length, totalBytes: 0 }, sessions: {} };
+    return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } });
+  };
+  const harness = createHookHarness(clientCalls.slotRegister[0].component);
+  const props = { t: clientCtx.locale.bind('settings.archived-chats'), refreshSidebar() {} };
+  const render = () => harness.render(props);
+  const elements = () => collectElements(render());
+  const button = label => elements().find(el => el.type === 'button' && elementText(el) === label);
+  const rowCheck = id => elements().find(el => el.type === 'input' && el.props.type === 'checkbox' && el.props['data-session-id'] === id);
+  const allCheck = () => elements().find(el => el.type === 'input' && el.props['aria-label'] === '全选当前结果');
+  const toolbar = () => elements().find(el => el.props?.className === 'dac-selectionbar');
+  render(); harness.flushEffects(); await new Promise(resolve => setTimeout(resolve, 0));
+  const select = button('选择');
+  assert(select !== undefined, 'Archived provides an explicit selection-mode entry');
+  if (select) {
+    assert(!rowCheck('select-a'), 'normal archive rows have no selection checkbox');
+    select.props.onClick();
+    assert(button('导出选中')?.props.disabled === true && button('永久删除')?.props.disabled === true,
+      'empty selection cannot export or permanently delete');
+    rowCheck('select-a')?.props.onChange({ target: { checked: true } });
+    assert(allCheck()?.props['aria-checked'] === 'mixed', 'partial selection exposes an indeterminate Select all');
+    const workspace = elements().find(el => el.type === 'select' && el.props['aria-label'] === props.t('filter.allProjects'));
+    workspace?.props.onChange({ target: { value: 'ws-2' } });
+    allCheck()?.props.onChange({ target: { checked: true } });
+    assert(rowCheck('select-c')?.props.checked === true && !rowCheck('select-b'), 'Select all selects only current filtered results');
+    assert(elementText(toolbar()).includes('已选 2 项') && elementText(toolbar()).includes('1 项不在当前结果中'),
+      'hidden selections stay selected and their count is disclosed');
+    allCheck()?.props.onChange({ target: { checked: false } });
+    assert(elementText(toolbar()).includes('已选 1 项'), 'deselecting current results preserves hidden selections');
+    button('取消')?.props.onClick();
+    assert(!toolbar() && !rowCheck('select-c'), 'Cancel closes selection mode');
+    button('选择')?.props.onClick();
+    assert(elementText(toolbar()).includes('已选 0 项') && button('导出选中')?.props.disabled === true,
+      're-entering selection mode does not resurrect cancelled selections');
+
+    // Two independently chosen chats, including one hidden by the workspace filter.
+    rowCheck('select-c')?.props.onChange({ target: { checked: true } });
+    elements().find(el => el.type === 'select' && el.props['aria-label'] === props.t('filter.allProjects'))?.props.onChange({ target: { value: 'ws-1' } });
+    rowCheck('select-a')?.props.onChange({ target: { checked: true } });
+    button('导出选中')?.props.onClick();
+    let dialog = findComponentElement(render(), 'ConfirmDialog');
+    assert(String(dialog?.props.body).includes('选中的 2 个已归档聊天') && !String(dialog?.props.body).includes('全部 2 个工作区'),
+      'selection confirmation names selected count instead of pretending to be a global action');
+    dialog?.props.onCancel();
+    assert(requests.length === 0, 'cancelling selected export sends no request');
+    button('导出选中')?.props.onClick();
+    await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+    assert(requests.at(-1)?.path.endsWith('/export') && requests.at(-1)?.ids.join(',') === 'select-a,select-c',
+      'selected export sends exactly the selected IDs, including disclosed hidden selections');
+
+    const barElements = collectElements(toolbar());
+    assert(['取消归档', '永久删除', '取消'].every(label => barElements.some(el => el.type === 'button' && elementText(el) === label)),
+      'selection mode exposes unarchive, permanent deletion and Cancel');
+    const more = findComponentElement(toolbar(), 'ChatActionMenu');
+    assert(collectElements(more).filter(el => el.type === 'button').map(elementText).join(',') === '导出选中,移入回收站',
+      'selection More offers Export selected and Move to Recycle Bin');
+    assert(!toolbar().props.children.find(el => el?.props?.className === 'dac-selection-actions')?.props.children
+      .some(el => el?.type === 'button' && /导出/.test(elementText(el))), 'selected export appears only inside More');
+    const rowActions = elements().filter(el => el.props?.className === 'dac-row-actions');
+    assert(rowActions.every(row => !elementText(row).includes('取消归档') && !elementText(row).includes('删除')),
+      'selection mode does not duplicate its mutation actions on every row');
+    failNextDelete = true;
+    collectElements(more).find(el => el.type === 'button' && elementText(el) === '移入回收站')?.props.onClick();
+    await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+    assert(elementText(toolbar()).includes('已选 2 项') && rowCheck('select-a')?.props.checked === true,
+      'failed recycling preserves selected chats for retry');
+    collectElements(more).find(el => el.type === 'button' && elementText(el) === '移入回收站')?.props.onClick();
+    dialog = findComponentElement(render(), 'ConfirmDialog');
+    await dialog?.props.onConfirm();
+    assert(requests.at(-1)?.path.endsWith('/delete-all') && requests.at(-1)?.body.permanent !== true
+      && requests.at(-1)?.body.sessionIds.join(',') === 'select-a,select-c', 'selected recycling does not widen to a workspace or permanently delete');
+    render(); harness.flushEffects();
+    assert(elementText(toolbar()).includes('已选 0 项'), 'successfully recycled chats leave the selection');
+    rowCheck('select-b')?.props.onChange({ target: { checked: true } });
+    button('永久删除')?.props.onClick();
+    await findComponentElement(render(), 'ConfirmDialog')?.props.onConfirm();
+    assert(requests.at(-1)?.body.permanent === true && requests.at(-1)?.body.sessionIds.join(',') === 'select-b',
+      'selected permanent deletion targets only the remaining checked chat');
+  }
+  harness.unmount();
+  // A fresh page exercises cancellation and the same exact-ID unarchive path.
+  rows = [{ id: 'select-a', title: 'Alpha', createdAt: 10, workspaceId: 'ws-1' },
+    { id: 'select-b', title: 'Beta', createdAt: 20, workspaceId: 'ws-1' }];
+  const second = createHookHarness(clientCalls.slotRegister[0].component);
+  const renderSecond = () => second.render(props);
+  const secondElements = () => collectElements(renderSecond());
+  const secondButton = label => secondElements().find(el => el.type === 'button' && elementText(el) === label);
+  renderSecond(); second.flushEffects(); await new Promise(resolve => setTimeout(resolve, 0));
+  secondButton('选择')?.props.onClick();
+  secondElements().find(el => el.props?.['data-session-id'] === 'select-a')?.props.onChange({ target: { checked: true } });
+  secondButton('取消归档')?.props.onClick();
+  const capturedConfirm = findComponentElement(renderSecond(), 'ConfirmDialog');
+  // Filtering after the dialog opens cannot change the captured operation range.
+  secondElements().find(el => el.type === 'input' && el.props.type === 'text')?.props.onChange({ target: { value: 'Beta' } });
+  const beforeRequests = requests.length;
+  const pending = capturedConfirm?.props.onConfirm();
+  await capturedConfirm?.props.onConfirm(); await pending;
+  assert(requests.length === beforeRequests + 1 && requests.at(-1)?.path.endsWith('/unarchive-all')
+    && requests.at(-1)?.body.sessionIds.join(',') === 'select-a',
+    'unarchive keeps the confirmed selected ID snapshot and blocks duplicate submissions');
+  renderSecond(); second.flushEffects();
+  assert(secondElements().find(el => el.props?.className === 'dac-selectionbar') !== undefined,
+    'successful selected unarchive keeps selection mode available for further work');
+  secondElements().find(el => el.type === 'button' && el.props.role === 'tab' && elementText(el) === '回收站')?.props.onClick();
+  secondElements().find(el => el.type === 'button' && el.props.role === 'tab' && elementText(el) === '已归档')?.props.onClick();
+  assert(!secondElements().some(el => el.props?.className === 'dac-selectionbar'),
+    'leaving Archived exits selection mode');
+  second.unmount(); globalThis.fetch = savedFetch; Object.assign(moduleTable.react, savedHooks);
 }
 
 // Tear down the isolated DSH_HOME and session fixture dirs.

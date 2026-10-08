@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.5.1 — 2026-10-08
+
+- 残留会话整合为顶部最后一张统计卡片，进入空间与策略自动检查，点击「查看明细」后管理明细；离开取消请求，迟到结果不覆盖新检查。目录及恢复快照异常归入对应卡片提示；空间统计加载或失败不再隐藏独立的残留检查入口。
+- Move residual chats into the final summary card and scan automatically on entry to Storage & Retention. View details opens the management dialog; cancelled late responses cannot replace newer results. Show measurement and recovery-snapshot issues in their respective cards. Keep residual access available while storage statistics load or fail.
+
+- 全部八张市场功能截图更新至最新界面，移除预览页顶部的英文及本地会话管理说明，并展示最新选择操作。
+- Refresh all eight marketplace screenshots from the latest UI, remove the extra preview header, and show the current selected actions.
+
+- 顶部更多新增「全部移入回收站」，确认并处理所有工作区的已归档聊天，筛选不会缩小范围。
+- Add header More → Move all to Recycle Bin, confirming the complete archive scope across workspaces regardless of filters.
+
+- 已归档新增选择模式，支持当前结果全选、半选、隐藏已选项计数及取消清空。直接提供取消归档和永久删除；更多提供导出选中和移入回收站。选择模式行内保留预览，操作先确认精确选中范围。
+- Add Archived selection mode with filtered Select all, indeterminate state, hidden-selection counts, and Cancel. Expose Unarchive and Delete permanently; More contains Export selected and Move to Recycle Bin. Rows retain Preview and actions confirm the exact selected scope.
+
 ## 1.5.0 — 2026-10-08
 
 ### 中文

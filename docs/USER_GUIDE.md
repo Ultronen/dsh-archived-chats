@@ -2,7 +2,7 @@
 
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.5.0. This release adds Unarchived management and on-demand residual chat checks, and fixes subagent cascade deletion and overlay backgrounds. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.5.1. This release streamlines selected actions, adds global recycling, and checks residual chats automatically from the final storage summary card. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
 ## Understand the three locations
 
@@ -67,14 +67,15 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 | Unarchived: chat row | Preview icon, Archive | One chat; archiving requires confirmation |
 | Unarchived: workspace three-dot menu | Archive all | Every eligible chat in that workspace |
 | Unarchived: header | Archive all | Eligible chats across all workspaces |
-| Archived: header | More | Open the global action menu |
-| Archived: header More menu | Import backup, Export all, Unarchive all; separator; Delete all | Export, unarchive, and delete cover archived chats across all workspaces; Import uses the selected ZIP |
+| Archived: header | Select, More | Enter selection mode or open the global action menu |
+| Archived: selection mode | Select all, Unarchive, Delete permanently, More → Export selected / Move to Recycle Bin, Cancel | Checked chats only; Select all covers current results |
+| Archived: header More menu | Import backup, Export all, Unarchive all, Move all to Recycle Bin; separator; Delete all | Export, unarchive, recycle, and delete cover archived chats across all workspaces; Import uses the selected ZIP |
 | Recycle Bin: chat row | Preview icon, Restore and Delete text buttons | One recycle record; Delete is permanent after confirmation |
 | Recycle Bin: workspace More menu | Restore all, Delete all | Recycle records in that workspace |
 | Recycle Bin: header | Restore all | Restore eligible entries across all workspaces after confirmation |
 | Recycle Bin: header | Empty Recycle Bin | Permanently delete recycle records across all workspaces after confirmation |
 
-**Moving to the Recycle Bin is available only through workspace actions, not individual rows or a global move-all action.** The Archived view has no single-chat export or list multi-select mode; Unarchived provides read-only previews and archiving. Search and filters do not narrow workspace or global bulk actions.
+**Selection mode supports one or many chats.** Select shows checkboxes and an action bar; rows keep Preview only. Unarchive and Delete permanently are visible; More contains Export selected and Move to Recycle Bin. Select all checks current search/filter results and shows an indeterminate state for partial selection. Hidden selections remain checked with a visible count; clearing current results preserves them. Cancel or leaving Archived clears the selection and exits. Actions confirm the selected count, and failed items stay checked. Ordinary rows have no export or recycle buttons; Unarchived provides read-only previews and archiving. Search and filters do not narrow workspace or global bulk actions.
 
 Every archive workspace action asks for confirmation with the full workspace name and its complete archive count. Global Export all, Unarchive all, and Delete all confirmations count archived chats across every workspace, excluding the Recycle Bin. Check these counts even when the list is filtered. The header keeps consistent dimensions when switching tabs.
 
@@ -104,11 +105,11 @@ Once deletion starts, the plugin saves a non-restorable deletion task, removes a
 
 Missing required Host capabilities cause refusal before a deletion task is committed. Removing snapshot attachment copies does not guarantee immediate reclamation of matching bytes in Harness's global attachment store; other references and Host caching or garbage collection may retain them.
 
-Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Storage & Retention offers an on-demand residual check, described below.
+Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Storage & Retention offers an automatic residual check, described below.
 
 ## Residual chat check
 
-In **Storage & Retention**, choose **Start check**. Results show a count, measured storage and check time; opening the page does not start a scan. Open details separately to manage the results. Only subagents with an explicit parent ID whose parent no longer exists are listed. Workspace, archived, recycled and pending-deletion records, empty chats, invalid parent relationships and independent forks are excluded.
+Every entry to **Storage & Retention** automatically runs a check. The final summary card, Residual chats, shows the count and measured storage. Choose View details to manage the listed chats; failed checks offer Retry. Checking never opens a dialog or deletes records. Only subagents with an explicit parent ID whose parent no longer exists are listed. Workspace, archived, recycled and pending-deletion records, empty chats, invalid parent relationships and independent forks are excluded.
 
 Details include full IDs, parent IDs, working directories, dates, sizes and read-only preview icons. Search and select current results without clearing hidden selections. Backups include selected records. When records exceed the backup limit, they are marked and you are asked whether to deselect them and export the rest. Cancelling keeps the original selection.
 
