@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main` and covers 1.5.1 behavior. This release streamlines selected actions, adds global recycling, and checks residual chats automatically from the final storage summary card. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main` and covers 1.5.2 behavior. This release fixes imported-title cache compatibility with newer Hosts while retaining support for the older interface. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -218,7 +218,7 @@ The shared limits are 2,000 sessions, 4,001 entries, 4 MiB manifest, 4 MiB per s
 
 restore.js adapts verified modern create handles first, then dedicated restore or an explicitly exclusive legacy create/append/locate contract. Plain legacy create/append is unsupported: inventory absence does not prove exclusive ownership. Modern import preserves the exact cut, appends in batches, flushes (including empty logs), validates a full read, and closes handles after registry/metadata commit. Rollback authority starts only after successful creation. A safely located session-owned destination is required; an uncertain first-write artifact is preserved and reported as `restore-rollback-failed`, never blindly deleted. Legacy writers refuse inherited v2 records. Workspace attachment requires paired attach/detach. Conflicts include Recycle Bin entries and pending deletion tasks and are rechecked inside the lifecycle queue. This adapter serves ZIP import; recycle snapshot fallback has separate checks in recycle.js.
 
-After raw import commits, optional public cold-title publication verifies the exact title and final event watermark under a shared bounded deadline. Cache absence, failure, timeout, or seeded-cold-list limitations return stable degraded warnings without rolling back durable restored data. Unarchive separately requires an authoritative readable persisted header with `cwd`; missing `cwd` is not the same as missing workspace and leaves the archived copy available for preview/export.
+After raw import commits, optional public cold-title publication verifies the exact title and final event watermark under a shared bounded deadline. Cache absence, failure, timeout, or legacy Host seeded-cold-list limitations return stable degraded warnings without rolling back durable restored data. Unarchive separately requires an authoritative readable persisted header with `cwd`; missing `cwd` is not the same as missing workspace and leaves the archived copy available for preview/export.
 
 ## Validation and release boundaries
 
@@ -234,9 +234,9 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all seven native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
+The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all eight native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (7/7) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (8/8) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
 
 Permanent deletion quiesces live agents before the final descendant inventory. Optional `cascadeSessionIds` in the parent purge-pending record persist the complete targets until every descendant finishes, so startup can recover after the parent directory disappears. Forks and subtrees with independent recycle records remain outside the cascade. Do not downgrade to a version that does not understand this field while these records are pending.
 

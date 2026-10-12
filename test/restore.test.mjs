@@ -613,8 +613,8 @@ test('restore reports title publication only after the exact public cache observ
       cached = { asOfSeq: 0, values: { title: 'Title published-title' } };
       return cached;
     },
-    cachedSnapshot(meta, cut, keys) {
-      calls.push({ kind: 'cached', meta, cut, keys });
+    cachedSnapshot(meta, keys) {
+      calls.push({ kind: 'cached', meta, keys });
       return cached;
     },
   };
@@ -626,7 +626,7 @@ test('restore reports title publication only after the exact public cache observ
     kind: 'cold', meta: record.record.source.meta, cut: 0, events: record.record.source.events,
   });
   assert.deepEqual(calls[1], {
-    kind: 'cached', meta: record.record.source.meta, cut: 0, keys: ['title'],
+    kind: 'cached', meta: record.record.source.meta, keys: ['title'],
   });
   assert.deepEqual(requestedServices, ['sessionProjectionCache']);
 });
@@ -678,7 +678,7 @@ test('optional projection cache failures degrade restore without rolling data ba
   }
 });
 
-test('cold title publication preserves a fork cut and never activates sessions or agents', async t => {
+for (const legacy of [false, true]) test(`cold title publication preserves a fork cut without activating sessions (legacy=${legacy})`, async t => {
   const f = await fixture();
   t.after(() => rm(f.root, { recursive: true, force: true }));
   const host = modernHost(f.root);
@@ -692,7 +692,16 @@ test('cold title publication preserves a fork cut and never activates sessions o
       observed = { meta, cut, events };
       return { asOfSeq: 1, values: { title: 'title 1' } };
     },
-    cachedSnapshot() { return { asOfSeq: 1, values: { title: 'title 1' } }; },
+    cachedSnapshot: legacy
+      ? function (meta, cut, keys) {
+        assert.equal(cut, 1);
+        assert.deepEqual(keys, ['title']);
+        return { asOfSeq: 1, values: { title: 'title 1' } };
+      }
+      : function (meta, keys) {
+        assert.deepEqual(keys, ['title']);
+        return { asOfSeq: 1, values: { title: 'title 1' } };
+      },
   };
   const requestedServices = [];
   const adapter = createRestoreAdapter({
@@ -706,11 +715,11 @@ test('cold title publication preserves a fork cut and never activates sessions o
 
   const result = await tx.commit();
 
-  assert.deepEqual(result.warnings, [{
+  assert.deepEqual(result.warnings, legacy ? [{
     id: 'cold-fork',
     reason: 'title-publication-degraded',
     detail: 'seeded-cold-list-unsupported',
-  }]);
+  }] : []);
   assert.equal(observed.cut, 1);
   assert.deepEqual(observed.meta, record.record.source.meta);
   assert.deepEqual(observed.events, record.record.source.events);
