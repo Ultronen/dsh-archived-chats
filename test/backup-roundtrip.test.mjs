@@ -37,7 +37,7 @@ async function smallBackup(id, root) {
   return { bytes, meta, events };
 }
 
-async function fixture(t) {
+async function fixture(t, { projections = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dac-backup-native-'));
   const previous = process.env.DSH_HOME;
   process.env.DSH_HOME = root;
@@ -51,6 +51,27 @@ async function fixture(t) {
     else process.env.DSH_HOME = previous;
     await rm(root, { recursive: true, force: true });
   });
+  let cache;
+  if (projections) {
+    const { Service } = await native('cordis');
+    const { default: Storage } = await native('dsh-storage');
+    const { JsonStorageBackend } = await native('dsh-storage-json');
+    const { DomainFacility } = await native('dsh-storage-domain');
+    const { default: Projections } = await native('dsh-session-projection');
+    const { titleProjectionDefinition } = await native('dsh-session-title');
+    const { default: Cache } = await native('dsh-session-projection-cache');
+    const storage = new Storage(ctx);
+    const backend = new JsonStorageBackend(join(root, 'storage'));
+    storage.backend.register('json', backend);
+    const domain = new DomainFacility(ctx, { backend: 'json' });
+    ctx.provide('storageDomain', domain);
+    ctx.provide('sessions', { get() { throw new Error('cold restore must not activate sessions'); } });
+    const registry = new Projections(ctx);
+    registry.register(titleProjectionDefinition);
+    cache = new Cache(ctx, { writeEveryEvents: 10, writeIntervalMs: 1000 });
+    await cache[Service.init]();
+    t.after(async () => { await domain.closeAll(); await backend.close(); });
+  }
   const workspace = { id: 'ws-backup', title: 'Backup workspace', sessionIds: [],
     async attachSession(id) { this.sessionIds.push(id); },
     async detachSession(id) { this.sessionIds = this.sessionIds.filter(value => value !== id); } };
@@ -60,7 +81,7 @@ async function fixture(t) {
     async archiveSession(id) { if (!this.state.archivedSessionIds.includes(id)) this.state.archivedSessionIds.push(id); },
     async setState(state) { this.state = state; } };
   const routes = new Map();
-  const services = { workspaceRegistry: registry, sessionPersistence: raw,
+  const services = { workspaceRegistry: registry, sessionPersistence: raw, sessionProjectionCache: cache,
     sessions: { get: () => undefined },
     webServer: { register({ path, handler }) { routes.set(path, handler); } } };
   apply({ get: key => services[key], on() {}, logger: { warn() {} },
@@ -91,7 +112,7 @@ async function fixture(t) {
     assert.equal(response.status, 200, response.bytes.toString());
     return response.json();
   }
-  return { root, raw, registry, workspace, call, inspect };
+  return { root, raw, registry, workspace, call, inspect, cache };
 }
 
 test('official modern backend: export, permanent delete, import, preview, unarchive, and reopen', { skip: !nativeRoot }, async t => {
@@ -383,4 +404,38 @@ test('official modern backend: cascade preserves forks and orphan backups remain
   const last = (await f.raw.list()).map(item => item.header.id);
   assert.equal(last.includes('native-fork'), true);
   assert.equal(last.includes('native-fork-child'), true);
+});
+
+
+test('official projection cache publishes restored ordinary and seeded titles to cold listing', { skip: !nativeRoot }, async t => {
+  const f = await fixture(t, { projections: true });
+  const { Session } = await native('dsh-session');
+  for (const isSeeded of [false, true]) {
+    const id = `session-cache-${isSeeded}`;
+    const meta = { version: sessionFormatVersion, id, createdAt: 42, cwd: f.root, isSeeded,
+      ...(isSeeded ? { parentSession: 'missing-parent' } : {}) };
+    const seed = [{ seq: 0, time: 42, type: 'session/title',
+      data: { title: 'Inherited title', messageSeqs: [], source: { kind: 'user' } } }];
+    const session = Session.create(id, isSeeded ? seed : [], meta, isSeeded ? 1 : 0);
+    session.append('session/title', { title: 'Restored title', messageSeqs: [], source: { kind: 'user' } });
+    const events = session.snapshotEvents();
+    const zip = await createExportZip({ plan: planExport([{ id, title: 'Restored title', workspaceId: f.workspace.id }]),
+      inspect: async () => ({ meta, events, inheritedEventCount: isSeeded ? 1 : 0 }), generatorVersion: 'test' });
+    const [bytes] = await Promise.all([buffer(zip.stream), zip.completion]);
+    const inspected = await f.inspect(bytes);
+    const response = await f.call('/import/restore', { token: inspected.token, nonce: inspected.nonce, sessionIds: [id] });
+    assert.equal(response.status, 200, response.bytes.toString());
+    assert.deepEqual(response.json().restored, [id]);
+    const legacy = f.cache.cachedSnapshot.length >= 3;
+    assert.deepEqual(response.json().warnings, legacy && isSeeded
+      ? [{ id, reason: 'title-publication-degraded', detail: 'seeded-cold-list-unsupported' }] : []);
+    const observed = legacy ? f.cache.cachedSnapshot(meta, isSeeded ? 1 : 0, ['title'])
+      : f.cache.cachedSnapshot(meta, ['title']);
+    assert.equal(observed.values.title, 'Restored title');
+    assert.equal(observed.asOfSeq, events.at(-1).seq);
+    const handle = await f.raw.open(id, 'read');
+    assert.equal(handle.inheritedEventCount, isSeeded ? 1 : 0);
+    assert.deepEqual((await handle.read()).events, events);
+    await handle.close();
+  }
 });

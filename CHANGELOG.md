@@ -4,6 +4,20 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.5.2 — 2026-10-13
+
+### 中文
+
+- 修复新版 Host 使用两参数 `cachedSnapshot(meta, keys)` 时，导入后标题同步误报 `cache-read-failed` 的问题；保留旧版三参数接口适配。
+- 新版 Host 已支持分叉会话的冷列表标题读取，不再返回过时的 `seeded-cold-list-unsupported` 警告；旧版 Host 仍保留该限制提示。
+- 增加官方投影缓存、标题投影和 JSON 存储的集成回归，覆盖普通与分叉会话的标题、事件水位和继承边界。强制原生集成门禁增至八项。
+
+### English
+
+- Fix imported-title synchronization reporting `cache-read-failed` on newer Hosts using `cachedSnapshot(meta, keys)`, while retaining the older three-argument interface.
+- Stop reporting the obsolete `seeded-cold-list-unsupported` warning on newer Hosts that support cold listing titles for forked sessions; retain the limitation warning on older Hosts.
+- Add integration coverage using the official projection cache, title projection, and JSON storage for ordinary and forked sessions, including titles, event watermarks, and inherited boundaries. Increase the mandatory native integration gate to eight cases.
+
 ## 1.5.1 — 2026-10-08
 
 - 残留会话整合为顶部最后一张统计卡片，进入空间与策略自动检查，点击「查看明细」后管理明细；离开取消请求，迟到结果不覆盖新检查。目录及恢复快照异常归入对应卡片提示；空间统计加载或失败不再隐藏独立的残留检查入口。
