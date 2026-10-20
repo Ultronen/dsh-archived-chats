@@ -4,6 +4,18 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.5.3 — 2026-10-21
+
+### 中文
+
+- 兼容 DSH `0.2.1-rc.2`：在可选会话依赖范围中显式接受已验证版本，避免安装时的 peer 依赖冲突（#60）；保留此前支持范围。
+- 增加新版官方 Host 的锁定测试夹具，适配 JSONL 后端由构造器改为插件 `apply()` 的初始化方式。CI 在 Ubuntu、macOS、Windows 上分别运行新旧两套 Host 的八项原生集成检查，覆盖备份恢复、删除、失败回滚及分叉标题。
+
+### English
+
+- Support DSH `0.2.1-rc.2` by explicitly admitting the verified version in the optional session peer range, avoiding installation conflicts (#60) while preserving earlier support.
+- Add a pinned official Host fixture and adapt native test setup to the JSONL backend's plugin `apply()` entry point. CI runs all eight native integration cases against both Host versions on Ubuntu, macOS, and Windows, covering backup/restore, deletion, rollback failures, and forked-session titles.
+
 ## 1.5.2 — 2026-10-13
 
 ### 中文

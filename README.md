@@ -32,7 +32,7 @@ Archive Management gives DeepSeek Harness a place to find chats hidden from the 
 
 > The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
 >
-> This document follows the `main` branch and targets 1.5.2. This release fixes imported-title cache compatibility with newer Hosts while retaining support for the older interface. See the [changelog](CHANGELOG.md) for release history.
+> This document follows the `main` branch and targets 1.5.3. This release adds installation support and native integration coverage for DSH `0.2.1-rc.2` while retaining older Host support. See the [changelog](CHANGELOG.md) for release history.
 
 ## Quick start
 
@@ -135,7 +135,7 @@ The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Ho
 
 Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 
-The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (8/8) and package checks, including the v4 session format.
+The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires both pinned official Host backends, `@deepseek-ai/dsh-session@0.1.7-rc.2` and `0.2.1-rc.2` (eight integration cases each) and package checks, including the v4 session format.
 
 ## Documentation
 
@@ -157,10 +157,12 @@ Archive Management is actively maintained. The latest stable npm release receive
 npm test
 npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
 node scripts/run-native-integration.mjs
+npm ci --prefix test/fixtures/native-host-0.2.1 --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs --fixture-root test/fixtures/native-host-0.2.1
 npm pack --dry-run --json
 ```
 
-The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all eight native integration cases to run without skips. All checks use isolated temporary data and never read real sessions.
+The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The two native command pairs use the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` and `0.2.1-rc.2` fixtures; each requires all eight native integration cases to run without skips. All checks use isolated temporary data and never read real sessions.
 
 ## Uninstall
 

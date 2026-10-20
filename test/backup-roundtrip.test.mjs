@@ -42,15 +42,19 @@ async function fixture(t, { projections = false } = {}) {
   const previous = process.env.DSH_HOME;
   process.env.DSH_HOME = root;
   const { Context } = await native('cordis');
-  const { default: Persistence } = await native('dsh-session-persistence-jsonl');
+  const persistencePlugin = await native('dsh-session-persistence-jsonl');
   const ctx = new Context();
-  const raw = new Persistence(ctx, { root: join(root, 'sessions') });
   t.after(async () => {
     await ctx.fiber.dispose();
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
     await rm(root, { recursive: true, force: true });
   });
+  // 0.2.1 mounts persistence through apply() so the Host owns handle cleanup.
+  // Older Hosts export the service constructor directly.
+  await ctx.plugin(persistencePlugin.default ?? persistencePlugin, { root: join(root, 'sessions') }).await();
+  const raw = ctx.get('sessionPersistence');
+  assert.ok(raw, 'official persistence plugin must provide its service');
   let cache;
   if (projections) {
     const { Service } = await native('cordis');
@@ -254,10 +258,12 @@ test('a foreign first-materialization conflict never deletes the foreign log', {
   const f = await fixture(t);
   const backup = await smallBackup('session-racing-create', f.root);
   const { Context } = await native('cordis');
-  const { default: Persistence } = await native('dsh-session-persistence-jsonl');
+  const persistencePlugin = await native('dsh-session-persistence-jsonl');
   const peerContext = new Context();
-  const peer = new Persistence(peerContext, { root: join(f.root, 'sessions') });
   t.after(() => peerContext.fiber.dispose());
+  await peerContext.plugin(persistencePlugin.default ?? persistencePlugin, { root: join(f.root, 'sessions') }).await();
+  const peer = peerContext.get('sessionPersistence');
+  assert.ok(peer, 'official persistence plugin must provide its service');
   const create = f.raw.create.bind(f.raw);
   f.raw.create = async (...args) => {
     const handle = await create(...args);
