@@ -2,7 +2,7 @@
 
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main` and covers 1.5.2 behavior. This release fixes imported-title cache compatibility with newer Hosts while retaining support for the older interface. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document follows `main` and covers 1.5.3 behavior. This release adds installation support and native integration coverage for DSH `0.2.1-rc.2` while retaining older Host support. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 

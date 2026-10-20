@@ -31,18 +31,13 @@ jobs:
       - run: npm pack --dry-run --json
 
   native-host:
-    name: Native / ${{ matrix.label }} / Node 24
+    name: Native / ${{ matrix.os }} / ${{ matrix.fixture }} / Node 24
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            label: ubuntu
-          - os: macos-latest
-            label: macos
-          - os: windows-latest
-            label: windows
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        fixture: [native-host, native-host-0.2.1]
 
     steps:
       - uses: actions/checkout@v6
@@ -57,7 +52,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Install locked official Host fixture
-        run: npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
+        run: npm ci --prefix test/fixtures/${{ matrix.fixture }} --ignore-scripts --include=optional
       - name: Run mandatory native Host integration
-        run: node scripts/run-native-integration.mjs
+        run: node scripts/run-native-integration.mjs --fixture-root test/fixtures/${{ matrix.fixture }}
       - run: npm pack --dry-run --json
