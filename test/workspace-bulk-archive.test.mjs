@@ -326,3 +326,102 @@ test('a session that starts during execution inspection is not archived', async 
   assert.deepEqual(result.skipped, [{ id: 'cold-a', reason: 'session-live' }]);
   assert.equal(item.calls.archive.length, 0);
 });
+
+test('active archive requires explicit stop consent bound to previewed active IDs', async () => {
+  const item = fixture();
+  item.dependencies.registry.stopSessionActivity = async () => {};
+  const calls = [];
+  const original = item.dependencies.registry.archiveSession;
+  item.dependencies.registry.archiveSession = async function(id, options) { calls.push({ id, options }); await original.call(this, id); };
+  const prepared = await item.service.preview('workspace-a', ['session-live'], { includeActive: true });
+  assert.equal(prepared.sessions[0].busy, true);
+  assert.deepEqual(prepared.stopSessionIds, ['session-live']);
+  await assert.rejects(item.service.execute(prepared.token, prepared.nonce), error => error.code === 'workspace-archive-stop-confirmation-required');
+  assert.equal(calls.length, 0);
+  const result = await item.service.execute(prepared.token, prepared.nonce, { stopActivity: true });
+  assert.deepEqual(result.archived, ['session-live']);
+  assert.deepEqual(calls, [{ id: 'session-live', options: { stopActivity: true } }]);
+});
+
+test('stop confirmation never authorizes stopping newly active unconfirmed chats', async () => {
+  const item = fixture({ sessionIds: ['cold-a'] });
+  item.dependencies.registry.stopSessionActivity = async () => {};
+  const prepared = await item.service.preview('workspace-a', ['cold-a'], { includeActive: true });
+  item.dependencies.sessions.get = () => ({ id: 'cold-a' });
+  const result = await item.service.execute(prepared.token, prepared.nonce, { stopActivity: true });
+  assert.deepEqual(result.skipped, [{ id: 'cold-a', reason: 'session-live' }]);
+  assert.equal(item.calls.archive.length, 0);
+});
+
+test('unarchived inventory retains unreadable chats but omits proven blank drafts', async () => {
+  const item = fixture({ sessionIds: ['blank', 'unreadable', 'live'], liveIds: ['live'] });
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies, inspectConversation: async id => {
+    if (id === 'unreadable') throw new Error('read failed');
+    return { hasConversation: id !== 'blank' };
+  } });
+  const rows = await service.listSessions();
+  assert.deepEqual(rows.map(row => row.id), ['unreadable', 'live']);
+  assert.equal(rows[0].archiveEligible, false);
+  assert.equal(rows[1].busy, true);
+});
+
+test('older hosts cannot silently archive active chats without stopping', async () => {
+  const item = fixture();
+  const prepared = await item.service.preview('workspace-a', ['session-live'], { includeActive: true });
+  const result = await item.service.execute(prepared.token, prepared.nonce, { stopActivity: true });
+  assert.deepEqual(result.failed, [{ id: 'session-live', reason: 'stop-archive-unsupported' }]);
+  assert.equal(item.calls.archive.length, 0);
+});
+
+test('official activity detects background work even with an idle agent', async () => {
+  const item = fixture({ sessionIds: ['background-chat'], liveIds: [] });
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies,
+    agents: { get: () => ({ status: 'idle' }) },
+    getActivity: async () => [{ kind: 'background-job' }],
+  });
+  assert.equal((await service.listSessions())[0].busy, true);
+  const prepared = await service.preview('workspace-a', ['background-chat'], { includeActive: true });
+  assert.deepEqual(prepared.stopSessionIds, ['background-chat']);
+});
+
+test('unassigned top-level conversations are listed and archived through the Host', async () => {
+  const item = fixture({ sessionIds: ['assigned'], blankIds: ['draft'] });
+  const headers = [
+    { id: 'assigned' }, { id: 'free-chat', title: 'Ungrouped chat' },
+    { id: 'draft' }, { id: 'child', origin: 'subagent' }, { id: 'already-archived' },
+  ];
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies, listSessionHeaders: async () => headers });
+  const rows = await service.listSessions();
+  assert.deepEqual(rows.map(row => row.id), ['assigned', 'free-chat']);
+  assert.equal(rows[1].workspaceId, null);
+  const groups = await service.listWorkspaces();
+  const ungrouped = groups.find(group => group.ungrouped);
+  assert.ok(ungrouped);
+  const prepared = await service.preview(ungrouped.id, ['free-chat'], { includeActive: true });
+  const result = await service.execute(prepared.token, prepared.nonce);
+  assert.deepEqual(result.archived, ['free-chat']);
+  assert.equal(item.calls.archive[0].receiver, item.registry);
+  assert.deepEqual((await service.listSessions()).map(row => row.id), ['assigned']);
+});
+
+test('ungrouped confirmation does not archive a chat moved into a workspace', async () => {
+  const item = fixture({ sessionIds: [] });
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies,
+    listSessionHeaders: async () => [{ id: 'moved-chat' }],
+  });
+  const group = (await service.listWorkspaces()).find(row => row.ungrouped);
+  assert.ok(group);
+  const prepared = await service.preview(group.id, ['moved-chat']);
+  item.workspace.sessionIds.push('moved-chat');
+  const result = await service.execute(prepared.token, prepared.nonce);
+  assert.deepEqual(result.skipped, [{ id: 'moved-chat', reason: 'session-workspace-changed' }]);
+  assert.equal(item.calls.archive.length, 0);
+});
+
+test('unavailable ungrouped inventory fails visibly instead of silently omitting chats', async () => {
+  const item = fixture();
+  const service = createWorkspaceBulkArchiveService({ ...item.dependencies,
+    listSessionHeaders: async () => { throw new Error('inventory offline'); },
+  });
+  await assert.rejects(service.listSessions(), /inventory offline/);
+});

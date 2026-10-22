@@ -9,7 +9,9 @@ import { EventEmitter, once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { zipSync, unzipSync, strToU8 } from 'fflate';
-import { apply } from '../lib/index.js';
+import { apply as applyPlugin } from '../lib/index.js';
+import { withLegacyFixtures } from './helpers/legacy-recycle-fixture.mjs';
+const apply = withLegacyFixtures(applyPlugin);
 import { createExportZip, planExport } from '../lib/export.js';
 import { createTrashStore } from '../lib/trash.js';
 
@@ -83,6 +85,7 @@ async function fixture(t, { projections = false } = {}) {
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => [workspace], get: id => id === workspace.id ? workspace : undefined,
     async archiveSession(id) { if (!this.state.archivedSessionIds.includes(id)) this.state.archivedSessionIds.push(id); },
+    async unarchiveSession(id) { await this.setState({ ...this.state, archivedSessionIds: this.state.archivedSessionIds.filter(value => value !== id) }); },
     async setState(state) { this.state = state; } };
   const routes = new Map();
   const services = { workspaceRegistry: registry, sessionPersistence: raw, sessionProjectionCache: cache,
@@ -332,7 +335,7 @@ test('official modern backend: purge and empty succeed with compressed historica
   const historicalBytes = await readFile(historicalPath);
   f.registry.state.archivedSessionIds = [oldId, mixedId, currentId, directId];
 
-  const movedCurrent = await f.call('/delete', { sessionId: currentId });
+  const movedCurrent = await f.call('/__test_seed_legacy_trash', { sessionId: currentId });
   assert.equal(movedCurrent.status, 200, movedCurrent.bytes.toString());
   const purgedCurrent = await f.call('/trash/purge', { sessionIds: [currentId] });
   assert.deepEqual(purgedCurrent.json().purged, [currentId], purgedCurrent.bytes.toString());
@@ -345,7 +348,7 @@ test('official modern backend: purge and empty succeed with compressed historica
   await assert.rejects(access(dirname(paths.get(directId))), { code: 'ENOENT' });
 
   for (const id of [oldId, mixedId]) {
-    const moved = await f.call('/delete', { sessionId: id });
+    const moved = await f.call('/__test_seed_legacy_trash', { sessionId: id });
     assert.equal(moved.status, 200, moved.bytes.toString());
   }
   const trash = (await f.call('/trash')).json().sessions;

@@ -15,6 +15,7 @@ const declaredScreenshots = JSON.parse(read('screenshots.json'));
 const publicRoutes = [
   'GET  /plugins/dsh-archived-chats/about',
   'POST /plugins/dsh-archived-chats/about/check-updates',
+  'POST /plugins/dsh-archived-chats/about/install-update',
   'GET  /plugins/dsh-archived-chats/state',
   'GET  /plugins/dsh-archived-chats/stats',
   'GET  /plugins/dsh-archived-chats/insights',
@@ -34,6 +35,7 @@ const publicRoutes = [
   'POST /plugins/dsh-archived-chats/import/restore',
   'POST /plugins/dsh-archived-chats/metadata',
   'GET  /plugins/dsh-archived-chats/trash',
+  'POST /plugins/dsh-archived-chats/trash/export',
   'POST /plugins/dsh-archived-chats/trash/restore',
   'POST /plugins/dsh-archived-chats/trash/purge',
   'POST /plugins/dsh-archived-chats/trash/empty',
@@ -56,7 +58,7 @@ function parseArchitectureRoutes(contents) {
 test('package and lock root publish one approved identity', () => {
   assert.equal(
     packageManifest.description,
-    '查看、搜索和恢复已归档会话，支持未归档管理、工作区批量归档、备份、回收站与残留会话检查。',
+    '查看、搜索和管理会话归档，支持工作区批量归档、标签备注、ZIP 备份和手动残留会话检查。',
   );
   assert.equal(packageManifest.author, 'Ultronen');
   assert.equal(packageLock.name, packageManifest.name);

@@ -8,12 +8,12 @@
 
 <h1>Archive Management</h1>
 
-<p><strong>A local-first archived-chat center for DeepSeek Harness</strong></p>
+<p><strong>Find past DSH chats, manage archives, and keep ZIP backups.</strong></p>
 <p><code>dsh-archived-chats</code></p>
 
 <p>
   <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-archived-chats?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm downloads" src="https://img.shields.io/npm/dm/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm total downloads" src="https://img.shields.io/npm/dt/dsh-archived-chats?style=flat-square&amp;label=total%20downloads"></a>
   <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ultronen/dsh-archived-chats/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
   <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="Node.js 18 and 24" src="https://img.shields.io/badge/Node.js-18%20%7C%2024-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white"></a>
 </p>
@@ -28,130 +28,110 @@
 
 </div>
 
-Archive Management gives DeepSeek Harness a place to find chats hidden from the main chat area after archiving. It keeps DSH's single-chat archive workflow and adds workspace bulk archiving, search, preview, backup, and a workspace-based Recycle Bin workflow.
+Archive Management adds conversation search, organization and backups to DeepSeek Harness. Find a past solution, preview its context, archive by workspace, or save a ZIP before deleting a chat.
 
-> The English name is **Archive Management**, and the Chinese name is **归档管理**. The installation package remains `dsh-archived-chats`.
->
-> This document follows the `main` branch and targets 1.5.3. This release adds installation support and native integration coverage for DSH `0.2.1-rc.2` while retaining older Host support. See the [changelog](CHANGELOG.md) for release history.
+- **Find past work:** search titles, messages, tool results, tags and notes; open a match with surrounding context.
+- **Organize chats:** manage Archived and Unarchived, including workspace groups, ungrouped chats, bulk actions, tags and notes.
+- **Keep a backup:** export JSON + Markdown ZIPs; preview imports and skip existing IDs instead of overwriting them.
 
-## Quick start
+> This document describes 1.6.0. New recycle operations and automatic cleanup are retired; see [upgrading](#upgrading-from-older-releases) for existing data.
 
-Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Archive Management**.
+## Install and open
 
-Alternatively, run this command on the computer running DSH:
+Find `dsh-archived-chats` in the DSH plugin market, verify author **Ultronen**, and install. Follow the host's restart prompt, then open **Settings → Archive Management** (Chinese: **设置 → 归档管理**).
+
+Alternatively, use the CLI. `web` is an example profile; replace it with your running DSH profile and use the same profile for updates and removal:
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH, then open **Settings → Archive Management** (Chinese: **设置 → 归档管理**).
-
-Before updating an older installation, read “Upgrading from older releases” below. To update:
+If installation reports `ERR_PNPM_ADDING_TO_ROOT`, add `-w` after `add`. To update:
 
 ```sh
 dsh plugin --profile web update dsh-archived-chats
 ```
 
-## What it does
+## First task
 
-| Area | Current behavior |
+1. Open **Unarchived**, click a chat title to preview it, then archive the chat you want to keep. Blank new chats are excluded; running chats require explicit **Stop and archive** confirmation.
+2. Search **Archived**, open a title or matching snippet, and edit tags and notes from the preview.
+3. Choose **Select**, check chats, and choose **Export selected**; narrow layouts place this action in the three-dot menu. Verify the ZIP in browser downloads.
+4. **Unarchive** to continue chatting. Before deleting, decide whether to keep a backup: deletion is permanent and cannot be undone.
+
+## Pages and capabilities
+
+| Page | Purpose |
 | --- | --- |
-| Browse and search | Workspace-grouped archived chats, full-text search, filters, sorting, tags, and notes. |
-| Workspace archiving | Unarchived offers individual, workspace-wide, and global archiving with aggregate confirmation; blank, active, or unreadable chats are skipped. |
-| Read-only preview | Conversations, reasoning, tool activity, Markdown, JSON, code, and readable stored images without unarchiving. |
-| Backup | Export one workspace or the entire archive as JSON + Markdown ZIP; preview imports and skip conflicting IDs. |
-| Recycle Bin | Move archived chats by workspace or selection; restore one chat, a workspace, or the entire Recycle Bin back to Archived. |
-| Permanent deletion | Delete one archived chat, a workspace's archive, or all archived chats after confirmation. Recycle Bin deletion is separate. |
-| Residual chat check | Entering Storage & Retention automatically checks for subagents whose parent no longer exists; search, select, preview, back up and confirm permanent deletion of selected records only. Empty chats are excluded. |
-| Storage and relationships | Storage accounting, optional automatic Recycle Bin cleanup, and read-only Origins & Branches. |
+| Archived | Search, filter, preview, tags and notes, import/export, unarchive and confirmed permanent deletion. |
+| Unarchived | Ordinary workspace and ungrouped chats, preview, individual/workspace/global archiving. |
+| Origins & Branches | Read-only sources, forks and subagents related to archived chats. |
+| About | Automatic update checks, host and local-checkout detection, copyable installation details, host-supported updates, and manual residual-chat checks. |
+| Recycle Bin, when records exist | Recover legacy records to Archived, export protection snapshots, or confirm permanent deletion; hidden when empty. |
 
-The six views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**. Unarchived shares Archived’s search, filters, and workspace-group layout, offering read-only chat previews and individual, workspace-wide, and global archiving. Archiving does not create historical versions; Recycle Bin protection snapshots support recovery, not a browsable version-history library.
+Content search starts at two characters and scans the selected scope in batches, showing progress, matches and failures; it supports Stop and Retry. Unarchived searches titles or session IDs. See the [user guide](docs/USER_GUIDE.md) for scope, long-log limits and detailed operations.
+
+## Archive, delete and maintain
+
+**Archive organizes; Delete permanently removes.** Archive and unarchive use official Host operations. Row deletion, selected deletion, workspace Delete all and global Delete all require confirmation. Workspace deletion never deletes project directories. Search and filters do not narrow workspace or global bulk actions.
+
+**Residual checks are manual maintenance.** Open **About → Maintenance → Check residual chats** to inspect subagents with an explicit parent reference whose parent no longer exists. Preview or export first, then select and confirm permanent deletion; eligibility is rechecked at execution. Ungrouped chats, independent forks, ordinary unarchived chats and blank chats are excluded. Opening the page never scans or cleans automatically.
+
+## Backups and data boundaries
+
+| Format | Contents | Use |
+| --- | --- | --- |
+| Conversation backup ZIP | JSON, Markdown, tags, notes and attachment references; no attachment bytes or automatic descendant bundling. | Preview with Import backup, then restore; existing IDs are skipped. |
+| Legacy protection-snapshot ZIP | Legacy record, validated session payload and image attachments; 64 MiB per record. | Preserve legacy data; not accepted by the ordinary conversation importer. |
+
+Successful exports are validated against the same format and budgets as import before the download starts. This applies to ordinary conversation backups; protection snapshots use a separate format. A download-started notice does not confirm the file was saved; check browser downloads.
+
+- Data stays on the DSH host under `$DSH_HOME/plugin-data/archived-chats/`, defaulting to `~/.dsh/`. The plugin does not upload or cloud-sync chats.
+- Permanent deletion removes session and related plugin data, not all global Host attachments, caches or external backups. Failures retain retryable tasks.
+- A chat without a working directory remains in Archived; a missing workspace alone allows an ungrouped chat.
+- Empty Recycle Bin uses the exact recycle-record incarnations shown at confirmation; changed targets do not expand the deletion scope.
+
+## Upgrading from older releases
+
+Version 1.6.0 disables new Move to Recycle Bin actions, removes Storage & Retention navigation, and stops automatic expiry and startup snapshot sweeping.
+
+**Removing navigation does not migrate or delete existing data.** Legacy recycle records, snapshots and saved policies remain. Records keep the Recycle Bin visible; catalog read errors retain a retry view instead of being mistaken for an empty bin. Saved cleanup policies do not run, and incomplete permanent deletions require explicit retry.
+
+Recovery prefers an intact original and returns it to Archived. Missing-original snapshot recovery depends on Host capabilities; unsupported or invalid recovery keeps the record and reports failure. Export a protection snapshot to preserve data first. Never treat manually deleting plugin data as emptying the Recycle Bin.
+
+Installing an older release can restore its earlier cleanup rules. Before downgrading, keep a full data backup and check pending tasks and format compatibility.
+
+## Compatibility
+
+The declared range is DSH `>=0.1.0-rc.7`; features still depend on Host capabilities. Native tests use pinned `0.1.7-rc.2` and `0.2.1-rc.2` backends; release CI covers macOS, Windows and Linux.
+
+Archive, unarchive and inventory use official capabilities. Permanent deletion coordinates Host session lifecycle and storage locations rather than calling one unified public deletion API. ZIP import and legacy snapshot recovery also have different writer requirements. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
 
 ## Screenshots
 
-These screenshots show the current interface with synthetic example chats; they contain no private conversations. The [marketplace screenshot list](screenshots.json) uses the same files in the same order.
+These 1.6.0 screenshots use synthetic example chats. The legacy Recycle Bin appears only when records exist; [screenshots.json](screenshots.json) owns the order.
+
+<details>
+<summary>View screenshots</summary>
 
 1. [Archived chats](assets/screenshots/preview-01.png)
 2. [Full-text search and selected actions](assets/screenshots/preview-02.png)
 3. [Unarchived and workspace archiving](assets/screenshots/preview-03.png)
-4. [Read-only preview](assets/screenshots/preview-04.png)
-5. [Recycle Bin](assets/screenshots/preview-05.png)
+4. [Conversation preview](assets/screenshots/preview-04.png)
+5. [Legacy Recycle Bin](assets/screenshots/preview-05.png)
 6. [Restore confirmation](assets/screenshots/preview-06.png)
-7. [Storage & Retention](assets/screenshots/preview-07.png)
+7. [About and manual maintenance](assets/screenshots/preview-07.png)
 8. [Origins & Branches](assets/screenshots/preview-08.png)
 
-The Archived header has **Select** and **More**. More contains Import backup, Export all, Unarchive all, Move all to Recycle Bin, then Delete all after a separator. The Recycle Bin header directly shows **Restore all** and **Empty Recycle Bin** without a More menu. Recycle rows retain the preview icon and use compact **Restore** and **Delete** text buttons. Workspace and global restoration separately confirm scope, counts, and the Archived destination, skipping pending deletions. Empty Recycle Bin still requires irreversible-action confirmation. The header keeps consistent dimensions across tabs. Workspace actions and global export, unarchive, and deletion ask you to confirm the complete archive scope and chat count.
+</details>
 
-**About** shows the running version, author, license, guides, project and feedback links, and Check for updates. Opening the page checks public npm version metadata in the background, at most once every 12 hours during a running backend session; failures never block archive management. A newer version adds a **Get update** link beside the title, opening the plugin market without installing or restarting anything. Follow the host's restart guidance when convenient; a browser refresh alone may not load an updated backend. No chat or backup content is sent during update checks.
+## Documentation and feedback
 
-Preview keeps real user messages on the right and the assistant's work on the left. Fully loaded, completed turns group intermediate work into a collapsed process disclosure, with the final response outside it. Partial turns remain in event order. After updating, reload the DSH backend to use the new preview projection; refreshing the browser alone is insufficient.
+[User guide](docs/USER_GUIDE.md) · [Architecture](docs/ARCHITECTURE.en.md) · [Changelog](CHANGELOG.md) · [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md)
 
-## Archive, recycle, or delete?
+Use [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions) for questions and suggestions. Bug reports should include plugin and DSH versions, minimal reproduction steps and redacted errors. Report security issues [privately](SECURITY.md). If this helped you find past work, consider [giving the project a Star](https://github.com/Ultronen/dsh-archived-chats).
 
-- **Archive:** retain a chat outside the main chat area. Unarchive returns it there.
-- **Move to Recycle Bin:** available through workspace menus, header More → Move all to Recycle Bin, or More in selection mode. Recovery returns the chat to Archived; Unarchive then returns it to the main chat area.
-- **Delete all on Archived:** permanently delete archived chats across all workspaces, not existing Recycle Bin entries.
-- **Empty Recycle Bin:** permanently delete recycled chats and their associated protection data.
-
-Choose Select to check one or more chats, then Unarchive or Delete permanently. More contains Export selected and Move to Recycle Bin. Select all checks only current search/filter results; hidden selections remain selected with a visible count. Cancel exits and clears the selection. Ordinary rows have no export or recycle buttons. Workspace and global actions include chats hidden by filters. Workspace actions do not delete workspace/project directories. See the [action scope table](docs/USER_GUIDE.md#actions-and-their-scope) before bulk operations.
-
-Empty Recycle Bin acts only on the exact recycle-record incarnations shown at confirmation. Records added afterward are excluded; a changed target fails instead of widening the confirmed scope. A chat without a working directory remains in Archived because this Host cannot make it reachable from the main chat list; a missing workspace alone can still restore as ungrouped.
-
-## Data safety and limits
-
-- **Local only:** plugin state lives under `$DSH_HOME/plugin-data/archived-chats/`; the plugin does not upload or cloud-sync chats. Update checks request only public npm version metadata, without chat or backup content.
-- **Recovery before purge:** workspace Recycle Bin moves require a healthy protection snapshot. Direct permanent deletion does not create a recoverable copy.
-- **No overwrite:** imports skip existing IDs. Recycle recovery prefers the original; snapshot fallback recreates an ordinary session ID only through an explicitly exclusive Host writer and otherwise retains the recovery record.
-- **Durable deletion:** confirmed deletion tasks clean related snapshots before the original. Partial failures retain non-restorable tasks for retries while running or after restart.
-- **Automatic Recycle Bin cleanup is off by default:** enabling or shortening retention requires confirmation. It applies to expired recycled chats, not ordinary archived chats.
-- **ZIP is not an attachment-complete backup:** attachment references remain, but attachment bytes and automatic descendant-session bundling are excluded.
-
-Successful exports are validated against the same format and budgets as import before the download starts. The browser buffers a validated ZIP with a five-minute timeout and 320 MiB response cap; this limits response bytes, not peak browser memory. “Backup download started” does not mean the browser has saved the file to disk.
-
-## Upgrading from older releases
-
-**Names and versions:** Version 1.4.2 changes the export writer only; the menu names below are unchanged. Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
-
-The standalone History and cleanup-preview interfaces have been removed; do not use older screenshots to locate them.
-
-**Startup recovery removes old snapshots that are not referenced by current recycle records, including plugin-owned attachment copies. They are not placed in the Recycle Bin. This cleanup is independent of the optional Recycle Bin retention setting.**
-
-Referenced protection snapshots are kept. Removing an unreferenced snapshot does not delete its source chat; already-confirmed deletion retries and enabled retention cleanup are separate operations.
-
-If old snapshot content is still needed, recover/export it using a supporting older version before updating, preserve required attachments separately, or make an offline backup of the full plugin-data directory. Before downgrading, finish pending deletion tasks and back up data; older releases may not understand snapshotless pending-deletion records.
-
-## Compatibility
-
-The package declares DSH `>=0.1.0-rc.7`; individual features depend on public Host capabilities.
-
-| Host capability | Dependency or limitation |
-| --- | --- |
-| Public archive API | Required for workspace bulk archiving; unsupported requests make no changes. |
-| Session and attachment reads | Used by preview/search; unavailable attachment reads degrade images only. |
-| Session-scoped physical location | Required for session-directory accounting and permanent deletion; shared directories are never used as purge targets. |
-| Public writer | Required for ZIP import and snapshot fallback; restoring an intact original does not rewrite its log. Plain legacy create/append is not enough for safe ZIP restore unless the provider explicitly guarantees exclusive creation. |
-| Modern handles | Fork titles, preview/search, and Recycle Bin moves are supported. ZIP v2 preserves inherited boundaries; import uses create/append/flush/close and a safe session-scoped rollback location. Ordinary v1 ZIPs remain readable, but ambiguous seeded v1 sources are refused rather than flattened. |
-| Host module resolution | DSH `0.1.6-alpha.2` added a resolution layer that fails on any dependency requesting a builtin name with a trailing slash. Before 1.4.2 this package reached `readable-stream@4` through `zip-stream`, so the plugin aborted Host startup as soon as it loaded. 1.4.2 uses `fflate` for export and no longer carries that chain; update before running on those Host versions. |
-
-Recycle Bin preview still depends on the original session; a missing original may prevent preview even when a protection snapshot can restore it. See [compatibility and limits](docs/USER_GUIDE.md#compatibility-and-limits).
-
-The declared range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires both pinned official Host backends, `@deepseek-ai/dsh-session@0.1.7-rc.2` and `0.2.1-rc.2` (eight integration cases each) and package checks, including the v4 session format.
-
-## Documentation
-
-| Resource | English | 简体中文 |
-| --- | --- | --- |
-| User guide | [Read the guide](docs/USER_GUIDE.md) | [查看指南](docs/USER_GUIDE.zh-CN.md) |
-| Architecture | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
-| Release history | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
-
-See also [Support](SUPPORT.md), [Security](SECURITY.md), [Contributing](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md), and [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions). Before claiming work or opening a pull request, contributors must read the [Contributing Guide](CONTRIBUTING.md) in full.
-
-## Project status
-
-Archive Management is actively maintained. The latest stable npm release receives fixes and security updates; older releases should be upgraded before reporting a problem. Reproducible bug reports and focused pull requests are welcome. Accepted community tasks are marked [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22); read the [claim workflow](CONTRIBUTING.md#community-proposals-and-claims) before starting substantial work. Maintenance is performed as availability permits, so no fixed response or release schedule is promised.
-
-## Development
+## Development and validation
 
 ```sh
 npm test
@@ -162,7 +142,7 @@ node scripts/run-native-integration.mjs --fixture-root test/fixtures/native-host
 npm pack --dry-run --json
 ```
 
-The suite covers Host and browser behavior, export/import, snapshot fallback recovery, Recycle Bin, retention, search, responsive layout, public types, package contents, and repository hygiene. The two native command pairs use the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` and `0.2.1-rc.2` fixtures; each requires all eight native integration cases to run without skips. All checks use isolated temporary data and never read real sessions.
+Native checks use isolated temporary data; all eight tests in each fixture must run without skips. Read the [contribution guide](CONTRIBUTING.md) in full before contributing.
 
 ## Uninstall
 
@@ -170,8 +150,6 @@ The suite covers Host and browser behavior, export/import, snapshot fallback rec
 dsh plugin --profile web remove dsh-archived-chats
 ```
 
-Uninstalling removes only the plugin package and preserves `$DSH_HOME/plugin-data/archived-chats/`; it does not run a permanent purge. Reinstallation follows the installed version's startup recovery and cleanup rules, including unreferenced-snapshot cleanup. Back up needed data before uninstalling or manually removing plugin state. See [local data and uninstall](docs/USER_GUIDE.md#local-data-and-uninstall).
+Removing the package preserves plugin data and does not permanently purge chats. See [local data and uninstall](docs/USER_GUIDE.md#local-data-and-uninstall).
 
-## License
-
-[MIT](LICENSE)
+[MIT License](LICENSE)

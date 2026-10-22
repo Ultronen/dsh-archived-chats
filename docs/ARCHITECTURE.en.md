@@ -1,8 +1,10 @@
 # Architecture and maintainer notes
 
+**Recycle Bin transition:** New recycle operations are retired; deletion requires explicit permanent-delete confirmation. Existing records are never automatically migrated or emptied. Recovery, protection-snapshot export and confirmed deletion remain available while records exist; the tab hides when empty. Storage & Policy navigation, automatic expiry and startup snapshot sweeping are disabled. Saved policies are preserved but not executed. Unsupported recovery keeps the record and reports failure. Protection-snapshot exports include images, are limited to 64 MiB per record, and are not standard conversation-import ZIPs.
+
 English · [中文](ARCHITECTURE.md) · [User guide](USER_GUIDE.md)
 
-This document follows `main` and covers 1.5.3 behavior. This release adds installation support and native integration coverage for DSH `0.2.1-rc.2` while retaining older Host support. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
+This document describes the interfaces and behavior of 1.6.0, with DSH `0.2.1-rc.2` compatibility, older Host support, and native integration coverage for both pinned Host versions. See the [changelog](../CHANGELOG.md) for release history. Runtime code is the authority for interfaces and behavior; user-facing documentation should agree with it.
 
 ## Product boundary and modules
 
@@ -11,7 +13,7 @@ The plugin supplements archive management; it does not replace DSH's main chat a
 | Module (under `lib/`) | Responsibility |
 | --- | --- |
 | `index.js` | Host capability resolution, routes, archive visibility, lifecycle queue, physical deletion |
-| `client.js` | Settings page, six views, dialogs, native archive notice, request state |
+| `client.js` | Settings page, four main views and conditional legacy recovery, dialogs, native archive notice, request state |
 | `about.js` | Local plugin identity, bounded public version checks, in-memory cache |
 | `persistence-compat.js` | Legacy inspect and modern read-handle adaptation; separate title reads |
 | `workspace-bulk-archive.js` | Eligible workspace chats, short-lived confirmation, apply-time checks |
@@ -19,11 +21,11 @@ The plugin supplements archive management; it does not replace DSH's main chat a
 | `export.js`, `import.js`, `restore.js` | ZIP export, bounded import validation, transactional restoration |
 | `metadata.js`, `durable.js` | Tags/notes, serialized atomic writes, durability primitives |
 | `search.js`, `stats.js`, `insights.js` | Message projection/search, directory measurements, storage accounting |
-| `retention.js`, `retention-service.js`, `auto-retention.js` | Policy, confirmation/revalidation, startup recovery and scheduling |
+| `retention.js`, `retention-service.js`, `auto-retention.js` | Legacy policy and scheduler modules; no scheduler is mounted |
 | `lineage.js` | Read-only source, fork, and subagent projection |
 | `session-graph.js` | Session-id normalization, subagent descendant resolution, orphan classification |
 
-The UI moves chats to the Recycle Bin through workspace actions, the global header menu, or selection mode. Rows can permanently delete or unarchive. Workspace export and export-all remain. A compatibility backend endpoint accepting one ID does not imply a row-level recycle action.
+New recycle actions are absent from workspace menus, header menus and selection mode. Rows can permanently delete or unarchive. Workspace export and export-all remain. Requests without `permanent: true` on deletion routes return 410 `recycle-retired`, never an implicit permanent delete.
 
 Standalone History, legacy-snapshot recovery copies, and cleanup-preview UI are retired. `history.js`, `history-restore.js`, and `legacy-recycle.js` are not current modules.
 
@@ -32,6 +34,7 @@ Standalone History, legacy-snapshot recovery copies, and cleanup-preview UI are 
 ```text
 GET  /plugins/dsh-archived-chats/about
 POST /plugins/dsh-archived-chats/about/check-updates
+POST /plugins/dsh-archived-chats/about/install-update
 GET  /plugins/dsh-archived-chats/state
 GET  /plugins/dsh-archived-chats/stats
 GET  /plugins/dsh-archived-chats/insights
@@ -51,6 +54,7 @@ POST /plugins/dsh-archived-chats/import/inspect
 POST /plugins/dsh-archived-chats/import/restore
 POST /plugins/dsh-archived-chats/metadata
 GET  /plugins/dsh-archived-chats/trash
+POST /plugins/dsh-archived-chats/trash/export
 POST /plugins/dsh-archived-chats/trash/restore
 POST /plugins/dsh-archived-chats/trash/purge
 POST /plugins/dsh-archived-chats/trash/empty
@@ -89,7 +93,7 @@ Plugin state lives under `$DSH_HOME/plugin-data/archived-chats/`:
 | `trash.json` | Authoritative recycle and permanent-deletion intent catalog |
 | `retention.json` | Version 2 policy with explicit `recycleAutoDelete` |
 | `snapshots/` | Protection snapshots, staging, and recovery files |
-| `pending-deletions.json` | Legacy deletion-marker compatibility and migration input |
+| `pending-deletions.json` | Legacy deletion markers; reading the bin records missing `purge-pending` entries without deleting sessions or sweeping snapshots |
 | `legacy-recycle.json` | Legacy file, no longer read or projected |
 
 The Host archive registry establishes archive ownership. Normal archive visibility excludes all IDs in the recycle catalog, including pending tasks. An unreadable or unsupported trash catalog retains its original bytes, marks the archive list unverified, and fails mutations closed.
@@ -98,7 +102,9 @@ Metadata and recycle writes are serialized and published through temporary files
 
 ## Workspace bulk archive
 
-The client registers `settings.section` and `shell.overlay`. Its Unarchived conversation list lives in **Settings → Archive Management / 设置 → 归档管理**, without depending on a workspace-menu extension or shared client store.
+Official archive methods and notices remain owned by the Host. The plugin does not intercept `workspaces.archiveSession` or register an archive-success overlay. Plugin archive success reuses the optional UI primitives `Toast`, which owns timing and positioning; older Hosts without it keep the result dialog open.
+
+The client registers only `settings.section`. Its Unarchived conversation list lives in **Settings → Archive Management / 设置 → 归档管理**, without depending on a workspace-menu extension. Official `workspaces.list.subscribe` updates synchronize Archived and Unarchived.
 
 1. List workspace conversations in Unarchived, excluding archived, recycled, pending deletion, and subagent rows. Use `readSession` for cold forks and preserve metadata.
 2. Individual archiving binds `sessionIds`; workspace and global actions cover complete workspaces regardless of search or filters. A stale individual target fails rather than expanding scope.
@@ -107,7 +113,7 @@ The client registers `settings.section` and `shell.overlay`. Its Unarchived conv
 
 Apply accepts credentials, not caller-added session IDs. Under the lifecycle queue, each chat is rechecked for workspace membership, archive state, agent state, and a real `turn/start`. Blank chats yield `session-empty`; unverifiable content yields `session-unavailable`. Older Hosts without agent status conservatively skip loaded chats. Candidate inspection concurrency is eight.
 
-Public `workspaceRegistry.archiveSession()` is invoked with its receiver. The operation does not stop active chats, move workspace membership, change directories, or capture versions. Missing capability returns `workspace-archive-unsupported`.
+Public `workspaceRegistry.archiveSession()` is invoked with its receiver. Previews may include active chats; their IDs are bound to the confirmation token. Only explicit Stop and archive consent enables `{ stopActivity: true }` for those IDs. Official `workspace/session-activity` covers active agents and background work. Newly active, unconfirmed chats are skipped. Unarchive uses `workspaceRegistry.unarchiveSession()` and its official queue, never direct state replacement. These operations do not move workspace membership, change directories, or capture versions. Missing capability returns `workspace-archive-unsupported`.
 
 ## Persistence compatibility and fork titles
 
@@ -137,21 +143,28 @@ Turn projection retains recorded boundaries and process/final-response positions
 
 Export download uses a guarded fetch, validates status, ZIP content type, and attachment disposition, then buffers the complete response before creating a Blob URL. It has a five-minute end-to-end timeout and a 320 MiB response-byte cap for declared and streamed bodies. The cap is not a peak-heap guarantee because chunks, the contiguous buffer, and Blob can coexist; the non-stream WebView fallback has no stronger universal memory ceiling. Completion says the download started, not that the browser saved it to disk.
 
-Selection mode stores checked IDs on the client. Select all uses filtered `group.items`; workspace actions keep complete `group.sessionIds`. Hidden selections have a visible count. Cancel or navigation clears the set, and list updates prune missing IDs. Confirmation captures the exact ID snapshot and reuses existing export, unarchive, and deletion APIs. Selection mode hides row mutations and global/workspace menus, retaining preview; More contains Export selected and Move to Recycle Bin.
+Selection mode stores checked IDs on the client. Select all uses filtered `group.items`; workspace actions keep complete `group.sessionIds`. Hidden selections have a visible count. Cancel or navigation clears the set, and list updates prune missing IDs. Confirmation captures the exact ID snapshot and reuses existing export, unarchive, and deletion APIs. Selection mode hides row mutations and global/workspace menus, retaining preview; More contains Export selected.
 
-Archive row actions are preview, edit tags/note, Unarchive, and Delete. The header exposes More; Unarchived reuses `GroupSection`, with search above filters and a refresh icon at the right; rows offer a read-only preview icon and Archive, while workspace menus and the header offer Archive all; More contains Import backup, Export all, Unarchive all, Move all to Recycle Bin, a separator, and Delete all. Header geometry stays consistent across tabs. Workspace menus contain Unarchive all, Move all to Recycle Bin, Export all, a separator, and Delete all; every action confirms the full workspace name and complete archive count. Global export/unarchive/delete confirms all archived chats across workspaces, excluding trash. Filters do not narrow these scopes. Delete/Delete all labels lead to concise irreversible-action confirmation naming the chat, workspace, or global scope. Recycle rows retain the preview icon and use compact Restore/Delete text buttons matching archive rows. Recycle workspace actions are Restore all and Delete all; its header directly offers text-only Restore all and Empty Recycle Bin, without a More menu. Empty still requires irreversible-action confirmation. Primary buttons and selected tabs use neutral theme colors that invert in dark mode, while destructive actions remain red. Workspace/global restoration separately confirms the workspace name or global workspace count, eligible chat counts, and Archived destination, skipping purge-pending. A synchronous submission lock prevents duplicates; results retain actual success/failure counts and View Archived navigation. Both deleted and pending IDs leave actionable archive rows while failures remain explained and related state refreshes.
+`/state` and `/unarchived` expose a separate `updatedAt` sort field. Like Host `ApiSessionList`, live sessions use `sessionProjections.cachedSnapshot` and cold sessions use `sessionProjectionCache.cachedSnapshot`. Recency is the maximum of creation time and `sessionListMetadata.lastPromptAt`; missing or failed projections fall back to creation. Reads do not replay events or mutate projection files, and plugin `metadataUpdatedAt` never affects rank. Recently/least recently updated sorting and workspace grouping use the same field, with session IDs breaking timestamp ties and unknown dates last. Title sorting keeps its previous behavior.
+
+Archive row actions are preview, edit tags/note, Unarchive, and Delete. The header exposes More; Unarchived reuses `GroupSection`, with full-width search above filters, matching Archived; Sources & Branches uses full-width search above a shared workspace, count and fold-control row and a Refresh text button at the top right; rows offer a read-only preview icon and Archive, while workspace menus and the header offer Archive all; More contains Import backup, Export all, Unarchive all, a separator, and Delete all. Header geometry stays consistent across tabs. Workspace menus contain Unarchive all, Export all, a separator, and Delete all; every action confirms the full workspace name. Archive/unarchive confirmations omit counts; an explicit scope distinguishes global archive from a workspace action even when only one workspace exists. Successful unarchive only updates the lists, matching the official behavior. Global export/delete still confirms counts across workspaces, excluding trash. Filters do not narrow these scopes. Delete/Delete all labels lead to concise irreversible-action confirmation naming the chat, workspace, or global scope. Recycle rows retain the preview icon and use compact Restore/Export snapshot/Delete text buttons matching archive rows. Recycle workspace actions are Restore all and Delete all; its header directly offers text-only Restore all and Empty Recycle Bin, without a More menu. Empty still requires irreversible-action confirmation. Primary buttons and selected tabs use neutral theme colors that invert in dark mode, while destructive actions remain red. Workspace/global restoration separately confirms the workspace name or global workspace count, eligible chat counts, and Archived destination, skipping purge-pending. A synchronous submission lock prevents duplicates; results retain actual success/failure counts and View Archived navigation. Both deleted and pending IDs leave actionable archive rows while failures remain explained and related state refreshes.
 
 Plugin confirmation, preview, import, metadata, storage, and retention dialogs share the opaque `--dsw-alias-bg-layer-2` surface and Host prominent elevation, with a legacy shadow fallback. Menus and toasts use opaque theme layers. Masks and hover states retain their intentional transparency; frosted menu tokens are not used as dialog backgrounds.
 
 ## About and version discovery
 
+About separates product information, version updates and manual maintenance. Residual checks request `/orphans?kind=subagent` only after a click; entering the page never scans. `ResidualSessionsDialog` handles loading, retry, empty results, preview, export and confirmed deletion. Closing or navigation aborts requests and discards late results. Failed reads disable mutations; deletion retains strict selection revalidation. Storage & Retention stays unmounted and legacy policy routes return 410.
+
+
 `GET /about` returns loaded-package identity, controlled links, and cached status without contacting the network. `POST /about/check-updates` uses the existing same-origin guard and accepts exactly `{ force: boolean }`. It requests only `https://registry.npmjs.org/dsh-archived-chats/latest`, without chat data, backups, or client credentials. Redirects, non-success status, wrong package names, and invalid SemVer are rejected. SemVer comparison never recommends a downgrade. Requests time out after 5 seconds and responses are bounded to 64 KiB.
 
-Automatic success/failure results have a 12-hour in-memory cache; manual checks have a 30-second cooldown, and concurrent checks coalesce. Backend reload resets the cache. Failure yields unavailable, never current. The client loads local metadata before a background cache-aware check and ignores canceled/stale results. About is the final tab; the update link beside the heading only opens the plugin market. No installation, commands, or restarts run. Users follow host guidance to reload the backend; refreshing the frontend alone may not activate an updated backend.
+Opening Archive Management loads local metadata, then automatically checks public npm metadata. While the page stays open, cache-aware checks run every 15 minutes and on visibility/network recovery. Success is cached for 12 hours and failure for 15 minutes; manual checks have a 30-second cooldown and concurrent requests coalesce. No chats or backups are sent. Failure never blocks chat management or claims the plugin is current. Leaving the page removes timers and listeners.
+
+`POST /about/install-update` additionally requires a local request, rejects cross-origin requests and accepts only `{ version }`. `createUpdateRuntime` checks profileContext, its dependency declaration and the actual loaded path. Local, external, unknown or mismatched sources cannot install. With host HMR present, it does not invoke installBundle, which rejects an already-installed package. Otherwise it delegates only to official pluginManager.installBundle without spawning a package manager or relaxing policy. Both the host outcome and installed package version must verify before reporting restart-required. Each Host has its own service instance; installation state and running version remain separate.
 
 ## Recycle and restore
 
-Move order: validate archive ownership → dispose/park a loaded session → capture or reuse a healthy protection snapshot → revalidate ownership → atomically write trashed → invalidate caches. Ordinary recycling does not remove the original log.
+Legacy internal move order (not exposed by current routes): validate archive ownership → dispose/park a loaded session → capture or reuse a healthy protection snapshot → revalidate ownership → atomically write trashed → invalidate caches. Ordinary recycling does not remove the original log.
 
 Snapshot manifests use `dsh-archived-chats/snapshot` v1; `dsh-archived-chats/snapshot-session` payloads use v2 when inherited metadata is available, otherwise legacy v1. Limits: 4 MiB manifest, 64 MiB session JSON, 1,000 attachments, 32 MiB per attachment, 512 MiB total. Attachments are SHA-256-validated as streams and reread individually before restoration, not all retained in memory.
 
@@ -159,7 +172,7 @@ Restore rejects purge-pending. For other records it first checks original identi
 
 For a missing original, validate snapshot identity/content, reject seeded sources whose exact inherited boundary cannot be represented, recheck ID conflicts, and require explicitly exclusive create plus append/locate and saveImage where needed. Plain create is never ownership. Restore uses the original ID, not a new archived copy. Attachment identity must match. Commit spans the log, workspace, metadata, archive registry, and recycle record. Failure compensates in reverse; uncertain creation and rollback failure retain the destination and recovery record and are reported separately. Missing workspaces or unpaired attach/detach capabilities yield an ungrouped warning.
 
-Protection snapshots left unreferenced after restore are not projected as recycle entries. A later startup handles them through legacy-data cleanup.
+Protection snapshots left unreferenced after restore are not projected as recycle entries. They remain on disk during this transition; startup does not sweep them.
 
 ## Permanent deletion and crash recovery
 
@@ -177,36 +190,26 @@ Both paths share purge: persist intent → remove and recheck all associated sna
 
 Snapshot sweeping uses manifest ownership and the record's named snapshotId to cover corrupted protection data. Unrelated unassignable corruption does not block a session's purge. The log must reside in a directory named for that session ID; shared directories are not purge targets. Safety checks use the actual session directory as the removal scope. If the current-generation log named by `locate()` is absent, inspect canonical generation logs that exist in the directory; empty directories still undergo ancestry and overlap checks. Inventory entries with absent directories are treated as missing and do not block other purges. Links/junctions, non-file logs, overlapping directories, and unreadable inventory still refuse deletion. A missing log or archive index is not proof of completion: durable intent authorizes remaining cleanup.
 
-Failures retain purge-pending. Startup and runtime retries continue these tasks, never restore them to ordinary chats. Archive deletion rejects existing recycle records, protecting the Recycle Bin from archive-wide Delete all. Purging snapshot copies does not promise global attachment cleanup or Host session_projcache eviction; no corresponding safe public eviction API is used.
+Failures retain purge-pending. Explicit user retries continue these tasks, never restore them to ordinary chats. Archive deletion rejects existing recycle records, protecting the Recycle Bin from archive-wide Delete all. Purging snapshot copies does not promise global attachment cleanup or Host session_projcache eviction; no corresponding safe public eviction API is used.
 
 Destroying a session also destroys its subagent descendants, transitively, so a deletion cannot strand sessions that no workspace owns and no view lists. Session ids are stored in two dialects — a bare UUID and the same UUID behind `session-` — and one edge may mix them, so every parent/child comparison normalizes first; without that, each parent looks absent and the cascade silently finds nothing. Only `origin: "subagent"` edges are followed. A branched chat keeps a pointer to the chat it came from but is an independent conversation, so neither it nor its own subagents are cascade targets. Descendants are resolved *before* the parent is destroyed, because a child edge is only visible while its parent is still listed; resolving afterwards would strand exactly the sessions the cascade exists to remove.
 
-Cascade runs on the permanent paths only: direct archive deletion, recycle purge, Empty Recycle Bin, and automatic retention. A move to the Recycle Bin leaves the original log on disk, so its subagents are not orphans yet — they become orphans exactly when the parent's log is destroyed, which is where the cascade runs. Descendants are never archived, so they take the direct permanent-delete path with only the archive precondition lifted; exclusive-directory verification, snapshot sweeping, live disposal, and registry index cleanup are all shared with an archived session. A descendant that already owns a recycle record keeps its own lifecycle, and a parent whose own deletion failed still exists, so its subagents are kept.
+Cascade runs on the permanent paths only: direct archive deletion, recycle purge, Empty Recycle Bin. Automatic retention is disabled. A move to the Recycle Bin leaves the original log on disk, so its subagents are not orphans yet — they become orphans exactly when the parent's log is destroyed, which is where the cascade runs. Descendants are never archived, so they take the direct permanent-delete path with only the archive precondition lifted; exclusive-directory verification, snapshot sweeping, live disposal, and registry index cleanup are all shared with an archived session. A descendant that already owns a recycle record keeps its own lifecycle, and a parent whose own deletion failed still exists, so its subagents are kept.
 
 ## Startup recovery and old-data cleanup
 
-recoverStartup performs:
-
-1. Recover snapshot storage and load the authoritative recycle catalog; mark missing protection data degraded, excluding pending tasks.
-2. Retry purge-pending.
-3. Read legacy pending-deletion markers. Attempt recoverable migration for still-archived, non-recycled IDs and remove successful markers; do not immediately purge them.
-4. Under the lifecycle queue, reread the catalog and snapshot inventory. Protect every currently referenced snapshotId and remove other valid or degraded snapshots.
-
-This startup old-data cleanup is independent of recycleAutoDelete and has no retired cleanup-preview UI. An unreadable authoritative catalog prevents speculative sweeping; unreadable migration input can return early. Individual snapshot cleanup errors are logged as stable codes and can be retried on a later startup.
-
-Cleanup removes plugin snapshots and attachment copies, not source chats. The older promise that every snapshot survives an upgrade as a Recycle Bin entry no longer applies. Users must preserve needed old data before upgrading.
+The transition mounts no startup recovery or cleanup scheduler. Legacy records, snapshots and policy files remain untouched. Pending deletion is retried explicitly from the Recycle Bin.
 
 ## Storage, retention, and lineage
 
 Stats measures directories with concurrency four, skips symlinks, and caches for 30 seconds; failure affects only the relevant item. Insights counts only protection snapshots referenced by current recycle records, separately from archived/recycled session directories. Repeated attachments use validated SHA-256 and are not presented as globally reclaimable space.
 
-Policy version 2 explicitly opts in. Reading version 1 forces recycleAutoDelete false without rewriting disk. Legacy count/age/quota fields no longer produce snapshot candidates. Enabling or shortening recycle retention requires a five-minute, single-use token/nonce bound to old/new policy and expired candidates. Saving rechecks under the lifecycle lock but does not itself delete.
+The retained policy modules are compatibility code only. All four `/retention/*` POST routes return HTTP 410 `retention-retired` without changing the saved policy.
 
-The scheduler completes startup recovery, then checks serially about once a minute. Each purge revalidates policy and record; failures remain for retry. Disabling policy does not cancel committed deletion intent. Plugin disposal stops new timers. Legacy manual retention APIs retain their own confirmation/revalidation.
 
-Lineage uses durable parentSession only, focusing archived/recycled chats and required context. At most 100 missing titles are read on demand; the 5,000-node limit applies to the displayed graph. Unknown fields degrade individual nodes. Search/filtering preserve ancestors and never modify relationships.
+Lineage uses durable parentSession only, focusing officially archived chats and their ancestors and descendants, excluding unrelated branches and empty workspaces. At most 100 missing titles are read on demand; the 5,000-node limit applies to the displayed graph. Unknown fields degrade individual nodes. Search/filtering preserve ancestors and never modify relationships.
 
-The client iteratively assigns each managed node to its own workspace once. Cross-workspace nodes become local roots while sourceParent retains the actual immediate-parent summary. Search/status filtering then runs within groups; folding changes visibility only. Workspace folds persist separately in browser key dsh-archived-chats:lineage-workspaces, without Host writes or changes to archive-group preferences. Initial loading folds every managed node with descendants. Search temporarily ignores folds and clearing restores them; bulk folding affects only the current filtered results.
+The client iteratively assigns each managed node to its own workspace once. Cross-workspace nodes become local roots while sourceParent retains the actual immediate-parent summary. Search then runs within groups, with no status filter; folding changes visibility only. Workspace folds persist separately in browser key dsh-archived-chats:lineage-workspaces, without Host writes or changes to archive-group preferences. Initial loading folds every managed node with descendants. Search temporarily ignores folds and clearing restores them; bulk folding affects only the current filtered results.
 
 Named native buttons expand branches and native details/summary disclose timestamps, full titles, and IDs, without making the whole row clickable. Iterative flattening retains actual levels with at most two ancestor-guide columns; deeper rows show a level label and direct-parent context. Narrow layouts allow title/status wrapping and avoid a separate scroll area inside the tree. Backend lineage, archive, and deletion interfaces are unchanged.
 
@@ -230,15 +233,17 @@ Tests cover retained modules: export/import rollback, snapshots/recycle states, 
 npm test
 npm ci --prefix test/fixtures/native-host --ignore-scripts --include=optional
 node scripts/run-native-integration.mjs
+npm ci --prefix test/fixtures/native-host-0.2.1 --ignore-scripts --include=optional
+node scripts/run-native-integration.mjs --fixture-root test/fixtures/native-host-0.2.1
 npm pack --dry-run --json
 git diff --check
 ```
 
-The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` fixture and require all eight native integration cases to run without skips. This is the local equivalent of the mandatory native Host integration gate in CI.
+The native commands install the locked `@deepseek-ai/dsh-session@0.1.7-rc.2` and `@deepseek-ai/dsh-session@0.2.1-rc.2` fixtures and require all eight native integration cases to run without skips for each fixture. This is the local equivalent of the mandatory native Host integration gate in CI.
 
-The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires the official `@deepseek-ai/dsh-session@0.1.7-rc.2` Host backend integration (8/8) and package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
+The declared DSH `>=0.1.0-rc.7` range remains capability-based. Release automation tests Node.js 18 on Ubuntu and Node.js 24 on Ubuntu, macOS, and Windows; the Node.js 24 matrix requires both official Host backend fixtures, `@deepseek-ai/dsh-session@0.1.7-rc.2` and `@deepseek-ai/dsh-session@0.2.1-rc.2`, on all three platforms (8/8 each), along with package checks, including the v4 session format. The [screenshots](../screenshots.json) show the current interface with synthetic example chats.
 
-Permanent deletion quiesces live agents before the final descendant inventory. Optional `cascadeSessionIds` in the parent purge-pending record persist the complete targets until every descendant finishes, so startup can recover after the parent directory disappears. Forks and subtrees with independent recycle records remain outside the cascade. Do not downgrade to a version that does not understand this field while these records are pending.
+Permanent deletion quiesces live agents before the final descendant inventory. Optional `cascadeSessionIds` in the parent purge-pending record persist the complete targets until every descendant finishes, so explicit retries can continue after the parent directory disappears. Forks and subtrees with independent recycle records remain outside the cascade. Do not downgrade to a version that does not understand this field while these records are pending.
 
 `GET /unarchived` is read-only; `/unarchived/export` and preview `scope: "unarchived"` validate current workspace visibility. Normal conversations gain no direct permanent-delete route. Cleanup UI retains `/orphans` authority checks.
 

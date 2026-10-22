@@ -1,50 +1,85 @@
 # Archive Management user guide
 
+Version 1.6.0 disables new recycle operations and automatic cleanup while retaining legacy data. See [upgrading and legacy data](#upgrades-old-data-and-downgrades).
+
 English · [简体中文](USER_GUIDE.zh-CN.md) · [Back to README](../README.md)
 
-Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document follows the `main` branch and targets 1.5.3. This release adds installation support and native integration coverage for DSH `0.2.1-rc.2` while retaining older Host support. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
+Archive Management provides a place to browse and manage DSH's archived chats, plus workspace bulk archiving. This document describes 1.6.0, which supports DSH `0.2.1-rc.2` and retains older Host support, with native integration coverage for both pinned Host versions. See the [changelog](../CHANGELOG.md) for release history. For interfaces and data formats, see the [architecture](ARCHITECTURE.en.md).
 
-## Understand the three locations
+## Chat states and legacy data
 
 | Location | Purpose | Return to the main chat area |
 | --- | --- | --- |
 | Main chat area | Continue everyday conversations | Already there |
 | Archived | Keep chats outside the main chat area | Choose Unarchive |
-| Recycle Bin | Remove chats from the archive list while retaining a recovery opportunity | Restore to Archived, then Unarchive |
+| Legacy Recycle Bin | Handle records saved by earlier versions; no new moves | Restore to Archived, then Unarchive |
 
-Archiving is not deletion and creates no historical version. Moving to the Recycle Bin does not immediately remove the original session files, but requires a protection snapshot. Permanent deletion is irreversible; it is not a Recycle Bin move.
+Archiving is not deletion and creates no historical version. Earlier Recycle Bin moves retained the original session files and a protection snapshot. Permanent deletion is irreversible; it is not a Recycle Bin move.
 
 ## Install and open
 
 Search for `dsh-archived-chats` in DSH's plugin market, verify the author is **Ultronen**, and choose **Install**. After installation, follow the host's restart instructions. The settings entry is **归档管理** in Chinese; in English it is **Archive Management**.
 
-Alternatively, run this command on the computer running DSH:
+Alternatively, run this command on the computer running DSH. `web` is an example profile; replace it with the profile that actually runs your DSH instance. Use that same profile for updates and removal:
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-Restart DSH and open **Settings → Archive Management** (Chinese: **设置 → 归档管理**). The views are **Archived**, **Unarchived**, **Recycle Bin**, **Storage & Retention**, **Origins & Branches**, and **About**.
+If installation reports `ERR_PNPM_ADDING_TO_ROOT`, the profile is a pnpm workspace root. Retry with `-w` (using your actual profile):
+
+```sh
+dsh plugin --profile web add -w dsh-archived-chats@latest
+```
+
+Restart DSH and open **Settings → Archive Management** (Chinese: **设置 → 归档管理**). The main views are **Archived**, **Unarchived**, **Origins & Branches**, and **About**; Recycle Bin appears only for existing records or a catalog error.
+
+If the settings entry is missing, verify that the plugin is installed and enabled in the profile actually running DSH, reload the host, and check the [compatibility requirements](#compatibility-and-limits).
 
 Before updating an older installation, read “Upgrades, old data, and downgrades” below, especially the snapshot-cleanup warning.
 
+## First task: find and back up a chat
+
+1. Open **Archived** and search for a keyword you remember. If the list is empty, archive a completed chat from DSH’s normal session menu first.
+2. Click the chat title to preview the conversation, confirm its content, and close the preview.
+3. Click **Select**, check the chats to keep, then choose **Export selected** (under **More** in narrow panels). Review the selected count and confirm.
+4. Check your browser’s downloads to confirm the ZIP was saved. Keep attachment files separately; the ZIP does not include them.
+
+See [search scope](#archive-and-find-chats) and [export and import](#export-and-import) for limits and restoring a backup.
+
 ## Archive and find chats
 
-Use DSH's normal session menu to archive one chat. The success notice offers View and Undo and closes after about three seconds. The plugin groups archived chats by workspace.
+Use DSH's normal session menu to archive one chat. The Host owns its success notice and Undo action; the plugin adds no second notice and does not replace the official archive method. The plugin groups archived chats by workspace.
 
-In **Unarchived**, search titles or IDs at the top. The next row provides time/title sorting, workspace filtering, and a refresh icon at the far right. Workspace groups and chat rows use the same layout as Archived.
+The **All workspaces** menu in both lists shows folder icons and includes **Ungrouped** and **Scheduled tasks**. Ungrouped follows official workspace membership, rather than titles or stale directories. Scheduled tasks matches session bindings returned by the official `schedule.catalog()`, including retained active and ended tasks. Deleted tasks stop matching; this is not a permanent historical session type. If the Host has no schedule service or its catalog cannot be read, the option is disabled with an explanation while ordinary chats remain available.
 
-- Click the eye icon for a read-only preview, or **Archive** on an individual chat.
+Archived and Unarchived use a two-row toolbar: full-width search above the filters. Origins & Branches puts full-width search above a shared row for related-workspace filtering, chat count and expand/collapse all, wrapping as needed on narrow screens.
+
+Archived and Unarchived default to **Recently updated**, matching the Host sidebar: the later of creation time and the last user prompt. **Least recently updated** reverses that order; title sorting is also available. Assistant output and tag/note edits do not affect recency. When the Host has no corresponding time metadata, sorting falls back to creation time. The date shown on each chat remains its creation time.
+
+In **Unarchived**, title/ID search occupies the first row, with time/title sorting and workspace filtering below it. The **Refresh** text button at the top right reloads the list, beside **Archive all**. Workspace groups and chat rows use the same layout as Archived.
+
+- Click the chat title for a read-only preview, or **Archive** on an individual chat.
 - The workspace three-dot menu offers **Archive all** for that workspace.
 - The header **Archive all** covers every workspace in the list.
 
-Search and workspace filters only change display; they do not narrow workspace or global archiving. Review the eligible chat and workspace counts before confirming. Running chats remain visible with individual archiving disabled. Bulk actions skip running, blank, or unverifiable chats. New chats after preparation are excluded; chats that start running or change workspace before apply are skipped. Unarchived offers read-only previews and archiving, without selection, export, deletion, or a cleanup entry. Archiving preserves workspace directories and prior tags and notes.
+Search and workspace filters only change display; they do not narrow workspace or global archiving. An idle individual chat archives directly after eligibility checks, without confirmation. Global and workspace bulk actions still confirm their scope, without counts. Existing chats in registered workspaces and Ungrouped are listed; verified empty drafts are omitted, while unreadable chats remain visible but cannot be archived yet. Running chats can be archived after an explicit Stop and archive confirmation using the official Host operation. Bulk actions also explain when ongoing work will stop. Blank or unverifiable chats cannot be archived. New chats after preparation are excluded; newly running chats without prior stop consent, or chats moved to another workspace, are skipped. Unarchived offers read-only previews and archiving, without selection, export, deletion, or a cleanup entry. Archiving preserves workspace directories and prior tags and notes. Unarchive uses the official operation, and official workspace and session subscriptions synchronize both lists after changes from the homepage or another tab, including renames. Background refreshes retain existing Unarchived rows; initial loading displays “Loading chats…”. Older hosts without official stop or unarchive support report an error instead of simulating it by rewriting state.
+
+After confirming an archive, full success closes the dialog and uses the Host's native Toast to show the actual archived count with a **View Archived** action. Older Hosts without that component keep the result dialog open. If any chats are skipped or fail, the detailed results stay open without a full-success notice.
 
 Search Archived by title, workspace, tags, notes, messages, and tool results. Filter by type, workspace, and tag; sort by time or title. Content matches show excerpts. Long workspace titles wrap to remain fully visible. Click a workspace folder or title to expand or collapse its chats; the open or closed folder reflects the current state. Group collapse state is saved in the browser.
 
-Forked chats use the last valid title in their own event stream, including renames after branching. The Host creates a new chat ID with history inherited through the fork point; parent and child develop independently afterwards. Modern Hosts support preview, Recycle Bin moves, and ZIP v2 export/import that preserves inherited history, even when the parent is absent. ZIPs do not include attachment bytes; see “Compatibility and limits” for older backups and Recycle Bin snapshot fallback.
+Content search starts when the trimmed query contains at least two Unicode characters. Workspace, type, and tag filters determine the candidates before requests begin. The client searches 20 candidates per batch; the API accepts at most 100 explicit candidate IDs per request. Results appear progressively, with separate counts for processed candidates/total, body-matched chats, displayed chats, and failed chats. Displayed chats combine metadata and body matches without counting a chat twice; these counts describe chats, not snippets. A completed scan covers the selected candidates within the projection limits; it has no 100-match total cap. Each matching chat shows up to three snippets. Shorter queries still match titles, workspaces, tags, and notes locally. Unarchived does not search conversation content, tool results, tags, or notes.
+
+Stop search keeps the results already found. Retry unfinished retries unreadable and unprocessed candidates without duplicating successful hits. Read failures expose the affected IDs and reasons; a network error stops later batches and preserves earlier results. A removed or newly hidden candidate is reported as skipped, never replaced with a broader search. Changing the query, filters, session list, or page cancels the old scan and discards late responses.
+
+Search and preview use bounded projections, not an unlimited raw-log index: at most 10,000 projected messages, 1,000 segments per message, 256 Ki Unicode code points per segment, and 1 Mi code points per message. Long logs or blocks can therefore contain text outside the searchable projection. No hit does not prove the original log contains no matching text.
+
+Forked chats use the last valid title in their own event stream, including renames after branching. The Host creates a new chat ID with history inherited through the fork point; parent and child develop independently afterwards. Modern Hosts support preview and ZIP v2 export/import that preserves inherited history, even when the parent is absent. ZIPs do not include attachment bytes; see “Compatibility and limits” for older backups and Recycle Bin snapshot fallback.
 
 ## Preview, tags, and notes
+
+Clicking a search snippet opens a page around its projected message sequence, highlights and focuses the match, and expands matched tool or reasoning text inside a folded turn. Load earlier messages and Load more keep both directions reachable. If the message is no longer present in the projection, preview explicitly reports the missing anchor and starts at the beginning. Click a chat title in Archived or Unarchived to preview from the beginning. Hovering or focusing the title immediately shows the View conversation hint. Recycle Bin and residual-session details retain preview icons.
 
 Read-only preview does not require unarchiving. It supports Markdown, reasoning, code, JSON, tool calls and results, and readable stored images. Missing attachment-read capabilities degrade images only. Closing preview cancels outstanding requests.
 
@@ -54,7 +89,7 @@ System prompts start collapsed and scroll within a height-limited area when expa
 
 After updating, reload the DSH backend to activate the new preview projection. Refreshing the browser alone does not replace the running backend.
 
-Each chat supports up to 8 tags of 24 Unicode characters each and a note of up to 2,000 Unicode characters. Tag matching is case-insensitive. Notes occupy one line; truncated notes expose their full text on hover or focus.
+Use the Edit tags and note icon in the preview header to edit metadata. Each chat supports up to 8 tags of 24 Unicode characters each and a note of up to 2,000 Unicode characters. Tag matching is case-insensitive. Notes occupy one line; truncated notes expose their full text on hover or focus.
 
 Tags and notes remain local. Unarchiving preserves them; completed permanent deletion removes them.
 
@@ -62,32 +97,34 @@ Tags and notes remain local. Unarchiving preserves them; completed permanent del
 
 | Page and entry | Actions | Scope |
 | --- | --- | --- |
-| Archived: chat row | Preview, edit tags and note, Unarchive, Delete | One chat |
-| Archived: workspace More menu | Unarchive all, Move all to Recycle Bin, Export all; separator; Delete all | All archived chats in that workspace |
-| Unarchived: chat row | Preview icon, Archive | One chat; archiving requires confirmation |
-| Unarchived: workspace three-dot menu | Archive all | Every eligible chat in that workspace |
+| Archived: chat row | Trash icon (permanent deletion), then Unarchive; click the title to preview, with an Edit tags and note icon directly in the preview header | One chat |
+| Archived: workspace More menu | This workspace: Unarchive all, Export all; separator; Delete all | All archived chats in that workspace |
+| Unarchived: chat row | Click title to preview, Archive | One chat; archives directly, with stop confirmation for active work |
+| Unarchived: workspace three-dot menu | This workspace: Archive all | Every eligible chat in that workspace |
 | Unarchived: header | Archive all | Eligible chats across all workspaces |
-| Archived: header | Select, More | Enter selection mode or open the global action menu |
-| Archived: selection mode | Select all, Unarchive, Delete permanently, More → Export selected / Move to Recycle Bin, Cancel | Checked chats only; Select all covers current results |
-| Archived: header More menu | Import backup, Export all, Unarchive all, Move all to Recycle Bin; separator; Delete all | Export, unarchive, recycle, and delete cover archived chats across all workspaces; Import uses the selected ZIP |
-| Recycle Bin: chat row | Preview icon, Restore and Delete text buttons | One recycle record; Delete is permanent after confirmation |
+| Archived: header | Select, three-dot More | Enter selection mode or open the global action menu |
+| Archived: selection mode | Select all, Unarchive, Export selected, trash icon (permanent deletion), Cancel | Checked chats only; Select all covers current results |
+| Archived: header More menu | Import backup, Export all, Unarchive all; separator; Delete all | Export, unarchive, and delete cover archived chats across all workspaces; Import uses the selected ZIP |
+| Recycle Bin: chat row | Preview, Restore, Export snapshot and Delete | One recycle record; Delete is permanent after confirmation |
 | Recycle Bin: workspace More menu | Restore all, Delete all | Recycle records in that workspace |
 | Recycle Bin: header | Restore all | Restore eligible entries across all workspaces after confirmation |
 | Recycle Bin: header | Empty Recycle Bin | Permanently delete recycle records across all workspaces after confirmation |
 
-**Selection mode supports one or many chats.** Select shows checkboxes and an action bar; rows keep Preview only. Unarchive and Delete permanently are visible; More contains Export selected and Move to Recycle Bin. Select all checks current search/filter results and shows an indeterminate state for partial selection. Hidden selections remain checked with a visible count; clearing current results preserves them. Cancel or leaving Archived clears the selection and exits. Actions confirm the selected count, and failed items stay checked. Ordinary rows have no export or recycle buttons; Unarchived provides read-only previews and archiving. Search and filters do not narrow workspace or global bulk actions.
+**Selection mode supports one or many chats.** Select shows checkboxes and an action bar; inline action buttons disappear, while the title still opens preview. Unarchive, Export selected, the trash icon (permanent deletion), and Cancel appear directly in that order. In narrow panels, Export selected moves into the three-dot More menu. With no selection, actions are disabled while Cancel remains available. Select all checks current search/filter results and shows an indeterminate state for partial selection. Hidden selections remain checked with a visible count; clearing current results preserves them. Cancel or leaving Archived clears the selection and exits. Actions confirm the selected count, and failed items stay checked. Ordinary rows show only the trash icon (permanent deletion) and Unarchive; click the title to preview, then use the Edit tags and note icon in its header; Unarchived provides read-only previews and archiving. Search and filters do not narrow workspace or global bulk actions.
 
-Every archive workspace action asks for confirmation with the full workspace name and its complete archive count. Global Export all, Unarchive all, and Delete all confirmations count archived chats across every workspace, excluding the Recycle Bin. Check these counts even when the list is filtered. The header keeps consistent dimensions when switching tabs.
+Every archive workspace action asks for confirmation with the full workspace name. Unarchive confirmations explain scope and the return to the chat list without counts; global unarchive covers all workspaces and excludes the Recycle Bin. Successful unarchive updates the lists without an additional success notice; failures still show errors. Export and deletion continue to confirm full scope and counts regardless of filtering. Page actions sit to the right of the description with the same text size, wrapping below it when space is limited. Reserved action space keeps tab switching stable.
 
-Delete all on Archived means permanent deletion, not a Recycle Bin move; its dialog explains the irreversible effect and scope. It does not delete chats already in the Recycle Bin. Workspace deletion affects archived chats, not the workspace or project files.
+Delete all in the Archived header and workspace menus requires a confirmation that explains the irreversible effect and scope. It does not delete chats already in the Recycle Bin. Workspace deletion affects archived chats, not the workspace or project files.
 
 Empty Recycle Bin captures the exact recycle-record incarnations displayed for confirmation, including their recycle/snapshot identity. Execution purges only those captured targets: records added later are excluded, and a target changed after confirmation fails instead of causing the scope to be recomputed or expanded. Uncertainty retains the record for a later safe retry; this is not a guarantee that unrelated Host filesystem content can be deleted.
 
 ## Restore from the Recycle Bin
 
-Move all to Recycle Bin first creates or reuses a healthy protection snapshot for each chat, then writes its recycle record. Failed chats are not reported as successfully recycled. The success notice offers immediate Undo.
+New Recycle Bin moves are disabled. This section applies only to records created by earlier releases. Export snapshot preserves the validated session and image bytes in a separate ZIP; it is not accepted by the ordinary conversation importer.
 
 Choose Restore on a row, or Restore all for a workspace or the entire Recycle Bin. Restored chats return to **Archived**, not directly to the main chat area. Choose Unarchive afterward to continue chatting there.
+
+If you use the official Unarchive action on the home page, the plugin releases the recycle marker after verifying that the original chat still exists and matches its recorded identity. The chat appears in Unarchived with its tags and notes preserved. Archiving it again returns it to Archived without putting it back in the Recycle Bin. Recovery snapshots whose originals are missing and permanent deletions already in progress are not discarded or canceled by this synchronization.
 
 Workspace Restore all first confirms the full workspace name, eligible chat count, and destination. Header Restore all confirms the total workspace and eligible chat counts. Both explain skipped pending deletions; canceling performs no restoration. Results report actual restored counts and offer View Archived; workspace results also name the workspace. Partial results include unsuccessful counts and reasons.
 
@@ -99,25 +136,30 @@ Recycle Bin preview currently still reads the original session. If the original 
 
 ## Permanent deletion and retries
 
-Row, workspace, and archive-wide deletion actions require confirmation. Archived rows use the text label Delete, to the right of Unarchive; workspace and global menus use Delete all. The concise confirmation names the chat or workspace, or the complete global scope, and states that deletion is irreversible. Clicking the action only opens confirmation. The Recycle Bin also offers row/workspace permanent deletion and Empty Recycle Bin. Permanent deletion removes the target chat, plugin tags and notes, and related snapshots.
+The trash icon shows “Delete archived chat” on hover or keyboard focus and performs permanent deletion without using the Recycle Bin. Row, workspace, and archive-wide deletion actions require confirmation. The selection toolbar shows a trash icon for permanent deletion directly, while archived-chat previews provide editing only, with no Delete or More menu; workspace and global menus use Delete all. The concise confirmation names the chat or workspace, or the complete global scope, and states that deletion is irreversible. Clicking the action only opens confirmation. The Recycle Bin also offers row/workspace permanent deletion and Empty Recycle Bin. Permanent deletion removes the target chat, plugin tags and notes, and related snapshots.
 
-Once deletion starts, the plugin saves a non-restorable deletion task, removes associated snapshots, deletes the original, and completes index cleanup. Partial failures retain the task and error message for retries while running or on the next startup. Pending items are no longer actionable archive rows and cannot be restored or unarchived. Even if the original file temporarily remains, deletion cannot be undone.
+Once deletion starts, the plugin saves a non-restorable deletion task, removes associated snapshots, deletes the original, and completes index cleanup. Partial failures retain the task and error message for explicit user retries from the legacy Recycle Bin. Reading the bin also records legacy pending markers that lack recycle records, without executing deletion. Pending items are no longer actionable archive rows and cannot be restored or unarchived. Even if the original file temporarily remains, deletion cannot be undone.
 
 Missing required Host capabilities cause refusal before a deletion task is committed. Removing snapshot attachment copies does not guarantee immediate reclamation of matching bytes in Harness's global attachment store; other references and Host caching or garbage collection may retain them.
 
-Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats. Storage & Retention offers an automatic residual check, described below.
+Permanent deletion also cleans up the chat's subagent descendants while preserving independent forks. Unarchived lists ordinary workspace chats.
 
-## Residual chat check
+## Manual residual chat check
 
-Every entry to **Storage & Retention** automatically runs a check. The final summary card, Residual chats, shows the count and measured storage. Choose View details to manage the listed chats; failed checks offer Retry. Checking never opens a dialog or deletes records. Only subagents with an explicit parent ID whose parent no longer exists are listed. Workspace, archived, recycled and pending-deletion records, empty chats, invalid parent relationships and independent forks are excluded.
+Open **About → Maintenance → Check residual chats**. Opening Archive Management or About never scans automatically; clicking the button starts the check. Loading is explicit, failures offer Retry, and only a successful empty scan reports no residual chats. Closing the dialog or leaving the page cancels the in-flight scan.
 
-Details include full IDs, parent IDs, working directories, dates, sizes and read-only preview icons. Search and select current results without clearing hidden selections. Backups include selected records. When records exceed the backup limit, they are marked and you are asked whether to deselect them and export the rest. Cancelling keeps the original selection.
+Candidates are subagent chats with an explicit parent reference whose parent no longer exists, excluding chats still owned by a workspace or the archive. Ordinary ungrouped chats, blank chats, independent forks, and chats with missing or invalid parent metadata are excluded. This is not a whole-disk cleanup and does not remove global attachments or caches.
 
-Permanent deletion requires confirmation and removes selected records and their directories only, preserving unselected descendants. Retries and restart recovery retain that scope. Descendants may become new residual records after their parent is deleted; check, review and back them up separately before cleanup. Changed membership is refused with a visible prompt to select again. Unavailable sizes display “—”; measured bytes include only measured records.
+1. Review candidate titles, IDs, parent references and directories; preview the conversation.
+2. Select content to keep and choose Export backup. Verify the saved download.
+3. Select only unwanted records, choose Delete, and confirm the irreversible result. Execution rechecks eligibility and deletes only the selected records, without widening the scope to other chats.
+4. Review results. Failures or changed eligibility remain visible and reload the list; Check again is also available.
+
+Checking and previewing do not delete data. Canceling deletion does not clean anything. This entry is independent of retired Storage & Retention.
 
 ## Export and import
 
-Choose Export all from the header's More menu to export every archived chat, or from a workspace menu to export only that workspace's archive. Both ask you to confirm the full scope and chat count and exclude Recycle Bin contents. Restore recycled chats to Archived first if you need to export them. Import backup is also in the header's More menu.
+Choose Export all from the header's More menu to export every archived chat, or Export all from a workspace menu to export only that workspace's archive. Both ask you to confirm the full scope and chat count and exclude Recycle Bin contents. For a standard conversation ZIP, restore to Archived first. Existing recycle rows also offer Export snapshot: a separate preservation ZIP with image bytes, not a conversation-import package. Import backup is also in the header's More menu.
 
 Each ZIP contains:
 
@@ -150,55 +192,49 @@ Export compresses the staged entries in 256 KiB slices and yields to the event l
 
 ZIP import and Recycle Bin recovery are separate workflows. A ZIP is not a Recycle Bin protection snapshot.
 
-## Storage and automatic cleanup
-
-Accounting separates archived/recycled session directories, protection snapshots referenced by current recycle records, unavailable or degraded measurements, and repeated snapshot attachment bytes. Searchable dialogs expose details. Totals are neither the entire Harness footprint nor a promise of globally reclaimable space.
-
-**Automatic Recycle Bin cleanup is off by default.** Choose 7, 30, or 90 days, or 1–3650 whole custom days, counted from each chat's recycle time. Enabling or shortening retention shows already-expired entries and explains future deletions. After confirmation, individual cleanups do not ask again.
-
-Checks run about once a minute while DSH is running, pause while closed, and catch up after startup recovery. Only expired records are deleted. Disabling or extending retention saves directly; deletion tasks already started still finish. A retention duration saved by an older version does not automatically enable cleanup.
-
-This is separate from the old-snapshot cleanup below: **disabling automatic Recycle Bin cleanup does not prevent startup removal of unreferenced old snapshots.**
-
 ## Origins and Branches
 
-Version 1.4.1 puts the scope explanation behind the help icon beside Managed chats. Hover, keyboard focus, or a touch tap reveals it. Auto-empty Recycle Bin on the storage page uses the same help control; enabling cleanup still shows the full permanent-deletion confirmation.
+The scope explanation is behind the help icon beside the chat count. Hover, keyboard focus, or a touch tap reveals it.
 
-This read-only view shows sources, forks, and subagent trees for archived and recycled chats, plus the active-session context needed to explain their relationships. Unrelated active chats are not listed.
+This read-only view starts from officially archived chats and includes their ancestors and descendants, including related unarchived chats, subagents, and ungrouped chats. Unrelated unarchived chats and empty workspaces are excluded. Archive and legacy recycle states remain visible. Recycle snapshots without an official session record do not create separate graph entries.
 
-Chats are grouped by their actual workspace, with counts in workspace headings and browser-persisted workspace folding. Compact rows use title-side buttons to expand branches; initially only starting chats are shown, not every descendant. Details disclose full titles, timestamps, sources, and session IDs with Copy ID. Ungrouped chats have their own group.
+Chats are grouped by their actual workspace, with counts and browser-persisted workspace folding. Cards follow the built-in plugin settings layout. A single trailing disclosure opens both metadata and child branches; there is no second Details disclosure. Ungrouped chats have their own group.
 
-Deep forks do not keep consuming horizontal space: at most two ancestor-guide columns plus the current connector are shown. Deeper rows display their level, with the parent name and source ID still available for inspection. Cross-workspace forks appear in their own workspace with a source-workspace label, not as duplicate managed entries.
+Unarchived chats count in their own workspace. Duplicate cross-workspace ancestors, ancestors retained only by filters, and unavailable sources remain read-only context and are not counted again. Current state (Unarchived, Archived, Recycle Bin, or Source unavailable) is separate from relationship type (Original chat, Fork, or Subagent). Incomplete metadata is shown as Unknown origin, never assumed to mean original or deleted.
 
-Search temporarily opens matching workspaces and branches; clearing it restores previous folds. Filters retain necessary source information. Expand/collapse all applies to the currently filtered workspaces and branches. Missing parents, cycles, and unknown fields produce diagnostics or degraded details without modifying relationships.
+Deep forks use at most two ancestor-guide columns plus the current connector, with deeper levels labeled explicitly. A managed chat is counted only in its own workspace; contextual copies elsewhere are labeled read-only sources.
+
+Full-width search occupies the first row. Related-workspace filtering, chat count, scope help and expand/collapse all share the second row, wrapping as needed on narrow screens. There is no state filter. Searching chat or source names preserves required ancestors and temporarily opens matching paths. Clearing search restores previous folds. Expand/collapse all controls the current workspaces, metadata and branches. Expanded metadata contains the complete title, timestamp, source ID and Copy ID.
+
+Relationships use the Host's `parentSession`, `isSeeded` and subagent metadata. Exact v4 inherited-event counts are not header metadata and are not guessed here; older seed lengths are kept only for compatibility. This view never mutates relationships or duplicates archive/recycle management actions. If recycle metadata is unavailable, official chats and archive states remain visible with a warning. The graph has a 5,000-node limit and reports an error rather than silently truncating larger inventories.
 
 ## About and updates
 
+About groups product information and links, Version and updates, and Maintenance. The maintenance entry opens a manual residual-chat check; it does not reactivate storage policies or scheduled cleanup.
+
 From 1.4.1, a red dot appears on the About tab only when a newer version is confirmed. Unchecked, failed, and up-to-date checks show no dot. Visiting About does not dismiss an available update.
 
-Success notices within Archive Management, including View Archived after restoration, dismiss after four seconds and pause while hovered or keyboard-focused. Switching tabs clears the current notice. Errors do not auto-dismiss and can be closed manually. The native archive-success notice on the main chat page still closes after about three seconds. These interaction improvements are available from 1.4.1.
+Archiving within the plugin uses the Host's native Toast with a six-second hold followed by the native fade. The Host controls archive feedback on the main chat page. Other success notices, including View Archived after Recycle Bin restoration, dismiss after four seconds and pause while hovered or keyboard-focused. Switching tabs clears the current notice. Errors do not auto-dismiss and can be closed manually.
 
 About shows the running plugin version, author, license, and direct links to the project, language-appropriate guide, changelog, issue feedback, and plugin market. The title also displays the running version.
 
 Current version is read dynamically from the running backend, never substituted with the registry's latest version. A failed online check keeps the loaded version, identity, and links. Local metadata failure shows Unavailable and Reload information rather than an update-check error. If newly installed endpoints have not loaded yet, reload the DSH backend and retry.
 
-Opening the archive loads local metadata immediately, then checks the public npm package version in the background. Automatic checks, including failures, are cached in memory for 12 hours during the running backend session. Check for updates bypasses this long cache with a short 30-second cooldown; concurrent checks share one request. No chat or backup content is sent. An unavailable registry reports failure without blocking archive management or claiming the plugin is up to date.
+Opening Archive Management loads local metadata, then automatically checks public npm metadata. While the page stays open, cache-aware checks run every 15 minutes and on visibility/network recovery. Success is cached for 12 hours and failure for 15 minutes; manual checks have a 30-second cooldown and concurrent requests coalesce. No chats or backups are sent. Failure never blocks chat management or claims the plugin is current. Leaving the page removes timers and listeners.
 
-When a newer version is found, Get update beside the title opens the plugin market. This plugin does not download or install updates, run commands, or restart DSH. Follow the host's instructions after updating and restart when convenient; refreshing the page alone may not activate a new backend. The displayed version remains the actually loaded version until the backend reloads.
+When diagnosing an unchanged version after an update, also verify that you updated the profile actually running DSH.
+
+Check for updates and View update beside the heading open a dialog with the running version, public release, last check and current host. Copy the package spec into Add plugin in another host. A terminal command is offered only when the current launcher and profile can be verified; official Desktop uses its own bundled command, never an unrelated dsh on PATH. This detects the current host only, not other Desktop installations.
+
+Local link:/file: installations are labeled Local checkout, offer Copy local path and are protected on the backend against registry replacement. Registry installations show Install update only when the host manager permits replacement; the official HMR restriction is retained, with manual guidance instead. Installation submits only the exact reviewed version through the official manager, preserving compatibility, locking and build-script checks. Failures never report completion and duplicate submissions are blocked. Success shows Restart needed; the running version changes only after the backend restarts. DSH is never restarted automatically.
 
 ## Upgrades, old data, and downgrades
 
-**Names and versions:** Version 1.4.2 changes the export writer only; the menu names below are unchanged. Version 1.4.1 uses Archive Management; 1.4.0 labels its English menu Session Archive. Both correspond to **归档管理** in Chinese and are the same plugin. The Chinese entry, package name, install command, and data location are unchanged. Update to 1.4.1 or later and restart DSH to load the renamed English entry.
-
-The standalone History and cleanup-preview interfaces are retired. Archiving no longer creates versions. Recycle Bin protection snapshots support recovery; they are not a browsable version-history library.
-
-**After upgrading from an older release and starting the new version, startup recovery automatically removes old snapshots not referenced by current recycle records, including their plugin-owned attachment copies. They do not become Recycle Bin entries and cannot be recovered through the plugin afterward.** Referenced protection snapshots are retained. This cleanup does not delete source chats; retrying confirmed deletion tasks and enabled expiry cleanup are separate mechanisms.
-
-If you still need old snapshot content, recover and export it using a supporting older release before updating, and separately preserve required attachments. You can also make an offline backup of the complete plugin-data directory first. Old pending-deletion markers are migrated toward recoverable recycle records, not treated as authority to immediately delete chats on startup.
-
-Before downgrading, finish pending deletion tasks and back up plugin data. Older versions may not recognize newer pending records, particularly direct permanent-deletion tasks without a protection snapshot.
+**Recycle Bin transition:** New recycle operations are retired; deletion requires explicit permanent-delete confirmation. Existing records are never automatically migrated or emptied. Recovery, protection-snapshot export and confirmed deletion remain available while records exist; the tab hides when empty. Storage & Policy navigation, automatic expiry and startup snapshot sweeping are disabled. Saved policies are preserved but not executed. Unsupported recovery keeps the record and reports failure. Protection-snapshot exports include images, are limited to 64 MiB per record, and are not standard conversation-import ZIPs.
 
 ## Compatibility and limits
+
+- **Settings closes unexpectedly (known Host issue):** On DSH `0.2.1-rc.2`, archiving the current chat while initial setup is incomplete can trigger onboarding and close Settings. Reported upstream in [#10596](https://github.com/deepseek-ai/deepseek-harness/discussions/10596). This does not by itself mean archiving failed; reopen Settings to check. Plugin 1.6.0 does not include a Host fix.
 
 Features depend on public Host capabilities, not just a version number:
 
@@ -225,7 +261,7 @@ $DSH_HOME/plugin-data/archived-chats/
 | --- | --- |
 | `metadata.json` | Tags and notes |
 | `trash.json` | Recycle records and pending permanent-deletion tasks |
-| `retention.json` | Automatic cleanup policy |
+| `retention.json` | Preserved legacy cleanup policy, not executed |
 | `snapshots/` | Protection data and legacy snapshots awaiting cleanup |
 | `pending-deletions.json` (legacy) | Migration input for old deletion markers |
 | `legacy-recycle.json` (legacy) | Old snapshot migration state, no longer used |
@@ -236,4 +272,4 @@ The plugin does not upload, cloud-sync, or schedule historical captures. To unin
 dsh plugin --profile web remove dsh-archived-chats
 ```
 
-Uninstalling preserves plugin data and does not permanently purge chats. Reinstalling still runs the installed version's recovery and cleanup rules; preserving the directory does not promise permanent retention of old snapshots. Do not treat manually deleting plugin data as Empty Recycle Bin: it loses recovery information without necessarily removing Host sessions. Prefer the UI and back up anything you still need first.
+Uninstalling preserves plugin data and does not permanently purge chats. This transition version performs no startup cleanup; check the behavior before reinstalling an older release. Do not treat manually deleting plugin data as Empty Recycle Bin: it loses recovery information without necessarily removing Host sessions. Prefer the UI and back up anything you still need first.

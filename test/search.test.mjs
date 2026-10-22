@@ -666,3 +666,61 @@ test('excerpts stay anchored on the match when normalization changes text length
   }
   t.diagnostic('excerpt anchoring verified across length-changing normalizations');
 });
+
+
+test('preview anchors use projected sequence identity with context in both directions', () => {
+  const messages = projectArchivedMessages(Array.from({ length: 130 }, (_, i) => userEvent(100 + i * 3, `message ${i}`)));
+  const page = paginateProjectedMessages(messages, { seq: 310, limit: 50 });
+  assert.equal(page.anchor?.status, 'found');
+  assert.equal(page.offset, 45);
+  assert.equal(page.previousOffset, 0);
+  assert.equal(page.nextOffset, 95);
+  assert.ok(page.messages.some(row => row.seq === 310));
+  assert.equal(paginateProjectedMessages(messages, { seq: 311 }).anchor.status, 'missing');
+  assert.equal(paginateProjectedMessages(messages, { seq: 311 }).offset, 0);
+  for (const seq of [-1, 1.5, '310', null, Infinity]) assert.throws(() => paginateProjectedMessages(messages, { seq }), error => error.status === 400);
+});
+
+test('legacy capped search reports a resumable remaining scope without dropping scanned matches', async () => {
+  const result = await searchArchivedSessions({ ids: ['a', 'b', 'c', 'd', 'e'], query: 'needle', limit: 1,
+    inspect: async () => ({ events: [userEvent(1, 'needle')] }) });
+  assert.deepEqual(result.scannedIds, ['a']);
+  assert.equal(result.total, 5);
+  assert.equal(result.remaining, 4);
+  assert.equal(result.complete, false);
+});
+
+
+test('legacy scan metadata counts exactly the inspected candidate scope', async () => {
+  const inspected = [];
+  const result = await searchArchivedSessions({ ids: ['empty', 'hit', 'unread'], query: 'needle', limit: 1,
+    inspect: async id => { inspected.push(id); return { events: [userEvent(1, id === 'hit' ? 'needle' : 'other')] }; } });
+  assert.deepEqual(inspected, ['empty', 'hit']);
+  assert.deepEqual(result.scannedIds, inspected);
+  assert.equal(result.remaining, 1);
+});
+
+
+test('late tool and reasoning search hits open their projected message page', () => {
+  const messages = projectArchivedMessages([
+    ...Array.from({ length: 70 }, (_, i) => userEvent(i * 3, `earlier ${i}`)),
+    logEvent(300, 'turn/start', { turn: 1 }),
+    userEvent(301, 'investigate'),
+    logEvent(302, 'step/start', { turn: 1, step: 1 }),
+    assistantEvent(303, 1, 1, [{ type: 'reasoning', text: 'needle-reasoning' }, { type: 'tool-call', id: 'late-call', name: 'read', arguments: '{}' }]),
+    logEvent(304, 'tool/result', { turn: 1, step: 1, message: { role: 'user', source: { kind: 'tool', callId: 'late-call' }, content: [{ type: 'tool-result', toolCallId: 'late-call', content: [{ type: 'text', text: 'needle-output' }] }] } }, 'append'),
+    logEvent(305, 'step/end', { turn: 1, step: 1 }),
+    logEvent(306, 'step/start', { turn: 1, step: 2 }),
+    assistantEvent(307, 1, 2, [{ type: 'text', text: 'done' }]),
+    logEvent(308, 'step/end', { turn: 1, step: 2 }),
+    logEvent(309, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]);
+  for (const [query, seq] of [['needle-reasoning', 303], ['needle-output', 304]]) {
+    assert.equal(searchProjectedMessages(messages, query)[0].seq, seq);
+    const page = paginateProjectedMessages(messages, { seq });
+    assert.equal(page.anchor.status, 'found');
+    assert.ok(page.offset > 0 && page.previousOffset !== null);
+    assert.ok(page.messages.some(message => message.seq === seq));
+    assert.equal(page.messages.find(message => message.seq === seq).turn.answerSeq, 307);
+  }
+});
