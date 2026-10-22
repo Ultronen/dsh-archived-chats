@@ -37,6 +37,32 @@ test('old recycle records remain discoverable, exportable and recoverable withou
 test('unsupported missing-original recovery preserves legacy record and exportable snapshot',async t=>{const f=await fixture(t);await f.legacy.move(['old-chat']);const old=await f.trash.get('old-chat');await rm(f.path);const restored=await f.call('/trash/restore',{sessionIds:['old-chat']});assert.equal(restored.status,409);assert.equal(restored.json().failed[0].reason,'snapshot-restore-unsupported');assert.deepEqual(await f.trash.get('old-chat'),old);assert.equal((await f.call('/trash/export',{sessionIds:JSON.stringify(['old-chat'])},true)).status,200)});
 test('explicit permanent deletion remains available during retirement',async t=>{const f=await fixture(t);const r=await f.call('/delete-all',{sessionIds:['old-chat'],permanent:true});assert.deepEqual(r.json().deleted,['old-chat']);await assert.rejects(access(f.path),{code:'ENOENT'})});
 
+test('legacy pending-only deletion remains visible for explicit retry without deleting on read', async t => {
+  const f = await fixture(t);
+  await mkdir(f.data, { recursive: true });
+  const pendingPath = join(f.data, 'pending-deletions.json');
+  await writeFile(pendingPath, JSON.stringify({ ids: ['old-chat'] }));
+  const listed = await f.call('/trash');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.json().summary.count, 1);
+  assert.equal(listed.json().sessions[0].sessionId, 'old-chat');
+  assert.equal(listed.json().sessions[0].state, 'purge-pending');
+  assert.equal(listed.json().sessions[0].snapshotId, null);
+  await access(f.path);
+  assert.deepEqual(JSON.parse(await readFile(pendingPath, 'utf8')).ids, ['old-chat']);
+  const saved = await f.trash.get('old-chat');
+  await f.call('/trash');
+  assert.deepEqual(await f.trash.get('old-chat'), saved);
+  const restore = await f.call('/trash/restore', { sessionIds: ['old-chat'] });
+  assert.equal(restore.status, 409);
+  await access(f.path);
+  const deleted = await f.call('/trash/purge', { sessionIds: ['old-chat'] });
+  assert.deepEqual(deleted.json().purged, ['old-chat']);
+  await assert.rejects(access(f.path), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(pendingPath, 'utf8')).ids, []);
+  assert.equal((await f.call('/trash')).json().summary.count, 0);
+});
+
 
 test('legacy snapshot ZIP preserves exact validated session and image bytes', async t => {
   const f = await fixture(t, { images: true });

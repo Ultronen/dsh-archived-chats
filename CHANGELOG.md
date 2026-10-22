@@ -8,6 +8,7 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 
 ### 中文
 
+- 兼容只有旧待删除标记、没有回收记录的会话：读取回收站时补齐待重试入口，不自动删除，也不撤销已提交的永久删除意图。
 - 修复旧回收记录恢复时将同一工作区的路径别名误判为 ID 冲突的问题；只有真实路径相同才允许恢复，不同或无法验证的路径仍拒绝。
 - 收拢归档管理入口：停止新增移入回收站，移除「空间与策略」。停止自动到期清理与启动快照清扫，保留旧回收记录、快照和策略文件；旧客户端的新增回收及策略请求返回 410。
 - 有旧回收记录时保留恢复、导出保护快照及确认永久删除；空回收站隐藏，读取异常时保留错误入口。未完成删除必须明确重试。保护快照 ZIP 包含会话与图片，单条上限 64 MiB，不能通过普通会话备份导入器导入。
@@ -21,6 +22,7 @@ Entries describe behavior at each release, not necessarily current behavior. Con
 
 ### English
 
+- Keep legacy pending-only deletions visible for explicit retry by recording them when the Recycle Bin is read, without automatically deleting data or reversing committed deletion intent.
 - Fix legacy recovery rejecting aliases of the same workspace directory as ID conflicts. Allow differing path strings only when both resolve to the same directory; retain rejection for different or unverifiable paths.
 - Simplify archive management: retire new Recycle Bin moves and Storage & Policy navigation. Disable automatic expiry and startup snapshot sweeping while retaining legacy records, snapshots and saved policies. Stale recycle/policy mutation requests return 410.
 - Keep recovery, protection-snapshot export and confirmed permanent deletion for legacy records. Hide an empty bin and retain its error view when the catalog cannot be read. Incomplete deletions require explicit retry. Protection-snapshot ZIPs include session data and images, are limited to 64 MiB per record, and cannot be imported by the ordinary conversation-backup importer.

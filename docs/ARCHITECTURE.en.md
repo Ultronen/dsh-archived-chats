@@ -93,7 +93,7 @@ Plugin state lives under `$DSH_HOME/plugin-data/archived-chats/`:
 | `trash.json` | Authoritative recycle and permanent-deletion intent catalog |
 | `retention.json` | Version 2 policy with explicit `recycleAutoDelete` |
 | `snapshots/` | Protection snapshots, staging, and recovery files |
-| `pending-deletions.json` | Legacy deletion-marker compatibility and migration input |
+| `pending-deletions.json` | Legacy deletion markers; reading the bin records missing `purge-pending` entries without deleting sessions or sweeping snapshots |
 | `legacy-recycle.json` | Legacy file, no longer read or projected |
 
 The Host archive registry establishes archive ownership. Normal archive visibility excludes all IDs in the recycle catalog, including pending tasks. An unreadable or unsupported trash catalog retains its original bytes, marks the archive list unverified, and fails mutations closed.

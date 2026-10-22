@@ -93,7 +93,7 @@ POST /plugins/dsh-archived-chats/orphans/export
 | `trash.json` | 回收和永久删除意图的权威目录 |
 | `retention.json` | version 2 策略，含显式 `recycleAutoDelete` |
 | `snapshots/` | 保护快照、暂存和恢复所需文件 |
-| `pending-deletions.json` | 旧删除标记兼容与迁移输入 |
+| `pending-deletions.json` | 旧删除标记；读取回收站时为缺少回收记录的标记补齐 `purge-pending` 入口，不执行删除或快照清扫 |
 | `legacy-recycle.json` | 旧版遗留，新版不再读取或投影 |
 
 Host 的归档注册表决定归档归属；正常可见归档列表排除回收目录中的全部 ID，包括待删除任务。`trash.json` 无法解析或版本不支持时保留原字节，列表标为未经核对，修改操作 fail closed，不推断回收状态。
