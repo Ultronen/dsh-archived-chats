@@ -6,12 +6,12 @@
 
 <h1>归档管理</h1>
 
-<p><strong>面向 DeepSeek Harness 的本地优先归档聊天中心</strong></p>
+<p><strong>找回 DSH 历史对话，搜索、管理归档并保存 ZIP 备份。</strong></p>
 <p><code>dsh-archived-chats</code></p>
 
 <p>
   <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-archived-chats?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm downloads" src="https://img.shields.io/npm/dm/dsh-archived-chats?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/dsh-archived-chats"><img alt="npm 累计下载量" src="https://img.shields.io/npm/dt/dsh-archived-chats?style=flat-square&amp;label=total%20downloads"></a>
   <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Ultronen/dsh-archived-chats/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
   <a href="https://github.com/Ultronen/dsh-archived-chats/actions/workflows/ci.yml"><img alt="Node.js 18 and 24" src="https://img.shields.io/badge/Node.js-18%20%7C%2024-339933?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white"></a>
 </p>
@@ -26,130 +26,110 @@
 
 </div>
 
-归档管理为 DeepSeek Harness 中归档后从主页面会话区隐藏的聊天提供查看和管理入口。保留 DSH 原有单条归档方式，并扩展工作区批量归档、搜索、预览、备份及按工作区移入回收站的流程。
+归档管理为 DeepSeek Harness 补充会话查找、整理和备份能力。搜索过去的解决方案，直接预览内容，按工作区归档，或在删除前保存一份 ZIP 备份。
 
-> 中文名称为「归档管理」，英文名称为 Archive Management；安装包名始终为 `dsh-archived-chats`。
->
-> 本文跟随 `main` 分支维护，适用于 1.5.3。本版加入 DSH `0.2.1-rc.2` 安装兼容性与原生集成验证，并保留旧版支持。版本变更见[更新日志](CHANGELOG.md)。
+- **找回内容：** 搜索标题、正文、工具结果、标签和备注，点击命中片段查看上下文。
+- **整理会话：** 管理已归档和未归档聊天，支持工作区分组、未分组、批量操作及标签备注。
+- **保存备份：** 导出 JSON + Markdown ZIP，导入前预览并跳过已有会话，避免覆盖。
 
-## 快速开始
+> 本文对应 1.6.0。此版本停止新增回收和自动清理，旧数据的处理方式见[从旧版升级](#从旧版升级)。
 
-在 DSH 插件市场搜索 `dsh-archived-chats`，核对作者为 **Ultronen** 后点击「安装」。安装完成后按宿主提示重启 DSH，打开 **设置 → 归档管理**。
+## 安装与打开
 
-也可以在运行 DSH 的电脑上使用命令行安装：
+在 DSH 插件市场搜索 `dsh-archived-chats`，核对作者 **Ultronen** 后安装。按宿主提示重启，打开 **设置 → 归档管理**（英文为 Archive Management）。
+
+也可使用命令行。`web` 是示例 profile，请替换为实际运行 DSH 的 profile，更新和卸载也使用同一个：
 
 ```sh
 dsh plugin --profile web add dsh-archived-chats@latest
 ```
 
-重启 DSH，打开 **设置 → 归档管理**。
-
-旧版用户请先阅读下方「从旧版升级」，再执行更新：
+若提示 `ERR_PNPM_ADDING_TO_ROOT`，在 `add` 后加 `-w`。更新命令：
 
 ```sh
 dsh plugin --profile web update dsh-archived-chats
 ```
 
-## 核心能力
+## 第一次使用
 
-| 范围 | 当前行为 |
+1. 打开 **未归档**，点击聊天标题预览，选择需要保留的聊天并归档。空白新聊天不列入可归档范围；正在执行的聊天需要先确认「停止并归档」。
+2. 在 **已归档** 搜索关键词，点击标题或命中片段查看内容；在预览中编辑标签和备注。
+3. 点击 **选择**，勾选聊天后 **导出选中**；窄屏下该操作位于三点菜单。到浏览器下载中确认 ZIP 已保存。
+4. 需要继续聊天时 **取消归档**。删除会话前先确认备份是否需要保留；删除为不可撤销的永久删除。
+
+## 页面与能力
+
+| 页面 | 用途 |
 | --- | --- |
-| 浏览与搜索 | 按工作区浏览归档聊天，支持全文搜索、筛选、排序、标签与备注。 |
-| 工作区批量归档 | 未归档视图支持单条、工作区和全局归档，汇总确认后执行；跳过空白、正在使用或无法确认内容的聊天。 |
-| 只读预览 | 无需取消归档即可查看对话、思考、工具活动、Markdown、JSON、代码及可读取的已存储图片。 |
-| 备份 | 支持按工作区或全部归档导出 JSON + Markdown ZIP；导入先预览，跳过冲突 ID。 |
-| 回收站 | 按工作区或勾选聊天移入回收站；支持单条、工作区和整个回收站恢复到已归档。 |
-| 永久删除 | 确认后删除单条归档、工作区归档或全部归档；回收站删除独立操作。 |
-| 残留会话检查 | 进入空间与策略时自动检查父会话已不存在的子代理，支持明细搜索、多选、预览、备份及确认后永久删除；只删除选中项，不清理空会话。 |
-| 空间与关系 | 空间分账、可选的回收站自动清理，以及只读「来源与分支」。 |
+| 已归档 | 搜索、筛选、预览、标签备注、导入导出、取消归档和确认永久删除。 |
+| 未归档 | 获取工作区及未分组中的普通聊天，预览并按单条、工作区或全局归档。 |
+| 来源与分支 | 查看与已归档聊天相关的来源、分叉和子代理关系；只读，不改变会话。 |
+| 关于 | 自动检查更新、运行环境与本地开发版识别、复制安装信息、宿主支持时一键更新，以及手动「检查残留会话」。 |
+| 回收站（有旧记录时） | 处理旧记录：恢复到已归档、导出保护快照或确认永久删除；空目录隐藏。 |
 
-六个视图为 **已归档**、**未归档**、**回收站**、**空间与策略**、**来源与分支** 和 **关于**。未归档复用已归档的搜索、筛选和工作区分组排版，提供只读预览、单条归档、工作区全部归档和全局全部归档。归档不会创建历史版本；回收站保护快照仅用于恢复，不是可浏览的历史版本库。
+正文搜索从两个字符开始，分批扫描当前筛选范围，展示进度、命中和失败数量；支持停止和重试。未归档搜索标题或会话 ID。完整范围、长日志限制及操作说明见[用户指南](docs/USER_GUIDE.zh-CN.md)。
 
-## 界面截图
+## 归档、删除与维护
 
-以下截图使用虚构示例聊天展示当前界面，不含私人会话。[插件市场截图清单](screenshots.json)使用相同文件及顺序。
+**归档用于整理，删除用于永久移除。** 归档和取消归档使用 Host 的官方操作。行内垃圾桶、选中删除、工作区全部删除和全局全部删除均需确认；工作区删除不会删除项目目录。搜索和筛选不会缩小工作区或全局操作范围。
 
-1. [已归档聊天](assets/screenshots/preview-01.png)
-2. [全文搜索与选择操作](assets/screenshots/preview-02.png)
-3. [未归档与工作区归档](assets/screenshots/preview-03.png)
-4. [只读预览](assets/screenshots/preview-04.png)
-5. [回收站](assets/screenshots/preview-05.png)
-6. [恢复确认](assets/screenshots/preview-06.png)
-7. [空间与策略](assets/screenshots/preview-07.png)
-8. [来源与分支](assets/screenshots/preview-08.png)
+**残留检查是手动维护工具。** 从 **关于 → 维护工具 → 检查残留会话** 打开，仅检查有明确父来源且父会话已不存在的子代理会话。可先预览或导出，再勾选确认永久删除；执行时重新核对范围。未分组、独立分叉、普通未归档和空白聊天不作为该工具的清理目标。进入页面不会自动扫描或清理。
 
-已归档页顶部提供 **选择** 和 **更多**；未归档页顶部提供 **全部归档**，筛选行最右侧提供刷新图标；「更多」依次提供导入备份、全部导出、全部取消归档、全部移入回收站，分隔线后为全部删除。回收站顶部直接并列显示 **全部恢复** 和 **清空回收站**，不再设更多菜单；聊天行保留预览图标，使用紧凑的 **恢复** 和 **删除** 文字按钮。工作区恢复和全局恢复分别确认范围、数量及已归档去向，跳过正在永久删除的条目；清空仍须确认不可恢复的后果。各 Tab 顶部保持一致尺寸。工作区操作及全局导出、取消归档、删除均先确认完整归档范围和聊天数量。
+## 备份与数据边界
 
-「关于」展示当前运行版本、作者、许可证、指南、项目与反馈链接，提供「检查更新」。打开页面时后台查询公开 npm 版本信息，运行期间自动检查间隔至少 12 小时；失败不会阻断归档功能。有新版时标题旁显示「去更新」，打开插件市场，不自动安装或重启。更新后按宿主提示自行安排重启 DSH，仅刷新网页不一定能加载新版后端。
+| 格式 | 内容 | 使用方式 |
+| --- | --- | --- |
+| 会话备份 ZIP | JSON、Markdown、标签备注及附件引用；不包含附件文件，不自动打包后代会话。 | 通过「导入备份」预览后导入；已有 ID 跳过。 |
+| 旧回收保护快照 ZIP | 旧记录、已验证的会话载荷及图片附件；单条上限 64 MiB。 | 用于保存旧数据，不能通过普通会话导入器导入。 |
 
-预览中真实用户消息在右侧，AI 处理过程在左侧。完整加载且已结束的轮次将中间过程默认折叠，最终回复独立展示；未完整加载的轮次保留事件顺序。更新后需要重新加载 DSH 后端才能使用新版预览投影，仅刷新浏览器不够。
+导出成功前会按导入使用的同一格式和预算完成验证。此保证针对普通会话备份；保护快照是独立格式。浏览器提示开始下载不代表文件已保存，需自行核对下载结果。
 
-## 归档、回收与删除的区别
-
-- **归档：** 保留聊天，但从主页面会话区隐藏；取消归档后返回主页面。
-- **移入回收站：** 通过工作区菜单、顶部「更多 → 全部移入回收站」或选择模式的「更多」操作。恢复先回到已归档，再取消归档返回主页面。
-- **归档页「全部删除」：** 永久删除所有工作区的已归档聊天，不影响已经在回收站中的聊天。
-- **「清空回收站」：** 永久删除回收聊天及其关联保护数据。
-
-点击「选择」进入选择模式，可勾选一条或多条聊天后取消归档或永久删除；「更多」提供导出选中和移入回收站。「全选」只勾选当前搜索／筛选结果，隐藏的已选项保留并显示数量；「取消」退出并清空选择。普通列表不增加单条导出或移入回收站按钮。工作区和全部操作包含被筛选隐藏的聊天；工作区操作不会删除工作区或项目目录。批量操作前可查看[操作范围表](docs/USER_GUIDE.zh-CN.md#操作入口与范围)。
-
-清空回收站只作用于确认时展示的精确回收记录实例。之后新增的记录不纳入本次操作；目标已变更时会失败，不会扩大已确认范围。没有工作目录的聊天会留在已归档，因为当前 Host 无法让它在主聊天列表中可达；仅缺少工作区不等同于没有工作目录，仍可以未分组方式恢复。
-
-## 数据安全与边界
-
-- **聊天数据只在本机：** 插件状态保存在 `$DSH_HOME/plugin-data/archived-chats/`，不会上传或云同步聊天；更新检查仅请求公开 npm 包版本，不发送聊天或备份内容。
-- **回收有保护，永久删除不可恢复：** 工作区移入回收站需要健康保护快照；直接永久删除不创建可恢复副本。
-- **不覆盖已有聊天：** 导入跳过已有 ID；回收恢复优先使用原会话，原件缺失时只能通过 Host 明确的独占写入器重建普通会话 ID，否则保留回收记录。
-- **删除可以续作：** 确认后的任务先清理关联快照，再删除原会话；失败保留不可恢复的任务，在运行期间或重启后重试。
-- **回收站自动清理默认关闭：** 开启或缩短期限需确认，只处理到期回收聊天，不自动删除普通归档聊天。
-- **ZIP 不等于完整附件备份：** 保留附件引用，但不包含附件字节，也不自动打包后代会话。
-
-导出成功前会按导入使用的同一格式和预算完成验证。浏览器会在五分钟超时和 320 MiB 响应上限内缓冲经验证的 ZIP；这是响应字节上限，不是浏览器峰值内存上限。“备份已开始下载”不表示文件已保存到磁盘。
+- 数据保存在运行 DSH 的主机 `$DSH_HOME/plugin-data/archived-chats/`，默认位于 `~/.dsh/`；插件不上传或云同步聊天。
+- 永久删除清理会话及插件关联数据，不承诺擦除 Host 全局附件、缓存或外部备份。失败保留可重试任务。
+- 没有工作目录的聊天会留在已归档；仅缺少工作区时可显示为未分组。
+- 旧回收站清空仅处理确认时展示的精确回收记录实例；目标变化时拒绝扩大删除范围。
 
 ## 从旧版升级
 
-**名称与版本：** 1.4.2 仅更换导出实现，下列菜单名称不变。1.4.1 的英文名称为 Archive Management，1.4.0 英文菜单显示 Session Archive；两者都对应中文「归档管理」，不是不同插件。中文入口、包名、安装命令和数据位置不变。更新至 1.4.1 或更高版本并重启 DSH 后，英文入口名称生效。
+1.6.0 不再提供新增「移入回收站」，移除「空间与策略」入口，并停用自动到期清理和启动快照清扫。
 
-独立「历史版本」和「预览清理」界面已移除，不应再按旧版截图寻找这些入口。
+**已有数据不会因为移除入口而自动迁移或删除。** 旧回收记录、快照和策略文件保留。只要存在回收记录，仍显示回收站；目录读取失败时保留错误与重试入口，不能当作空目录隐藏。旧策略不执行，未完成的永久删除需明确重试。
 
-**启动恢复流程会清理未被当前回收记录引用的旧快照及其插件附件副本，不会将它们放进回收站。这项清理不受回收站自动清理开关控制。**
+恢复优先使用仍完好的原会话，成功后回到已归档。原会话丢失时，快照回退依赖 Host 能力；不支持或校验失败会保留记录并报错，不伪报成功。可先导出保护快照保存数据。不要通过手动删除插件数据目录来清空回收站。
 
-当前回收记录引用的保护快照会保留。清理未引用快照不删除来源聊天本身；已确认删除任务的重试和已启用的到期清理是另外的操作。
-
-如果仍需要旧快照内容，请在升级前使用支持该功能的旧版恢复并导出，另行保留附件，或离线备份完整插件数据目录。降级前应完成待删除任务并备份数据；旧版本可能不识别不带快照的待删除记录。
+重新安装旧版本可能重新启用其原有清理规则；降级前应保留完整数据备份，并确认待删除任务和数据格式兼容。
 
 ## 兼容性
 
-包声明支持 DSH `>=0.1.0-rc.7`；具体功能取决于 Host 公开能力。
+声明范围为 DSH `>=0.1.0-rc.7`，具体能力仍取决于 Host。原生测试使用锁定的 `0.1.7-rc.2` 与 `0.2.1-rc.2` 后端，发布 CI 覆盖 macOS、Windows 和 Linux。
 
-| Host 能力 | 依赖或限制 |
-| --- | --- |
-| 公开归档 API | 工作区批量归档必需；不支持时拒绝执行，不作修改。 |
-| 会话与附件读取 | 用于预览／搜索；缺少附件读取时只降级图片。 |
-| 会话独占物理位置 | 会话目录统计和永久删除必需；不把共享目录当作删除目标。 |
-| 公开 writer | ZIP 导入和快照回退恢复必需；恢复完好的原会话不重写日志。仅有旧 create/append 不足以安全恢复 ZIP，除非提供者明确保证独占创建。 |
-| 新版句柄接口 | 分叉支持标题、预览／搜索及移入回收站。ZIP v2 保存继承边界；导入通过 create/append/flush/close 写入，并要求安全的会话独占回滚位置。普通 v1 ZIP 仍可读取，但边界不明的 seeded v1 来源会被拒绝，不会展平。 |
-| Host 模块解析 | DSH `0.1.6-alpha.2` 新增的解析层会在任何依赖请求带斜杠的内置模块名时失败。1.4.2 之前，本插件经 `zip-stream` 引入 `readable-stream@4`，因此插件一被加载就会中止 Host 启动。1.4.2 的导出改用 `fflate`，不再携带该依赖链；请在这些 Host 版本上先升级。 |
+归档、取消归档、列表读取以官方能力为基础。永久删除由插件协调会话生命周期和存储位置完成，并非调用一个官方统一删除接口；ZIP 导入和旧快照恢复的写入能力要求也不同。详见[兼容性与限制](docs/USER_GUIDE.zh-CN.md#兼容性与限制)。
 
-回收站预览目前仍依赖原会话；原件丢失时，即使保护快照可恢复，也可能无法预览。详见[兼容性与限制](docs/USER_GUIDE.zh-CN.md#兼容性与限制)。
+## 界面截图
 
-声明的版本范围仍以 Host 公开能力为准。发布自动化在 Ubuntu 上测试 Node.js 18，并在 Ubuntu、macOS 和 Windows 上测试 Node.js 24；Node.js 24 矩阵强制运行官方 `@deepseek-ai/dsh-session@0.1.7-rc.2` 与 `0.2.1-rc.2` 两套锁定 Host 后端集成（各 8 项）与打包检查，覆盖 v4 会话格式。
+以下截图来自 1.6.0，使用虚构示例会话。旧回收站仅在存在旧记录时显示；[截图清单](screenshots.json)保持以下顺序。
 
-## 文档
+<details>
+<summary>查看界面截图</summary>
 
-| 资料 | English | 简体中文 |
-| --- | --- | --- |
-| 用户指南 | [Read the guide](docs/USER_GUIDE.md) | [查看指南](docs/USER_GUIDE.zh-CN.md) |
-| 架构说明 | [Maintainer architecture](docs/ARCHITECTURE.en.md) | [维护者架构](docs/ARCHITECTURE.md) |
-| 版本历史 | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) | [GitHub Releases](https://github.com/Ultronen/dsh-archived-chats/releases) |
+1. [已归档](assets/screenshots/preview-01.png)
+2. [全文搜索与选中操作](assets/screenshots/preview-02.png)
+3. [未归档与工作区归档](assets/screenshots/preview-03.png)
+4. [会话预览](assets/screenshots/preview-04.png)
+5. [旧回收站](assets/screenshots/preview-05.png)
+6. [恢复确认](assets/screenshots/preview-06.png)
+7. [关于与手动维护](assets/screenshots/preview-07.png)
+8. [来源与分支](assets/screenshots/preview-08.png)
 
-另见 [支持说明](SUPPORT.md)、[安全说明](SECURITY.md)、[贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)和[问题交流](https://github.com/Ultronen/dsh-archived-chats/discussions)。认领任务或提交 Pull Request 前，贡献者务必完整阅读[贡献指南](CONTRIBUTING.md)。
+</details>
 
-## 项目状态
+## 文档与反馈
 
-归档管理目前处于积极维护状态。最新 npm 稳定版会接收缺陷修复与安全更新；报告问题前请先从旧版本升级。欢迎可复现的缺陷报告和目标集中的 Pull Request。已开放认领的社区任务会标记为 [`help wanted`](https://github.com/Ultronen/dsh-archived-chats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)；开始较大改动前，请先阅读[需求认领流程](CONTRIBUTING.md#社区需求与认领)。项目按维护者的可用时间推进，不承诺固定响应或发布时间。
+[用户指南](docs/USER_GUIDE.zh-CN.md) · [架构说明](docs/ARCHITECTURE.md) · [更新日志](CHANGELOG.md) · [支持](SUPPORT.md) · [贡献指南](CONTRIBUTING.md)
 
-## 开发
+使用问题和建议欢迎前往 [Discussions](https://github.com/Ultronen/dsh-archived-chats/discussions)；缺陷请附插件与 DSH 版本、最小复现步骤和脱敏错误。安全问题请[私密报告](SECURITY.md)。若帮助你找回了旧方案，欢迎[给项目一个 Star](https://github.com/Ultronen/dsh-archived-chats)。
+
+## 开发与验证
 
 ```sh
 npm test
@@ -160,7 +140,7 @@ node scripts/run-native-integration.mjs --fixture-root test/fixtures/native-host
 npm pack --dry-run --json
 ```
 
-测试覆盖 Host 与浏览器行为、导出导入、快照恢复、回收站、保留策略、全文搜索、响应式布局、公开类型、包内容和仓库卫生。两组原生集成命令分别使用锁定的 `@deepseek-ai/dsh-session@0.1.7-rc.2` 与 `0.2.1-rc.2` fixture，每组要求八个原生集成用例全部执行且不能跳过。所有检查只使用隔离临时数据，不读取真实会话。
+原生测试使用隔离临时数据，每套 8 项均要求执行且不能跳过。提交贡献前请完整阅读[贡献指南](CONTRIBUTING.md)。
 
 ## 卸载
 
@@ -168,8 +148,6 @@ npm pack --dry-run --json
 dsh plugin --profile web remove dsh-archived-chats
 ```
 
-卸载只移除插件包，保留 `$DSH_HOME/plugin-data/archived-chats/`，不执行永久删除。重新安装后仍按所安装版本执行启动恢复与清理，包括清理未引用快照。卸载或手动删除插件状态前请备份需要的数据，详见[本地数据与卸载](docs/USER_GUIDE.zh-CN.md#本地数据与卸载)。
+卸载插件包保留插件数据，不执行永久删除。详见[本地数据与卸载](docs/USER_GUIDE.zh-CN.md#本地数据与卸载)。
 
-## 许可证
-
-[MIT](LICENSE)
+[MIT License](LICENSE)

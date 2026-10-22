@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-chats",
-  "version": "1.5.3",
-  "description": "查看、搜索和恢复已归档会话，支持未归档管理、工作区批量归档、备份、回收站与残留会话检查。",
+  "version": "1.6.0",
+  "description": "查看、搜索和管理会话归档，支持工作区批量归档、标签备注、ZIP 备份和手动残留会话检查。",
   "license": "MIT",
   "author": "Ultronen",
   "repository": {
@@ -19,10 +19,7 @@
     "archive",
     "backup",
     "recycle-bin",
-    "undo",
     "snapshot",
-    "retention",
-    "storage-insights",
     "session-lineage",
     "full-text-search",
     "local-first",
@@ -67,6 +64,7 @@
     "lib/lineage.js",
     "lib/session-graph.js",
     "lib/workspace-bulk-archive.js",
+    "lib/session-filters.js",
     "lib/persistence-compat.js",
     "lib/search.js",
     "lib/stats.js",

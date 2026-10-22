@@ -4,6 +4,34 @@
 
 Entries describe behavior at each release, not necessarily current behavior. Consult the READMEs and user guides for current usage.
 
+## 1.6.0 — 2026-10-22
+
+### 中文
+
+- 修复旧回收记录恢复时将同一工作区的路径别名误判为 ID 冲突的问题；只有真实路径相同才允许恢复，不同或无法验证的路径仍拒绝。
+- 收拢归档管理入口：停止新增移入回收站，移除「空间与策略」。停止自动到期清理与启动快照清扫，保留旧回收记录、快照和策略文件；旧客户端的新增回收及策略请求返回 410。
+- 有旧回收记录时保留恢复、导出保护快照及确认永久删除；空回收站隐藏，读取异常时保留错误入口。未完成删除必须明确重试。保护快照 ZIP 包含会话与图片，单条上限 64 MiB，不能通过普通会话备份导入器导入。
+- 统一已归档、未归档和来源与分支的搜索、筛选、工作区折叠及操作布局；未归档只提供归档操作。已归档和未归档默认按官方首页的「最近更新」逻辑排序，支持未分组和定时任务筛选。
+- 全文搜索按筛选后的候选分批执行，展示进度并支持停止、重试；不再只展示前 100 个匹配。点击摘要定位命中消息，自动展开包含工具或推理内容的折叠轮次。
+- 修复永久删除归档时官方侧栏短暂重新显示会话的问题：确认文件删除后通知客户端移除，在归档状态下清理工作区成员关系，失败保留可重试任务。单条预览只读取所选聊天，待删除会话不再参与预览或标题读取。
+- 关于页提供手动残留会话检查、失败重试、预览、备份及确认删除；进入页面不自动扫描。新增定时、页面恢复和联网后的更新检查，失败 15 分钟后重试。
+- 更新弹窗提供当前宿主对应的命令、安装信息复制和本地开发版保护；宿主允许时安装已展示的精确版本，完成后明确提示重启，不自动重启 DSH。
+- 同步中英文 README、用户指南、架构文档及八张界面截图。
+- 已知宿主限制：DSH 0.2.1-rc.2 在首次配置未完成时，归档当前会话可能触发引导并关闭设置弹窗。已向官方反馈 [#10596](https://github.com/deepseek-ai/deepseek-harness/discussions/10596)，本版不包含宿主修复。
+
+### English
+
+- Fix legacy recovery rejecting aliases of the same workspace directory as ID conflicts. Allow differing path strings only when both resolve to the same directory; retain rejection for different or unverifiable paths.
+- Simplify archive management: retire new Recycle Bin moves and Storage & Policy navigation. Disable automatic expiry and startup snapshot sweeping while retaining legacy records, snapshots and saved policies. Stale recycle/policy mutation requests return 410.
+- Keep recovery, protection-snapshot export and confirmed permanent deletion for legacy records. Hide an empty bin and retain its error view when the catalog cannot be read. Incomplete deletions require explicit retry. Protection-snapshot ZIPs include session data and images, are limited to 64 MiB per record, and cannot be imported by the ordinary conversation-backup importer.
+- Align search, filters, workspace folding and actions across Archived, Unarchived and Origin & Branches. Unarchived offers archive actions only. The two chat lists default to the official home page's Recently updated ordering and support Ungrouped and Scheduled tasks filters.
+- Search all filtered candidates in batches with progress, stop and retry controls instead of showing only the first 100 matches. Open matching messages from result snippets and expand folded turns containing tool or reasoning matches.
+- Prevent permanently deleted archived chats from briefly reappearing in the official sidebar: notify clients after file removal, detach workspace membership while still archived, and retain retryable tasks on cleanup failure. Preview only the selected chat and exclude pending deletions before preview or title reads.
+- Add manual residual-chat checks, retry, preview, backup and confirmed deletion to About; opening the page never starts a scan. Check for updates periodically, after visibility/network recovery, and retry failures after 15 minutes.
+- Provide host-specific update commands, copyable installation information and local-checkout protection. Where supported by the official plugin manager, install the exact reviewed version and report restart requirements without restarting DSH automatically.
+- Update both READMEs, user guides, architecture documents and all eight interface screenshots.
+- Known Host limitation: in DSH 0.2.1-rc.2, archiving the current chat while initial setup is incomplete can trigger onboarding and close Settings. Reported upstream in [#10596](https://github.com/deepseek-ai/deepseek-harness/discussions/10596); this release does not include a Host fix.
+
 ## 1.5.3 — 2026-10-21
 
 ### 中文

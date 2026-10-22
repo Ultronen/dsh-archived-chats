@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRecycleService, RecycleError } from '../lib/recycle.js';
@@ -312,6 +312,41 @@ function recycleFixture(options = {}) {
   };
 }
 
+test('legacy restore accepts workspace aliases that resolve to the original directory', async () => {
+  const fixture = recycleFixture({ trashed: true });
+  const canonical = join(fixture.root, 'workspace');
+  const alias = join(fixture.root, 'workspace-alias');
+  mkdirSync(canonical);
+  symlinkSync(canonical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  fixture.records.get('session-a').workspace.path = canonical;
+  (await fixture.persistence.list())[0].cwd = alias;
+
+  assert.deepEqual(await fixture.service.restore(['session-a']), { restored: ['session-a'], failed: [], warnings: [] });
+  assert.equal(await fixture.trashStore.get('session-a'), null);
+  assert.equal(fixture.persistence.ids.has('session-a'), true);
+  assert.equal(fixture.persistence.writeCalls, 0);
+});
+
+test('legacy restore preserves records when workspace identity differs or cannot be resolved', async t => {
+  for (const missing of [false, true]) {
+    await t.test(missing ? 'unresolved directory' : 'different directory', async () => {
+      const fixture = recycleFixture({ trashed: true });
+      const original = join(fixture.root, 'original');
+      const other = join(fixture.root, 'other');
+      mkdirSync(original);
+      if (!missing) mkdirSync(other);
+      fixture.records.get('session-a').workspace.path = original;
+      (await fixture.persistence.list())[0].cwd = other;
+
+      const result = await fixture.service.restore(['session-a']);
+      assert.deepEqual(result.failed, [{ id: 'session-a', reason: 'id-conflict' }]);
+      assert.deepEqual(result.restored, []);
+      assert.notEqual(await fixture.trashStore.get('session-a'), null);
+      assert.equal(fixture.persistence.writeCalls, 0);
+    });
+  }
+});
+
 test('a missing fork original cannot be silently flattened through a legacy snapshot writer', async () => {
   const f = recycleFixture({ trashed: true, originalMissing: true });
   const validate = f.snapshotStore.validate.bind(f.snapshotStore);
@@ -416,6 +451,71 @@ test('intact-original undo removes only marker and writes no persistence', async
   assert.equal(fixture.persistence.writeCalls, 0);
   assert.equal(await fixture.trashStore.get('session-a'), null);
   assert.notEqual(await fixture.snapshotStore.latestFor('session-a'), null);
+});
+
+test('official unarchive releases a recycled original and rearchive does not recycle it again', async () => {
+  const f = recycleFixture();
+  await f.service.move(['session-a']);
+  const snapshots = f.publishedSnapshotIds();
+  const metadata = structuredClone(f.metadata.get('session-a'));
+  await f.registry.setState({ ...f.registry.state, archivedSessionIds: [] });
+  assert.deepEqual(await f.service.list(), []);
+  assert.equal(f.records.has('session-a'), false);
+  await f.registry.setState({ ...f.registry.state, archivedSessionIds: ['session-a'] });
+  assert.deepEqual(await f.service.list(), []);
+  assert.equal(f.persistence.ids.has('session-a'), true);
+  assert.equal(f.workspace.sessionIds.has('session-a'), true);
+  assert.deepEqual(f.metadata.get('session-a'), metadata);
+  assert.deepEqual(f.publishedSnapshotIds(), snapshots);
+  assert.equal(f.persistence.writeCalls, 0);
+});
+
+test('a queued official unarchive survives immediate rearchive before reconciliation runs', async () => {
+  const f = recycleFixture();
+  await f.service.move(['session-a']);
+  await f.registry.setState({ ...f.registry.state, archivedSessionIds: [] });
+  const reconcile = f.service.reconcileUnarchived(['session-a']);
+  await f.registry.setState({ ...f.registry.state, archivedSessionIds: ['session-a'] });
+  await reconcile;
+  assert.equal(f.records.has('session-a'), false);
+  assert.deepEqual(f.registry.archivedSessionIds, ['session-a']);
+});
+
+test('official unarchive recognizes a canonical workspace path and its session path alias', async () => {
+  const f = recycleFixture({ trashed: true, unarchived: true });
+  const project = join(f.root, 'project');
+  const alias = join(f.root, 'project-alias');
+  mkdirSync(project);
+  symlinkSync(project, alias, 'junction');
+  f.records.get('session-a').workspace.path = project;
+  f.persistence.list = async () => [{ id: 'session-a', createdAt: 10, cwd: alias }];
+  assert.deepEqual(await f.service.list(), []);
+  assert.equal(f.persistence.ids.has('session-a'), true);
+});
+
+test('an old empty-trash selection cannot purge an officially unarchived original', async () => {
+  const f = recycleFixture();
+  await f.service.move(['session-a']);
+  const target = purgeTarget(f.records.get('session-a'));
+  await f.registry.setState({ ...f.registry.state, archivedSessionIds: [] });
+  const result = await f.service.empty([target]);
+  assert.deepEqual(result.purged, []);
+  assert.equal(result.failed.length, 1);
+  assert.equal(f.persistence.ids.has('session-a'), true);
+  assert.deepEqual(f.purgedIds, []);
+});
+
+test('reconciliation preserves missing originals, identity conflicts and durable purge intent', async t => {
+  for (const options of [{ originalMissing: true }, { conflict: true }, { pending: true }]) {
+    await t.test(JSON.stringify(options), async () => {
+      const record = trashRecord('session-a', options.pending ? 'purge-pending' : 'degraded');
+      if (options.conflict) record.workspace.path = '/another-project';
+      const f = recycleFixture({ records: [record], unarchived: true, originalMissing: options.originalMissing });
+      await f.service.reconcileUnarchived();
+      assert.deepEqual(f.records.get('session-a'), record);
+      assert.deepEqual(f.purgedIds, []);
+    });
+  }
 });
 
 test('processes duplicate ids once and returns stable failures', async () => {

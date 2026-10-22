@@ -73,7 +73,7 @@ test('lineage applies trash then archive status and strips private fields', () =
   }
 });
 
-test('lineage focus excludes unrelated active descendants but keeps paths between managed sessions', () => {
+test('lineage focus includes archived descendants and ancestors but excludes unrelated siblings', () => {
   const graph = projectLineage({
     headers: [
       { id: 'ancestor', createdAt: 1 },
@@ -93,12 +93,12 @@ test('lineage focus excludes unrelated active descendants but keeps paths betwee
 
   assert.deepEqual(graph.roots.map((node) => node.id), ['ancestor']);
   assert.deepEqual(graph.roots[0].children.map((node) => node.id), ['archived']);
-  assert.deepEqual(graph.roots[0].children[0].children.map((node) => node.id), ['active-bridge']);
-  assert.deepEqual(graph.roots[0].children[0].children[0].children.map((node) => node.id), ['archived-grandchild']);
-  assert.equal(JSON.stringify(graph).includes('active-child'), false);
+  assert.deepEqual(graph.roots[0].children[0].children.map((node) => node.id), ['active-child', 'active-bridge']);
+  assert.deepEqual(graph.roots[0].children[0].children[1].children.map((node) => node.id), ['archived-grandchild']);
+  assert.equal(JSON.stringify(graph).includes('active-child'), true);
   assert.equal(JSON.stringify(graph).includes('unrelated-sibling'), false);
   assert.equal(JSON.stringify(graph).includes('unrelated-root'), false);
-  assert.equal(graph.nodeCount, 4);
+  assert.equal(graph.nodeCount, 5);
 });
 
 test('lineage focus is empty without archived or recycled sessions', () => {
@@ -276,4 +276,27 @@ test('the node limit counts the projected graph, not how many sessions the Host 
     }),
     (error) => error instanceof LineageError && error.code === 'lineage-limit-exceeded' && error.status === 413,
   );
+});
+
+
+test('v4 lineage uses isSeeded without inventing a header event count', () => {
+  const graph = projectLineage({ headers: [
+    { id: 'root', version: 4, isSeeded: false },
+    { id: 'fork', version: 4, parentSession: 'root', isSeeded: true, seedLength: 999 },
+    { id: 'agent', version: 4, parentSession: 'root', isSeeded: false, origin: 'subagent' },
+  ] });
+  assert.equal(graph.roots[0].isSeeded, false);
+  assert.equal(graph.roots[0].children.find(n => n.id === 'fork').isSeeded, true);
+  assert.equal(graph.roots[0].children.find(n => n.id === 'fork').seedLength, null);
+  assert.equal(graph.roots[0].children.find(n => n.id === 'agent').isSeeded, false);
+});
+
+test('legacy lineage seed counts are compatible while unknown lineage stays unknown', () => {
+  const graph = projectLineage({ headers: [
+    { id: 'legacy', version: 3, seedLength: 3 },
+    { id: 'unknown', version: 4 },
+  ] });
+  assert.equal(graph.roots.find(n => n.id === 'legacy').isSeeded, true);
+  assert.equal(graph.roots.find(n => n.id === 'legacy').seedLength, 3);
+  assert.equal(graph.roots.find(n => n.id === 'unknown').isSeeded, null);
 });

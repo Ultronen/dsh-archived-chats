@@ -1,6 +1,6 @@
 /**
  * Host loader entry — registers the `/plugins/dsh-archived-chats/*` routes
- * (about, about/check-updates,
+ * (about, about/check-updates, about/install-update,
  * state, stats, insights, retention/policy, retention/policy/preview,
  * retention/preview, retention/apply,
  * lineage,
@@ -13,6 +13,15 @@
  * JSON/Markdown backup ZIPs, and wires archive insights:
  * per-session tags/notes joined into `/state`, storage statistics from
  * `/stats`, guarded projected-message reads through `/preview` and `/search`.
+ * `/search` optionally accepts `sessionIds: string[]` (0–100 IDs, <=1024 UTF-16
+ * units each). Explicit batches scan that scope and report skipped IDs/reasons;
+ * empty never means all. Only currently visible archives may be inspected, with
+ * visibility rechecked after reads. Without IDs, the legacy matching-session
+ * limit remains; scannedIds/processed/total/remaining/complete disclose coverage.
+ * `/preview` accepts an optional nonnegative safe integer `seq`, locating a page
+ * around that projected message identity (not a source event offset). The anchor
+ * status is found/missing; missing falls back to page zero. previousOffset and
+ * nextOffset preserve both directions. Neither route writes session content.
  * `/preview` returns bounded structured tool/image descriptors. The separately
  * listed `/preview/image` route is guarded and read-only, authorizes each stored
  * image against the archived, trash, or orphan session's projected
@@ -171,6 +180,9 @@ export type LineageDiagnosticCode = 'missing-parent' | 'self-parent' | 'cycle' |
 export interface LineageNode {
   id: string;
   parentSession: string | null;
+  /** Official fork-inheritance marker; null when unavailable. */
+  isSeeded: boolean | null;
+  /** Legacy pre-v4 header value only; v4 inherited counts are not list metadata. */
   seedLength: number | null;
   origin: 'subagent' | null;
   delegationDepth: number;
@@ -188,7 +200,9 @@ export interface LineageDiagnostic {
 }
 
 export interface LineageResponse {
-  /** Archived/recycled chats plus only the parent/child context needed to explain them. */
+  workspaces: Array<{ id: string; title: string | null }>;
+  trashStatus: 'ready' | 'unavailable';
+  /** Official session inventory and missing-parent reference nodes. */
   roots: LineageNode[];
   diagnostics: LineageDiagnostic[];
   nodeCount: number;

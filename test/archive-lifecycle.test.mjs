@@ -4,7 +4,10 @@ import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
-import { apply } from '../lib/index.js';
+import { existsSync } from 'node:fs';
+import { apply as applyPlugin } from '../lib/index.js';
+import { withLegacyFixtures } from './helpers/legacy-recycle-fixture.mjs';
+const apply = withLegacyFixtures(applyPlugin);
 import { createSnapshotStore } from '../lib/snapshot.js';
 import { createTrashStore } from '../lib/trash.js';
 import { resolvePersistenceCompat } from '../lib/persistence-compat.js';
@@ -57,6 +60,7 @@ async function fixture(t, { modern = false } = {}) {
     state: { archivedSessionIds: ['chat-a'], workspaceIds: [] },
     get archivedSessionIds() { return this.state.archivedSessionIds; },
     list: () => [],
+    async unarchiveSession(id) { await this.setState({ ...this.state, archivedSessionIds: this.state.archivedSessionIds.filter(value => value !== id) }); },
     async setState(next) { this.state = next; },
   };
   const routes = new Map();
@@ -65,7 +69,7 @@ async function fixture(t, { modern = false } = {}) {
     webServer: { register({ path, handler }) { routes.set(path, handler); } } };
   let startScheduler;
   let recoveryFinished;
-  const mount = () => apply({ get: key => services[key], on() {}, logger: { warn(message) { recoveryFinished?.(message); } },
+  const mount = () => apply({ get: key => services[key], on() {}, emit: (...args) => services.emit?.(...args), logger: { warn(message) { recoveryFinished?.(message); } },
     effect(fn, label) {
       if (label === 'archived-chats: automatic recycle cleanup') startScheduler = () => disposers.push(fn());
       else fn();
@@ -85,18 +89,158 @@ async function fixture(t, { modern = false } = {}) {
   const trash = createTrashStore({ path: join(data, 'trash.json') });
   return { root, data, path, registry, persistence: raw, services, reads, call, snapshots, trash,
     async restart() {
-      // Make the post-recovery scan report completion, so cleanup never races
-      // an unawaited startup task. Recovery must not depend on policy validity.
-      await writeFile(join(data, 'retention.json'), 'unavailable policy');
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('startup did not finish')), 2000);
-        recoveryFinished = message => { clearTimeout(timer); resolve(message); };
-        mount(); startScheduler();
-      });
+      mount();
+      // Retirement does not perform destructive startup work. Retry is explicit.
+      const before = await trash.get('chat-a');
+      if (before?.state === 'purge-pending') {
+        assert.equal((await trash.get('chat-a')).state, 'purge-pending');
+        await call('/trash/purge', { sessionIds: ['chat-a'] });
+      }
     } };
 }
 
 const permanentlyDelete = f => f.call('/delete-all', { sessionIds: ['chat-a'], permanent: true });
+
+for (const mode of ['single', 'all', 'ungrouped']) {
+  test(`permanent ${mode} deletion never exposes archived chats in intermediate sidebar frames`, async t => {
+    const f = await fixture(t);
+    const ids = mode === 'all' ? ['chat-a', 'chat-b'] : ['chat-a'];
+    const headers = new Map(ids.map(id => [id, { id, version: 1, createdAt: 10, cwd: f.root }]));
+    const pathFor = id => join(f.root, 'sessions', id, 'session.jsonl');
+    if (mode === 'all') {
+      await mkdir(join(f.root, 'sessions', 'chat-b'));
+      await writeFile(pathFor('chat-b'), 'second chat');
+    }
+    f.persistence.list = async () => [...headers.values()].filter(header => existsSync(pathFor(header.id)));
+    f.persistence.locate = header => ({ kind: 'jsonl', path: pathFor(header.id) });
+    f.persistence.inspect = async id => ({ meta: headers.get(id), events: [] });
+    f.registry.state.archivedSessionIds = [...ids];
+    f.registry.headers = new Map(headers);
+    f.registry.sessionPaths = new Map(ids.map(id => [id, f.root]));
+    const frames = [];
+    // Two connected clients retain their own cold session.list baselines.
+    // Workspace feed frames do not refresh these summaries in the Host.
+    const clients = [new Set(ids), new Set(ids)];
+    const sample = phase => frames.push({ phase,
+      visible: clients.map(client => [...client].filter(id => !f.registry.archivedSessionIds.includes(id))),
+    });
+    const workspace = { id: 'ws-a', sessionIds: mode === 'ungrouped' ? [] : [...ids],
+      async detachSession(id) { this.sessionIds = this.sessionIds.filter(value => value !== id); sample('workspace'); },
+    };
+    f.registry.list = () => [workspace];
+    f.registry.setState = async next => { f.registry.state = next; sample('archive'); };
+    const removals = [];
+    f.services.emit = (name, id) => {
+      if (name !== 'api-session/removed') return;
+      assert.equal(existsSync(pathFor(id)), false, 'only confirmed physical deletion can remove a client summary');
+      removals.push(id);
+      for (const client of clients) client.delete(id);
+      sample('removed');
+    };
+    const result = mode === 'all'
+      ? await f.call('/delete-all', { sessionIds: ids, permanent: true })
+      : await f.call('/delete', { sessionId: ids[0], permanent: true });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.deepEqual(result.body.deleted, ids);
+    assert.ok(frames.every(frame => frame.visible.every(visible => visible.length === 0)), JSON.stringify(frames));
+    assert.deepEqual(removals, ids);
+    assert.deepEqual(workspace.sessionIds, []);
+    assert.deepEqual(f.registry.archivedSessionIds, []);
+    assert.equal(f.registry.headers.size, 0);
+  });
+}
+
+test('failed deletion does not broadcast a removed session or unarchive it', async t => {
+  const f = await fixture(t);
+  const notifications = [];
+  f.services.emit = (...args) => notifications.push(args);
+  f.persistence.locate = () => ({ path: join(f.root, 'shared', 'session.jsonl') });
+  const result = await permanentlyDelete(f);
+  assert.equal(result.status, 409);
+  assert.equal(await exists(f.path), true);
+  assert.deepEqual(f.registry.archivedSessionIds, ['chat-a']);
+  assert.deepEqual(notifications, []);
+});
+
+test('failed workspace detach keeps archive protection and deletion intent until explicit retry', async t => {
+  const f = await fixture(t);
+  const [header] = await f.persistence.list();
+  f.registry.headers = new Map([['chat-a', header]]);
+  let failDetach = true;
+  let members = ['chat-a'];
+  const workspace = {
+    // Like the Host, membership visibility depends on the header index.
+    get sessionIds() { return members.filter(id => f.registry.headers.has(id)); },
+    async detachSession(id) {
+      assert.deepEqual(f.registry.archivedSessionIds, ['chat-a']);
+      if (failDetach) throw new Error('simulated workspace write failure');
+      members = members.filter(value => value !== id);
+    },
+  };
+  f.registry.list = () => [workspace];
+  const notifications = [];
+  f.services.emit = (name, id) => {
+    assert.equal(existsSync(f.path), false);
+    notifications.push([name, id]);
+  };
+  const result = await permanentlyDelete(f);
+  assert.equal(result.body.failed.length, 1);
+  assert.equal(await exists(f.path), false);
+  assert.deepEqual(f.registry.archivedSessionIds, ['chat-a']);
+  assert.deepEqual(workspace.sessionIds, ['chat-a']);
+  assert.deepEqual(JSON.parse(await readFile(join(f.data, 'pending-deletions.json'), 'utf8')).ids, ['chat-a']);
+  assert.equal((await f.trash.get('chat-a'))?.state, 'purge-pending');
+
+  failDetach = false;
+  await f.restart();
+  assert.deepEqual(members, []);
+  assert.equal(f.registry.headers.size, 0);
+  assert.deepEqual(f.registry.archivedSessionIds, []);
+  assert.deepEqual(JSON.parse(await readFile(join(f.data, 'pending-deletions.json'), 'utf8')).ids, []);
+  assert.equal(await f.trash.get('chat-a'), null);
+  assert.deepEqual(notifications, [
+    ['api-session/removed', 'chat-a'], ['api-session/removed', 'chat-a'],
+  ]);
+});
+
+test('lineage excludes unrelated unarchived chats and empty workspaces without archives', async t => {
+  const f = await fixture(t);
+  f.registry.state.archivedSessionIds = [];
+  f.registry.list = () => [{ id: 'empty-workspace', title: 'Empty workspace', path: f.root, sessionIds: [] }];
+  const result = await f.call('/lineage');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.nodeCount, 0);
+  assert.deepEqual(result.body.roots, []);
+  assert.deepEqual(result.body.workspaces, []);
+  assert.equal(JSON.stringify(result.body).includes(f.root), false);
+});
+
+test('unreadable recycle metadata does not hide the official lineage inventory', async t => {
+  const f = await fixture(t);
+  await mkdir(f.data, { recursive: true });
+  await writeFile(join(f.data, 'trash.json'), 'invalid json');
+  const result = await f.call('/lineage');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.trashStatus, 'unavailable');
+  assert.equal(result.body.roots[0].id, 'chat-a');
+  assert.equal(result.body.roots[0].status, 'archived');
+});
+
+test('archived ungrouped chats remain visible in archive and lineage despite matching workspace cwd', async t => {
+  const f = await fixture(t);
+  f.registry.list = () => [{ id: 'workspace-a', title: 'Workspace A', path: f.root, sessionIds: [] }];
+
+  const archive = await f.call('/state');
+  assert.equal(archive.status, 200);
+  assert.deepEqual(archive.body.sessions.map(row => [row.id, row.workspaceId, row.workspaceTitle]),
+    [['chat-a', null, null]]);
+
+  const lineage = await f.call('/lineage');
+  assert.equal(lineage.status, 200);
+  assert.equal(lineage.body.roots[0].id, 'chat-a');
+  assert.equal(lineage.body.roots[0].status, 'archived');
+  assert.deepEqual(lineage.body.roots[0].workspace, { id: null, title: null });
+});
 
 test('single unarchive keeps a cwd-less cold chat reachable in Archived', async t => {
   const f = await fixture(t);
@@ -202,6 +346,85 @@ test('batch unarchive rejects a mixed pending scope before any archive write', a
   assert.deepEqual(f.registry.archivedSessionIds, ['chat-a', 'chat-b']);
 });
 
+test('a cold archive preview reads only its selected conversation', async t => {
+  const f = await fixture(t);
+  const originalInspect = f.persistence.inspect;
+  const [header] = await f.persistence.list();
+  f.persistence.list = async () => [header, { ...header, id: 'unrelated-archive' }];
+  f.registry.state.archivedSessionIds.push('unrelated-archive');
+  const reads = [];
+  f.persistence.inspect = async id => {
+    reads.push(id);
+    return originalInspect(id);
+  };
+
+  const result = await f.call('/preview', { sessionId: 'chat-a' });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.session.id, 'chat-a');
+  assert.ok(result.body.messages.length > 0);
+  assert.ok(reads.length > 0);
+  assert.deepEqual([...new Set(reads)], ['chat-a']);
+  assert.deepEqual(f.registry.archivedSessionIds, ['chat-a', 'unrelated-archive']);
+});
+
+for (const route of ['/preview', '/preview/image']) {
+  test(`a single unarchived ${route} reads only its selected conversation`, async t => {
+    const f = await fixture(t);
+    const originalInspect = f.persistence.inspect;
+    const [header] = await f.persistence.list();
+    f.persistence.list = async () => [header, { ...header, id: 'unrelated-unarchived' }];
+    f.registry.state.archivedSessionIds = [];
+    f.registry.archiveSession = async () => { throw new Error('read-only preview must not archive'); };
+    const reads = [];
+    f.persistence.inspect = async id => {
+      reads.push(id);
+      const inspected = await originalInspect(id);
+      return { ...inspected, events: [...inspected.events, { seq: 4, type: 'turn/start', data: {} }] };
+    };
+
+    const result = await f.call(route, { sessionId: 'chat-a', scope: 'unarchived', attachmentId: 'missing-image' });
+    if (route === '/preview') {
+      assert.equal(result.status, 200, JSON.stringify(result.body));
+      assert.equal(result.body.session.id, 'chat-a');
+      assert.ok(result.body.messages.length > 0);
+    } else {
+      assert.equal(result.status, 404);
+      assert.equal(result.body.error, 'preview-image-not-found');
+    }
+    assert.ok(reads.length > 0);
+    assert.deepEqual([...new Set(reads)], ['chat-a']);
+    assert.deepEqual(f.registry.archivedSessionIds, []);
+  });
+}
+
+test('pending deletion is excluded before an unarchived preview reads conversation content', async t => {
+  const f = await fixture(t);
+  f.registry.state.archivedSessionIds = [];
+  f.registry.archiveSession = async () => {};
+  await mkdir(f.data, { recursive: true });
+  await writeFile(join(f.data, 'pending-deletions.json'), JSON.stringify({ ids: ['chat-a'] }));
+  let reads = 0;
+  const originalInspect = f.persistence.inspect;
+  f.persistence.inspect = async id => { reads++; return originalInspect(id); };
+  const result = await f.call('/preview', { sessionId: 'chat-a', scope: 'unarchived' });
+  assert.equal(result.status, 404);
+  assert.equal(reads, 0);
+});
+
+test('a pending-deletion archive cannot be previewed or read for its title', async t => {
+  const f = await fixture(t);
+  await mkdir(f.data, { recursive: true });
+  await writeFile(join(f.data, 'pending-deletions.json'), JSON.stringify({ ids: ['chat-a'] }));
+  let reads = 0;
+  const originalInspect = f.persistence.inspect;
+  f.persistence.inspect = async id => { reads++; return originalInspect(id); };
+
+  const result = await f.call('/preview', { sessionId: 'chat-a' });
+  assert.equal(result.status, 404);
+  assert.equal(reads, 0);
+  assert.deepEqual(f.registry.archivedSessionIds, ['chat-a']);
+});
+
 test('fork previews include inherited history and child reasoning without permitting lossy ZIP reads', async t => {
   const f = await fixture(t, { modern: true });
   const state = await f.call('/state');
@@ -218,7 +441,7 @@ test('fork previews include inherited history and child reasoning without permit
 
 test('fork recycle captures the inherited cut and restores the original archive without rewriting it', async t => {
   const f = await fixture(t, { modern: true });
-  const move = await f.call('/delete', { sessionId: 'chat-a' });
+  const move = await f.call('/__test_seed_legacy_trash', { sessionId: 'chat-a' });
   assert.deepEqual(move.body.failed, []);
   assert.deepEqual(move.body.trashed, ['chat-a']);
   const record = await f.trash.get('chat-a');
@@ -253,7 +476,7 @@ test('unreadable deletion authority never removes an archived original', async t
 
 test('snapshot cleanup failure preserves the original and durable intent until a later purge succeeds', async t => {
   const f = await fixture(t);
-  await f.call('/delete', { sessionId: 'chat-a' });
+  await f.call('/__test_seed_legacy_trash', { sessionId: 'chat-a' });
   await f.call('/trash/restore', { sessionIds: ['chat-a'] });
   const snapshotRoot = join(f.data, 'snapshots');
   const savedRoot = join(f.data, 'snapshots-saved');
@@ -272,7 +495,7 @@ test('snapshot cleanup failure preserves the original and durable intent until a
 
 test('permanent archive deletion removes snapshots left by an earlier recycle and restore', async t => {
   const f = await fixture(t);
-  assert.deepEqual((await f.call('/delete', { sessionId: 'chat-a' })).body.trashed, ['chat-a']);
+  assert.deepEqual((await f.call('/__test_seed_legacy_trash', { sessionId: 'chat-a' })).body.trashed, ['chat-a']);
   assert.deepEqual((await f.call('/trash/restore', { sessionIds: ['chat-a'] })).body.restored, ['chat-a']);
   assert.equal((await f.snapshots.inventory()).valid.length, 1);
   assert.deepEqual((await permanentlyDelete(f)).body.deleted, ['chat-a']);
@@ -281,7 +504,7 @@ test('permanent archive deletion removes snapshots left by an earlier recycle an
   assert.equal((await f.trash.load()).records.size, 0);
 });
 
-test('failed cold permanent deletion keeps durable intent and completes after restart without the original header', async t => {
+test('failed cold permanent deletion keeps durable intent and completes on explicit retry after restart without the original header', async t => {
   const f = await fixture(t);
   const save = f.registry.setState;
   f.registry.setState = async () => { throw new Error('simulated state write failure'); };
@@ -299,7 +522,7 @@ test('failed cold permanent deletion keeps durable intent and completes after re
 
 test('archive permanent deletion cannot bypass an existing Recycle Bin record', async t => {
   const f = await fixture(t);
-  await f.call('/delete', { sessionId: 'chat-a' });
+  await f.call('/__test_seed_legacy_trash', { sessionId: 'chat-a' });
   const before = await f.trash.get('chat-a');
   const result = await permanentlyDelete(f);
   assert.equal(result.status, 409);
@@ -311,7 +534,7 @@ test('archive permanent deletion cannot bypass an existing Recycle Bin record', 
 
 test('Empty Recycle Bin rejects an absent confirmation scope without changing data', async t => {
   const f = await fixture(t);
-  assert.deepEqual((await f.call('/delete', { sessionId: 'chat-a' })).body.trashed, ['chat-a']);
+  assert.deepEqual((await f.call('/__test_seed_legacy_trash', { sessionId: 'chat-a' })).body.trashed, ['chat-a']);
   const before = await f.trash.get('chat-a');
 
   const result = await f.call('/trash/empty', {});
@@ -401,4 +624,30 @@ test('physical deletion rechecks exclusivity when another session appears after 
   assert.equal(await exists(f.path), true);
   assert.equal(await readFile(otherPath, 'utf8'), 'late session');
   assert.equal((await f.trash.get('chat-a')).state, 'purge-pending');
+});
+
+test('unarchive delegates to official queue and preserves intervening Host state', async t => {
+  const f = await fixture(t);
+  let called = 0;
+  f.registry.setState = async () => { throw new Error('plugin must not directly overwrite registry state'); };
+  f.registry.unarchiveSession = async id => {
+    called++;
+    await Promise.resolve();
+    f.registry.state = { ...f.registry.state, archivedSessionIds: ['another-official-archive'], pinnedSessionIds: ['new-pin'] };
+    assert.equal(id, 'chat-a');
+  };
+  const result = await f.call('/unarchive-all', { sessionIds: ['chat-a', 'chat-a'] });
+  assert.equal(result.status, 200);
+  assert.equal(called, 1);
+  assert.deepEqual(result.body.archivedSessionIds, ['another-official-archive']);
+  assert.deepEqual(f.registry.state.pinnedSessionIds, ['new-pin']);
+});
+
+test('missing official unarchive capability fails without direct state writes', async t => {
+  const f = await fixture(t);
+  f.registry.unarchiveSession = undefined;
+  const result = await f.call('/unarchive', { sessionId: 'chat-a' });
+  assert.equal(result.status, 501);
+  assert.equal(result.body.error, 'unarchive-unsupported');
+  assert.deepEqual(f.registry.archivedSessionIds, ['chat-a']);
 });
